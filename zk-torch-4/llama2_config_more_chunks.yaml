@@ -1,0 +1,8 @@
+sf:
+  scale_factor_log: 10
+  # Phase 6 experiment: opposite direction of zk-3's single-poly approach
+  # — try MORE chunks per sparse aux for Llama-2. Default llama2_config
+  # has 12/12 → 1 chunk at arity 26 (FFN: input_n=14 + 12). Setting
+  # table_commit_log=8 → 16 chunks at arity 22 each.
+  table_size_log: 12
+  table_commit_log: 8

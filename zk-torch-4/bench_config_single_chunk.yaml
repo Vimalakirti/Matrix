@@ -1,0 +1,10 @@
+sf:
+  scale_factor_log: 10
+  # Phase 6 experiment: zk-torch-3-style single-poly per sparse aux.
+  # Setting table_commit_log == table_size_log means each NonNegative /
+  # ExpHelper / TwoPow sparse aux gets one Ajtai commit at arity
+  # input_n + 10, instead of being split into 2^(10-8) = 4 chunks of
+  # smaller arity. Compare prover wall time to bench_config.yaml on
+  # the bench_streaming_gpt2 bin.
+  table_size_log: 10
+  table_commit_log: 10

@@ -1,0 +1,52 @@
+=== Llama-2-7B on Almost-Goldilocks ===
+num_layers=1 seq_len=1 max_num_vars=22 (threads=96)
+hidden_dim=4096 ffn_dim=11008 num_heads=32 head_dim=128 vocab=32000 logits_shards=32 ffn_shards=16
+Weight gen: 2.041708756s
+Partitions: 4 (boundaries: 0)
+Compile: 3.65386526s  (712 nodes, 1108 edges)
+Forward: 1.158035412s
+Commit (offline, amortized): 4.220366868s
+Commit (online, prover time): 69.584103ms
+Prove: 2.328365884s
+Verify: 371.582773ms
+Proof size: 13627153 bytes
+
+Verified: true
+[commit offline] 155 tasks across 4 GPU(s) in 4.220221435s:
+    Constant sparse=false:  155 edges,     402.75 M elems,   313.7s
+[commit online] 256 tasks across 4 GPU(s) in 69.367026ms:
+   Auxiliary sparse=false:    3 edges,       0.00 M elems,   84.0ms
+   Auxiliary sparse= true:  252 edges,      20.20 M elems,     5.1s
+       Input sparse=false:    1 edges,       0.00 M elems,   68.8ms
+[prove_range] nodes=235 bool_groups=6 part_aux=3.501418ms table=60.693µs bool=50.831203ms claims=7.783918ms total=62.177362ms
+[prove] opening reducer: 3 edges in 1.67459ms
+[prove]   backward phases: node-sumcheck 607.241183ms, two_pow 4.455646ms, range 62.572883ms, opening_reducer 1.69046ms
+[fold_tree] scheduler: 12 workers (3 per GPU x 4 GPUs), 12 buckets
+[fold_tree] bucket arity=9 leaves=1 levels=1 time=9.350777ms
+[fold_tree] bucket arity=11 leaves=17 levels=1 time=38.211745ms
+[fold_tree] bucket arity=7 leaves=42 levels=1 time=59.417606ms
+[gpu_batched arity=18 leaves=26] kind=ternary_single setup=25.900726ms
+[gpu_sp arity=18 M=26] setup=25.932014ms sumcheck_msg=1.848723ms sumcheck_fold=247.867µs
+[fold_tree] bucket arity=15 leaves=16 levels=1 time=391.255318ms
+[fold_tree] bucket arity=14 leaves=58 levels=1 time=392.853024ms
+[final_group arity=18 leaves=26] sp=29.042669ms promote=349.255µs multifold=22.258005ms
+[fold_tree] bucket arity=18 leaves=68 levels=2 time=415.470884ms
+[fold_tree] bucket arity=6 leaves=111 levels=2 time=442.839082ms
+[fold_tree] bucket arity=12 leaves=84 levels=2 time=533.756004ms
+[gpu_batched arity=24 leaves=26] kind=ternary_single setup=57.941357ms
+[gpu_sp arity=24 M=26] setup=57.972125ms sumcheck_msg=3.723643ms sumcheck_fold=398.134µs
+[fold_tree] bucket arity=10 leaves=1009 levels=3 time=738.941263ms
+[fold_tree] bucket arity=16 leaves=400 levels=3 time=768.657165ms
+[gpu_batched arity=22 leaves=26] kind=ternary_single setup=7.627215ms
+[gpu_sp arity=22 M=26] setup=7.671267ms sumcheck_msg=1.294426ms sumcheck_fold=231.472µs
+[final_group arity=22 leaves=26] sp=35.536508ms promote=3.710729ms multifold=88.443072ms
+[fold_tree] bucket arity=22 leaves=1680 levels=4 time=968.656568ms
+[final_group arity=24 leaves=26] sp=181.627668ms promote=96.991814ms multifold=320.217469ms
+[fold_tree] bucket arity=24 leaves=84 levels=2 time=1.148553229s
+[fold_tree] mirror leaves: 124 same-device (DtoD), 305 cross-device (host fallback) — 29% affinity
+[prove] backward (sumcheck + reducer): 678.734126ms
+[prove] leaf build total (3570 leaves, 0 const edges deferred): 403.036674ms
+[prove]   par loop 364.002086ms, flatten+absorb 39.034588ms
+[prove]   thread-time: set_device 3ms (1108 edges), defer 0ms (0 edges), dense[clone 2865ms eval 18264ms] (143 edges), sparse[clone 42ms eval 1ms] (567 leaves)
+[prove]   leaves by arity: {6: 111, 7: 42, 9: 1, 10: 1009, 11: 17, 12: 84, 14: 58, 15: 16, 16: 400, 18: 68, 22: 1680, 24: 84}
+[prove] fold tree: 1.246323996s

@@ -1,0 +1,24 @@
+# LLM family config (Llama-2/3, GPT-J, Whisper large-v3).
+sf:
+  scale_factor_log: 10
+  # Range coverage. Llama-2-7B has hidden=4096, so LayerNorm/RMSNorm
+  # rounding checks need mean_tolerance = n/2 = 2048 inside [0, 2^tsl).
+  # 12 is the bare minimum that passes; 16 leaves real headroom for
+  # activation magnitudes at scale_factor_log=10 and is FREE — it only
+  # changes the chunk COUNT (ceil(table_num_vars / table_commit_log)),
+  # and measured on llama2 8L/seq64 it moved prove 38.0s -> 38.2s and
+  # leaves +0.3% with identical proof size. See table_commit_log below
+  # for the knob that actually costs.
+  table_size_log: 16
+  # Sets each sparse-aux chunk's ARITY = input_n + table_commit_log, and
+  # the fold tree runs GPU same-point only at arity <= 24
+  # (ZK4_GPU_SP_MAX_ARITY) — above that it falls back to CPU with the
+  # GPUs idle. Llama's largest range aux has input_n = 18, so 6 puts the
+  # top bucket exactly on the cap. The old value of 12 put it at arity
+  # 29: prove 97.6s with 9-13% GPU utilization and a 3.4 GB proof.
+  # Measured llama2 8L/seq64, 4xA100: tcl 12 -> 97.6s, 10 -> 52.0s,
+  # 8 -> 45.4s, 6 -> 37.4s, 4 -> 40.2s (4 is worse: non-aux leaves
+  # already sit at arity 24, so lowering further only adds chunks).
+  # Pure performance knob — the verifier reconstructs the table value as
+  # sum_j middle_claim_j * 2^(j * table_commit_log), sound at any width.
+  table_commit_log: 6

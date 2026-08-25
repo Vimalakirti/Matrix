@@ -1,0 +1,22 @@
+[package]
+name = "almost-goldilocks-cuda"
+version = "0.1.0"
+edition = "2021"
+description = "CUDA-accelerated almost-Goldilocks (P = 2^64 - 2^32 - 31) field arithmetic and protocol kernels"
+license = "MIT OR Apache-2.0"
+keywords = ["cryptography", "cuda", "almost-goldilocks", "zkp"]
+categories = ["cryptography", "mathematics"]
+
+[dependencies]
+thiserror = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.8"
+
+[build-dependencies]
+cc = "1.0"
+
+[lib]
+name = "almost_goldilocks_cuda"
+path = "src/lib.rs"

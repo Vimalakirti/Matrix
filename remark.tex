@@ -1,0 +1,27 @@
+\paragraph{Remark 1 (Encoding Messages in Extension Fields).}
+For soundness bootstrapping in PCS and IOPP, sometimes it is useful to lift a random foldable code over message space $(\mathbb{F}_p)^{k_d}$ to a code over message space $(\mathbb{F}_{p^m})^{k_d}$ where $\mathbb{F}_{p^m}$ is the degree-$(m-1)$ extension field of a prime field $\mathbb{F}_p$. 
+In this case, we can understand the encoding $\mathrm{Enc}_d(\mathbf{m})$ of $\mathbf{m} \in (\mathbb{F}_{p^m})^{k_d}$ as
+\[
+\mathrm{Enc}_d(\mathbf{m}) := \sum_{j=0}^{r-1} \mathrm{Enc}_d(\mathbf{m}_j) X^j
+\]
+where
+\[
+\mathbf{m} = \sum_{j=0}^{r-1} \mathbf{m}_j X^j
+\quad \text{and} \quad
+\mathbf{m}_j \in \mathbb{F}_p^{k_d}
+\quad \text{for every } j \in [0,r-1].
+\]
+Hence for any $t \in \mathbb{N}$, $\mathrm{Enc}_d(\mathbf{m})$ has $t$ zeros implies that $\mathrm{Enc}_d(\mathbf{m}_j)$ has at least $t$ zeros for every $j \in [0,r-1]$. 
+Since $\mathbf{m}$ is non-zero implies that at least one of $\mathbf{m}_j$ is non-zero, the relative minimum distance of the encoding over message space $(\mathbb{F}_{p^m})^{k_d}$ is at least that of the encoding over $\mathbb{F}_p^{k_d}$. 
+Moreover, for a message $\mathbf{m} \in (\mathbb{F}_p)^{k_d}$, the encoding of $\mathbf{m}$ over the small field $\mathbb{F}_p$ is exactly the encoding of $\mathbf{m}$ over the extension field $\mathbb{F}_{p^m}$.
+
+\paragraph{Remark 2 (Field Choices).}
+In the following context, we assume that $\mathbb{F}$ is a large field such that $d / |\mathbb{F}| = \mathrm{negl}(\lambda)$. 
+This is without loss of generality: given some polynomial $f \in \mathbb{F}_p[X_1,\ldots,X_d]$ over a small field $\mathbb{F}_p$, as explained in Remark~1, we can lift the encoding of the coefficient vector $\mathbf{f} \in \mathbb{F}_p^{2^d}$ to an encoding over the message space $\mathbb{F}_{p^m}^{2^d}$ where $\mathbb{F} := \mathbb{F}_{p^m}$ is the extension field of $\mathbb{F}_p$. 
+Looking ahead, for any evaluation claim $f(\mathbf{z}) = y$ where
+\[
+f \in \mathbb{F}_p[X_1,\ldots,X_d], 
+\quad \mathbf{z} \in \mathbb{F}_p^d,
+\quad \text{and} \quad y \in \mathbb{F}_p,
+\]
+we can understand it as a claim over the extension field $\mathbb{F}_{p^m}$, and run IOPP and sum-check protocols over the extension field and reduce the claim to a random evaluation claim over the extension field.

@@ -1,0 +1,67 @@
+=== PointPillar on Almost-Goldilocks ===
+BEV 16x16, n_pillars=32 max_points=4 num_anchors=2 num_classes=5
+max_num_vars=22 (threads=96)
+Weight gen: 33.7245ms (26 layers)
+Compile: 38.155309ms  (232 nodes, 304 edges)
+Forward: 227.30324ms
+Commit (offline, amortized): 893.509542ms
+Commit (online, prover time): 67.498331ms
+Prove: 1.602885396s
+Verify: 206.565688ms
+Proof size: 36624502 bytes
+
+Verified: true
+[commit offline] 52 tasks across 4 GPU(s) in 111.843469ms:
+    Constant sparse=false:   52 edges,       8.39 M elems,     4.8s
+[commit online] 118 tasks across 4 GPU(s) in 65.997145ms:
+   Auxiliary sparse=false:   18 edges,       0.52 M elems,  906.2ms
+   Auxiliary sparse= true:   50 edges,      51.38 M elems,     2.0s
+       Input sparse=false:    2 edges,       0.00 M elems,   91.6ms
+      Output sparse=false:   48 edges,       0.19 M elems,     2.0s
+[prove_range][bool] arity=20 terms=42 nnz=172032 time=25.343731ms
+[prove_range][bool] arity=21 terms=12 nnz=98304 time=26.466367ms
+[prove_range][bool] arity=22 terms=12 nnz=196608 time=29.183222ms
+[prove_range][bool] arity=18 terms=36 nnz=36864 time=31.237324ms
+[prove_range][bool] arity=19 terms=48 nnz=98304 time=35.614745ms
+[prove_range] nodes=50 bool_groups=5 part_aux=8.629615ms table=127.409µs bool=36.111115ms claims=21.399634ms total=66.267924ms
+[prove] opening reducer: 43 edges in 42.449733ms
+[prove]   backward phases: node-sumcheck 765.113318ms, two_pow 1.723µs, range 66.854503ms, opening_reducer 42.569138ms
+[packed_pcs/interleaved] leaves 1557 -> 15 commitments across 14 arity groups
+[packed_pcs/interleaved]   pack 0.02s  commit 0.03s  link 0.21s  (total 0.08s)
+[packed_pcs] prove 0.077s  verify 0.056s  openings 14  verified true
+[fold_tree] scheduler: 12 workers (3 per GPU x 4 GPUs), 14 buckets
+[gpu_batched arity=20 leaves=42] kind=binary setup=11.97608ms
+[gpu_batched arity=21 leaves=12] kind=binary setup=11.495008ms
+[gpu_sp arity=20 M=42] setup=12.008772ms sumcheck_msg=2.549771ms sumcheck_fold=287.582µs
+[gpu_batched arity=18 leaves=36] kind=binary setup=25.44421ms
+[gpu_sp arity=21 M=12] setup=12.040732ms sumcheck_msg=2.832481ms sumcheck_fold=287.078µs
+[gpu_batched arity=22 leaves=12] kind=binary setup=11.762159ms
+[gpu_sp arity=18 M=36] setup=25.649534ms sumcheck_msg=5.063756ms sumcheck_fold=369.974µs
+[gpu_sp arity=22 M=12] setup=11.963598ms sumcheck_msg=2.742743ms sumcheck_fold=252.686µs
+[gpu_batched arity=19 leaves=48] kind=binary setup=25.418432ms
+[gpu_sp arity=19 M=48] setup=25.595353ms sumcheck_msg=5.917757ms sumcheck_fold=269.795µs
+[final_group arity=18 leaves=36] sp=33.122129ms promote=1.020334ms multifold=29.091601ms
+[fold_tree] bucket arity=18 leaves=36 levels=1 time=64.206407ms
+[final_group arity=20 leaves=42] sp=30.930309ms promote=2.565922ms multifold=47.487542ms
+[fold_tree] bucket arity=20 leaves=42 levels=1 time=82.359683ms
+[final_group arity=19 leaves=48] sp=38.900987ms promote=9.387476ms multifold=36.813162ms
+[fold_tree] bucket arity=19 leaves=48 levels=1 time=89.650446ms
+[final_group arity=21 leaves=12] sp=25.18817ms promote=369.262µs multifold=70.03013ms
+[fold_tree] bucket arity=21 leaves=12 levels=1 time=97.669616ms
+[fold_tree] bucket arity=8 leaves=21 levels=1 time=158.260623ms
+[fold_tree] bucket arity=17 leaves=21 levels=1 time=284.567789ms
+[final_group arity=22 leaves=12] sp=37.381708ms promote=1.360672ms multifold=288.057153ms
+[fold_tree] bucket arity=22 leaves=12 levels=1 time=330.066621ms
+[fold_tree] bucket arity=11 leaves=273 levels=3 time=360.336652ms
+[fold_tree] bucket arity=16 leaves=21 levels=1 time=358.876192ms
+[fold_tree] bucket arity=12 leaves=294 levels=3 time=403.81834ms
+[fold_tree] bucket arity=10 leaves=294 levels=3 time=410.928375ms
+[fold_tree] bucket arity=13 leaves=168 levels=2 time=425.673268ms
+[fold_tree] bucket arity=14 leaves=189 levels=2 time=478.632312ms
+[fold_tree] bucket arity=15 leaves=126 levels=2 time=481.535655ms
+[prove] backward (sumcheck + reducer): 884.371805ms
+[prove] leaf build total (1557 leaves, 52 const edges deferred): 49.013533ms
+[prove]   par loop 16.895046ms, flatten+absorb 32.118487ms
+[prove]   thread-time: set_device 10ms (304 edges), defer 2ms (52 edges), dense[clone 50ms eval 368ms] (67 edges), sparse[clone 120ms eval 1ms] (150 leaves)
+[prove]   leaves by arity: {8: 21, 10: 294, 11: 273, 12: 294, 13: 168, 14: 189, 15: 126, 16: 21, 17: 21, 18: 36, 19: 48, 20: 42, 21: 12, 22: 12}
+[prove] fold tree: 535.537686ms

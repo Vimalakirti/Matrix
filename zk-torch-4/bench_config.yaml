@@ -1,0 +1,7 @@
+sf:
+  scale_factor_log: 10
+  # Reduced from 20 so the sparse-aux fold-tree bucket fits in
+  # memory at hidden=768 (input_n=10 + 10 = 20 vars aux instead of
+  # 30). Benchmark-only; production uses 20.
+  table_size_log: 10
+  table_commit_log: 8

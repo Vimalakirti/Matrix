@@ -1,0 +1,89 @@
+=== Whisper on Almost-Goldilocks (enc=2, dec=2, n_state=384, n_head=6) ===
+n_mels=16 n_audio_ctx=64 n_text_ctx=16 head_dim=64 mlp_dim=1536
+max_num_vars=22 (threads=96)
+Weight gen: 36.579192ms
+Compile: 89.852165ms  (925 nodes, 1326 edges)
+Forward: 1.337079705s
+Commit (offline, amortized): 1.20811736s
+Commit (online, prover time): 183.998264ms
+Prove: 4.028664957s
+Verify: 614.459651ms
+Proof size: 223923584 bytes
+
+Verified: true
+[commit offline] 218 tasks across 4 GPU(s) in 456.868814ms:
+    Constant sparse=false:  218 edges,      17.73 M elems,    35.2s
+[commit online] 275 tasks across 4 GPU(s) in 183.752112ms:
+   Auxiliary sparse=false:   14 edges,       0.52 M elems,     1.2s
+   Auxiliary sparse= true:  255 edges,    1132.27 M elems,    12.3s
+       Input sparse=false:    2 edges,       0.01 M elems,  200.7ms
+      Output sparse=false:    4 edges,       0.20 M elems,  381.4ms
+[prove_range][bool] arity=15 terms=1 nnz=32768 time=18.236312ms
+[prove_range][bool] arity=16 terms=2 nnz=4096 time=27.472845ms
+[prove_range][bool] arity=20 terms=4 nnz=131072 time=97.872778ms
+[prove_range][bool] arity=18 terms=2 nnz=16384 time=104.732542ms
+[prove_range][bool] arity=14 terms=80 nnz=5120 time=108.360967ms
+[prove_range][bool] arity=19 terms=26 nnz=53248 time=111.562953ms
+[prove_range][bool] arity=24 terms=4 nnz=262144 time=120.275984ms
+[prove_range][bool] arity=12 terms=112 nnz=1792 time=121.783762ms
+[prove_range][bool] arity=21 terms=104 nnz=851968 time=148.302417ms
+[prove_range][bool] arity=22 terms=2 nnz=262144 time=166.281867ms
+[prove_range][bool] arity=25 terms=30 nnz=3932160 time=269.868611ms
+[prove_range][bool] arity=23 terms=122 nnz=3997696 time=270.402002ms
+[prove_range] nodes=245 bool_groups=12 part_aux=54.474245ms table=111.96µs bool=271.089531ms claims=181.918843ms total=507.59469ms
+[prove] opening reducer: 16 edges in 75.693501ms
+[prove]   backward phases: node-sumcheck 654.371726ms, two_pow 156.734131ms, range 508.167233ms, opening_reducer 75.731653ms
+[packed_pcs/interleaved] leaves 919 -> 17 commitments across 16 arity groups
+[packed_pcs/interleaved]   pack 0.24s  commit 0.47s  link 1.06s  (total 1.40s)
+[packed_pcs] prove 1.400s  verify 0.039s  openings 16  verified true
+[fold_tree] scheduler: 12 workers (3 per GPU x 4 GPUs), 16 buckets
+[gpu_batched arity=20 leaves=4] kind=binary setup=17.013668ms
+[gpu_batched arity=18 leaves=44] kind=binary setup=27.378949ms
+[gpu_batched arity=24 leaves=4] kind=binary setup=14.844381ms
+[gpu_sp arity=24 M=4] setup=15.056598ms sumcheck_msg=3.432198ms sumcheck_fold=287.373µs
+[gpu_sp arity=20 M=4] setup=17.216639ms sumcheck_msg=5.564424ms sumcheck_fold=301.756µs
+[gpu_batched arity=19 leaves=30] kind=binary setup=31.566501ms
+[gpu_batched arity=22 leaves=2] kind=binary setup=21.751083ms
+[gpu_sp arity=19 M=30] setup=31.815829ms sumcheck_msg=3.369396ms sumcheck_fold=196.751µs
+[gpu_sp arity=18 M=44] setup=27.602418ms sumcheck_msg=8.47983ms sumcheck_fold=2.0134ms
+[gpu_sp arity=22 M=2] setup=22.033152ms sumcheck_msg=5.48938ms sumcheck_fold=1.301154ms
+[final_group arity=20 leaves=4] sp=25.898462ms promote=124.143µs multifold=37.196521ms
+[fold_tree] bucket arity=20 leaves=4 levels=1 time=64.952678ms
+[final_group arity=19 leaves=30] sp=38.162373ms promote=816.251µs multifold=41.858124ms
+[final_group arity=18 leaves=44] sp=40.682759ms promote=4.721826ms multifold=35.611518ms
+[fold_tree] bucket arity=19 leaves=30 levels=1 time=81.522573ms
+[fold_tree] bucket arity=18 leaves=44 levels=1 time=82.163095ms
+[sp arity=25 leaves=30] state_init=98.541802ms
+[sp arity=25 leaves=30] round 0 msg=17.342916ms fold=18.131064ms
+[sp arity=25 leaves=30] round 1 msg=6.800385ms fold=9.34692ms
+[sp arity=25 leaves=30] round 2 msg=4.351321ms fold=5.251789ms
+[sp arity=25 leaves=30] round 3 msg=2.115577ms fold=2.890411ms
+[sp arity=25 leaves=30] TOTAL msg=44.099298ms fold=55.181419ms
+[final_group arity=22 leaves=2] sp=36.197798ms promote=592.812µs multifold=176.026623ms
+[fold_tree] bucket arity=22 leaves=2 levels=1 time=218.025351ms
+[gpu_batched arity=21 leaves=26] kind=ternary_single setup=109.499784ms
+[gpu_sp arity=21 M=26] setup=109.662058ms sumcheck_msg=2.241353ms sumcheck_fold=393.029µs
+[fold_tree] bucket arity=11 leaves=21 levels=1 time=335.592725ms
+[fold_tree] bucket arity=13 leaves=21 levels=1 time=341.27933ms
+[fold_tree] bucket arity=16 leaves=44 levels=1 time=358.109204ms
+[fold_tree] bucket arity=17 leaves=2 levels=1 time=358.860182ms
+[fold_tree] bucket arity=15 leaves=45 levels=1 time=362.872077ms
+[fold_tree] bucket arity=12 leaves=112 levels=2 time=380.717935ms
+[fold_tree] bucket arity=6 leaves=252 levels=2 time=397.902575ms
+[final_group arity=21 leaves=26] sp=140.688317ms promote=2.2339ms multifold=91.547965ms
+[fold_tree] bucket arity=14 leaves=80 levels=2 time=420.927208ms
+[gpu_batched arity=23 leaves=26] kind=ternary_single setup=60.677349ms
+[gpu_sp arity=23 M=26] setup=60.847978ms sumcheck_msg=1.91847ms sumcheck_fold=249.34µs
+[fold_tree] bucket arity=21 leaves=106 levels=2 time=437.808578ms
+[final_group arity=24 leaves=4] sp=35.081234ms promote=4.149292ms multifold=494.561907ms
+[fold_tree] bucket arity=24 leaves=4 levels=1 time=572.973465ms
+[final_group arity=23 leaves=26] sp=172.636435ms promote=28.975382ms multifold=219.912119ms
+[fold_tree] bucket arity=23 leaves=122 levels=2 time=793.817422ms
+[final_group arity=25 leaves=30] sp=202.846784ms promote=163.010031ms multifold=669.003056ms
+[fold_tree] bucket arity=25 leaves=30 levels=1 time=1.062658405s
+[prove] backward (sumcheck + reducer): 1.40530551s
+[prove] leaf build total (919 leaves, 140 const edges deferred): 50.70697ms
+[prove]   par loop 21.680171ms, flatten+absorb 29.026799ms
+[prove]   thread-time: set_device 12ms (1326 edges), defer 2ms (140 edges), dense[clone 8ms eval 108ms] (20 edges), sparse[clone 1045ms eval 7ms] (499 leaves)
+[prove]   leaves by arity: {6: 252, 11: 21, 12: 112, 13: 21, 14: 80, 15: 45, 16: 44, 17: 2, 18: 44, 19: 30, 20: 4, 21: 106, 22: 2, 23: 122, 24: 4, 25: 30}
+[prove] fold tree: 1.132084963s

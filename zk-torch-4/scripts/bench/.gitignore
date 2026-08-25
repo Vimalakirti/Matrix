@@ -1,0 +1,5 @@
+# Produced by the drivers, not source: CSV medians and per-rep rows, the
+# full stdout/stderr log of every run, and the LaTeX tables built from them.
+out/
+logs/
+__pycache__/

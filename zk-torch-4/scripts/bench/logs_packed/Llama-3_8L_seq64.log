@@ -1,0 +1,103 @@
+=== Llama 3.1 8B on Almost-Goldilocks ===
+num_layers=8 seq_len=64 max_num_vars=29 (threads=96)
+hidden_dim=4096 ffn_dim=14336 num_heads=32 num_kv_heads=8 head_dim=128 vocab=128256
+Weight gen: 7.460565549s
+Compile: 11.026253304s  (1190 nodes, 1725 edges)
+Forward: 79.596136677s
+Commit (offline, amortized): 21.674643958s
+Commit (online, prover time): 3.254728741s
+Prove: 72.287431949s
+Verify: 6.629938171s
+Proof size: 2186241460 bytes
+
+Verified: true
+[commit offline] 224 tasks across 4 GPU(s) in 20.920401326s:
+    Constant sparse=false:  224 edges,    2512.74 M elems,  1137.8s
+[commit online] 396 tasks across 4 GPU(s) in 3.25458944s:
+   Auxiliary sparse=false:   17 edges,       0.00 M elems,     8.2s
+   Auxiliary sparse= true:  378 edges,    7483.06 M elems,   250.7s
+       Input sparse=false:    1 edges,       0.26 M elems,  332.6ms
+[prove_range][bool] arity=12 terms=272 nnz=17408 time=9.198602ms
+[prove_range][bool] arity=22 terms=72 nnz=5242880 time=368.8194ms
+[prove_range][bool] arity=25 terms=8 nnz=8388608 time=1.047748442s
+[prove_range][bool] arity=23 terms=136 nnz=17825792 time=1.177114315s
+[prove_range][bool] arity=24 terms=198 nnz=51904512 time=3.702100504s
+[prove_range][bool] arity=29 terms=2 nnz=16777216 time=7.361485376s
+[prove_range][bool] arity=26 terms=168 nnz=176160768 time=11.187969749s
+[prove_range] nodes=362 bool_groups=7 part_aux=895.254003ms table=65.312µs bool=11.188419833s claims=9.207301461s total=21.291040729s
+[prove] opening reducer: 20 edges in 87.836615ms
+[prove]   backward phases: node-sumcheck 7.809708055s, two_pow 3.971250246s, range 21.354711633s, opening_reducer 87.882671ms
+[packed_pcs/interleaved] leaves 1250 -> 26 commitments across 10 arity groups
+[packed_pcs/interleaved]   pack 4.63s  commit 9.60s  link 16.84s  (total 16.77s)
+[packed_pcs] prove 16.771s  verify 0.062s  openings 26  verified true
+[fold_tree] scheduler: 12 workers (3 per GPU x 4 GPUs), 10 buckets
+[gpu_batched arity=21 leaves=8] kind=binary setup=42.379751ms
+[gpu_batched arity=18 leaves=21] kind=binary setup=45.495686ms
+[gpu_sp arity=21 M=8] setup=42.406421ms sumcheck_msg=2.639809ms sumcheck_fold=385.296µs
+[gpu_sp arity=18 M=21] setup=45.5352ms sumcheck_msg=1.812962ms sumcheck_fold=425.228µs
+[final_group arity=18 leaves=21] sp=48.708611ms promote=796.956µs multifold=38.258772ms
+[fold_tree] bucket arity=18 leaves=21 levels=1 time=93.488886ms
+[final_group arity=21 leaves=8] sp=54.318242ms promote=1.325536ms multifold=120.642512ms
+[fold_tree] bucket arity=21 leaves=8 levels=1 time=177.772918ms
+[sp arity=25 leaves=8] state_init=1.389475622s
+[sp arity=26 leaves=42] state_init=750.180422ms
+[sp arity=26 leaves=63] state_init=1.352571299s
+[gpu_batched arity=22 leaves=26] kind=ternary_single setup=30.24824ms
+[gpu_sp arity=22 M=26] setup=30.28036ms sumcheck_msg=1.374941ms sumcheck_fold=312.382µs
+[gpu_batched arity=23 leaves=39] kind=ternary_single setup=23.420324ms
+[gpu_sp arity=23 M=39] setup=23.452014ms sumcheck_msg=2.721293ms sumcheck_fold=246.395µs
+[final_group arity=22 leaves=26] sp=82.604172ms promote=4.31921ms multifold=149.308114ms
+[fold_tree] bucket arity=22 leaves=72 levels=2 time=2.36053178s
+[gpu_batched arity=24 leaves=52] kind=ternary_single setup=41.423188ms
+[gpu_sp arity=24 M=52] setup=41.464145ms sumcheck_msg=7.995718ms sumcheck_fold=402.293µs
+[final_group arity=23 leaves=39] sp=139.378812ms promote=74.6214ms multifold=291.676341ms
+[fold_tree] bucket arity=23 leaves=136 levels=2 time=2.731045778s
+[sp arity=26 leaves=63] state_init=962.752976ms
+[sp arity=25 leaves=8] round 0 msg=41.743218ms fold=1.447858858s
+[sp arity=26 leaves=42] round 0 msg=131.229286ms fold=1.316651092s
+[sp arity=26 leaves=63] round 0 msg=309.867407ms fold=1.137851669s
+[sp arity=25 leaves=8] round 1 msg=133.350265ms fold=100.826226ms
+[sp arity=25 leaves=8] round 2 msg=15.075604ms fold=10.319965ms
+[sp arity=25 leaves=8] round 3 msg=6.630625ms fold=3.690671ms
+[sp arity=25 leaves=8] TOTAL msg=216.217619ms fold=1.628275709s
+[sp arity=26 leaves=42] round 1 msg=149.47686ms fold=315.915982ms
+[sp arity=26 leaves=42] round 2 msg=161.304421ms fold=93.207929ms
+[sp arity=26 leaves=42] round 3 msg=8.293404ms fold=41.716879ms
+[sp arity=26 leaves=42] TOTAL msg=470.157285ms fold=1.792019243s
+[sp arity=26 leaves=63] round 1 msg=276.594345ms fold=560.016815ms
+[sp arity=26 leaves=63] round 0 msg=465.424511ms fold=406.316866ms
+[sp arity=26 leaves=63] round 2 msg=34.867433ms fold=84.425207ms
+[sp arity=26 leaves=63] round 1 msg=92.450438ms fold=180.489402ms
+[sp arity=26 leaves=63] round 3 msg=188.761848ms fold=79.22257ms
+[sp arity=26 leaves=63] round 2 msg=44.455214ms fold=42.994896ms
+[sp arity=26 leaves=63] round 3 msg=30.456851ms fold=37.814841ms
+[sp arity=26 leaves=63] TOTAL msg=868.127228ms fold=1.942496975s
+[sp arity=26 leaves=63] TOTAL msg=686.044075ms fold=724.173655ms
+[final_group arity=24 leaves=52] sp=303.89165ms promote=176.39834ms multifold=1.540080077s
+[fold_tree] bucket arity=24 leaves=206 levels=2 time=4.3801784s
+[final_group arity=25 leaves=8] sp=3.271046505s promote=167.47795ms multifold=1.502480839s
+[fold_tree] bucket arity=25 leaves=8 levels=1 time=5.085284206s
+[sp arity=29 leaves=2] state_init=6.25740257s
+[sp arity=29 leaves=2] round 0 msg=280.851579ms fold=332.834131ms
+[fold_tree] bucket arity=6 leaves=357 levels=3 time=7.093193051s
+[fold_tree] bucket arity=12 leaves=272 levels=3 time=7.220651336s
+[sp arity=29 leaves=2] round 1 msg=138.478222ms fold=272.388697ms
+[sp arity=29 leaves=2] round 2 msg=69.996286ms fold=112.435239ms
+[sp arity=29 leaves=2] round 3 msg=35.226246ms fold=55.657865ms
+[sp arity=29 leaves=2] TOTAL msg=562.344213ms fold=805.960636ms
+[sp arity=26 leaves=39] state_init=1.449898873s
+[sp arity=26 leaves=39] round 0 msg=143.742356ms fold=247.155232ms
+[sp arity=26 leaves=39] round 1 msg=87.06045ms fold=162.093562ms
+[sp arity=26 leaves=39] round 2 msg=54.732429ms fold=108.475744ms
+[sp arity=26 leaves=39] round 3 msg=29.712725ms fold=33.195848ms
+[sp arity=26 leaves=39] TOTAL msg=367.336033ms fold=615.884133ms
+[final_group arity=26 leaves=39] sp=2.434662981s promote=450.038013ms multifold=1.1974478s
+[fold_tree] bucket arity=26 leaves=168 levels=2 time=12.113221542s
+[final_group arity=29 leaves=2] sp=7.626051663s promote=201.143508ms multifold=12.380879477s
+[fold_tree] bucket arity=29 leaves=2 levels=1 time=21.612827342s
+[prove] backward (sumcheck + reducer): 33.441295327s
+[prove] leaf build total (1250 leaves, 148 const edges deferred): 271.493868ms
+[prove]   par loop 235.299136ms, flatten+absorb 36.194732ms
+[prove]   thread-time: set_device 20ms (1725 edges), defer 4ms (148 edges), dense[clone 2ms eval 156ms] (18 edges), sparse[clone 16561ms eval 22ms] (872 leaves)
+[prove]   leaves by arity: {6: 357, 12: 272, 18: 21, 21: 8, 22: 72, 23: 136, 24: 206, 25: 8, 26: 168, 29: 2}
+[prove] fold tree: 21.741868054s
