@@ -1,0 +1,11 @@
+{
+  "initial_proposed_bound": 8191,
+  "initial_check": "rejected: learned W2 contains 9116",
+  "actual_max_absolute_parameter": 9116,
+  "adopted_bound": 16383,
+  "reason": "model-parameter fit before inspecting held-out predictions; parent authorized widening",
+  "training_plan_unchanged": true,
+  "model_parameters_unchanged": true,
+  "test_rows_unchanged": true,
+  "no_clipping_or_retraining": true
+}

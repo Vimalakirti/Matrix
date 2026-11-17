@@ -1,0 +1,154 @@
+[
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "exphelper_emits_dense_r_and_sparse_k",
+    "status": "executed",
+    "body_sha256": "61e3be32779994fe7f64bef1c77eee9909836ff91dbad7570c3159d5e0d35274",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "exphelper_recovers_negative_k",
+    "status": "executed",
+    "body_sha256": "76e787a9045be89bfdfaad9bada5ac9fe531e943084939cdc0f5d79fa84a4500",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "exphelper_rejects_positive_and_out_of_domain_without_clamping",
+    "status": "executed",
+    "body_sha256": "ec732b2ed2225fc75745f9667ffd157ac77526e10d0a2cb690edcdac0b1629bc",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "exphelper_prove_passes_through",
+    "status": "executed",
+    "body_sha256": "01609d4b66cb7b5f9bcae41870bd69b34caa92899b0a3cc1fd7c10c4756de5f9",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "twopow_looks_up_15_minus_k",
+    "status": "executed",
+    "body_sha256": "91a31c31ec0d0dbea882a2ba7ab4c5c029b45ea7a8fd155b7aaa6a28cf58a425",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/basicblock/exp.rs",
+    "test": "twopow_prove_returns_empty",
+    "status": "executed",
+    "body_sha256": "e5fa528671d3ef5a28931b97b9e7ac67c3a52c306ccc2dbb0d6ead69ca325e17",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "exp_zero_is_one_at_output_scale_cpu_forward",
+    "status": "executed",
+    "body_sha256": "b5d5b4b1ee4ff6c4009bd76d84f0435a46eb155fbe980084e1269b5c6c5bbe17",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "exp_logical_values_ignore_padding_and_padded_outputs_are_zero",
+    "status": "executed",
+    "body_sha256": "83684ed40db3a17cf5dbd8663d62439fb6c9327f4cc7b9d9dfec218584fe09b2",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "eager_request_arithmetic_is_not_a_model_parameter",
+    "status": "executed",
+    "body_sha256": "8581a56fa603dd509cf5357e5da6f5349f8dc0797dcda977c078c726c06c78f0",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "eager_model_only_arithmetic_remains_trusted_precomputation",
+    "status": "executed",
+    "body_sha256": "8b84412a5d0ef2f5639edd662b72a1bbb2a89b4dd5f4b00f38efd571b39b1e22",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "test_dag_builder_simple_add",
+    "status": "executed",
+    "body_sha256": "fab7415da52383c4e33a255766958787b926bb915b2f91b1a67c110bdb3f1ddd",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "test_dag_builder_compile",
+    "status": "executed",
+    "body_sha256": "a20a2a6f5c38ff8059afad7bb38ca85923c737a49c88885b7105230816c3c867",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "test_dag_builder_chain",
+    "status": "executed",
+    "body_sha256": "ea912cd9e38a649f05b5ec9b8ecdee826f0fa61ea4f1fcfcf1bc213b10a91884",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/dag/builder.rs",
+    "test": "test_dag_builder_pipe",
+    "status": "executed",
+    "body_sha256": "53f91a5930ca2f5f7858d934d75763a1de83cba5d46f6bbc6c7b237cd744c639",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 31
+  },
+  {
+    "source": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "test": "standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r",
+    "status": "blocked-link",
+    "body_sha256": "53816058a69923c703c4b66da0019b94717dba819890e3db1a98927614b5e8ff",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 0
+  },
+  {
+    "source": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "test": "immutable_literal_source_mutation_fails_verifier_rows",
+    "status": "blocked-link",
+    "body_sha256": "2355f24dc815664f19b090cc1fc1f3e840527a22fb1f07ba80b2cfdfcce00226",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 0
+  },
+  {
+    "source": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "test": "verifier_statement_rejects_removed_guard_or_changed_literal",
+    "status": "blocked-link",
+    "body_sha256": "a3414b61bda7e030040e4d9e9d76e5818bfdd91f3ff65e2522527e162c7bf9ea",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 0
+  },
+  {
+    "source": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "test": "finite_exp_rejects_modular_scaled_quotient_counterfeit",
+    "status": "blocked-link",
+    "body_sha256": "c680b07c8fa4352ec664e24cd6eec3f371362332bbcfecaad0f8014bc2896933",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 0
+  },
+  {
+    "source": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "test": "padded_exp_verifier_rejects_nonzero_claimed_padding",
+    "status": "blocked-link",
+    "body_sha256": "102895be4a8d9e7b908f3e8f63af0d08d58c9b9cf72e2c9bec5f55b15f9d2ed1",
+    "body_hash_definition": "UTF-8 bytes from opening { through matching function-closing }, excluding final newline",
+    "invocations": 0
+  }
+]

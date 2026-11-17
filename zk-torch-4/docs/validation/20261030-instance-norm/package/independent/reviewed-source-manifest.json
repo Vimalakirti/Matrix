@@ -1,0 +1,52 @@
+[
+  {
+    "path": "zk-torch-4/docs/morpheus_instance_norm_profile.md",
+    "base_sha256": null,
+    "candidate_sha256": "6ab3ab7d7065ff17392e9dac767d8a982bf3ba64dfa8e1ef56b30e15bdac902e"
+  },
+  {
+    "path": "zk-torch-4/docs/morpheus_mean_rms_profile.md",
+    "base_sha256": "8d6d7e7cd60fdf9b75d0dcb8b3db0ffd6c3f1c92e5fa23c81f82ea05fa4b1358",
+    "candidate_sha256": "1d53d36b10f6ef452305eed1e5adb01e1f8759d184cba05f30b1c3289f6d05c6"
+  },
+  {
+    "path": "zk-torch-4/src/basicblock/instancenorm.rs",
+    "base_sha256": "f7871809e3bf96182e4780a1ce99ec5ddb04d3ea4b77f9e15550e76e1f95b238",
+    "candidate_sha256": "5d425c10daf309507f02b436b909da10e161893439df5a15c959a322b371607f"
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "base_sha256": "d269a963fde7fce65d0d1e6ab84b5c7cbfcad24ec2c435a56a7ce2023f8f359c",
+    "candidate_sha256": "a6542fd8a85ee5f2f7e9179a73d22b2c04ce29db15103fb6ba627c9b70198e0e"
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm.rs",
+    "base_sha256": null,
+    "candidate_sha256": "07d72d0841a73d056a0faeb82fe61aa11229a77d8bb8cfc557a668de85068d5a"
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm_tests.rs",
+    "base_sha256": null,
+    "candidate_sha256": "10de5a1d49760b518f5b6e6c17c71acdd167fe17c17466a2b13819901d5c82b0"
+  },
+  {
+    "path": "zk-torch-4/src/dag/mod.rs",
+    "base_sha256": "111ce4c4040f02bdfe187a4ceaf4a99cbae30643b8b9aba601fb5c1d5d71c04e",
+    "candidate_sha256": "71d894068c2f820f4f9ed0a4fc60cf2e66eb753ef8ffe6692fde63691d364427"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "base_sha256": "c91df21bab83a2b9373050cd85e37ea24fa9c46155ff12aa8005f8b078a91e83",
+    "candidate_sha256": "0f100d5c4fe0dfdd87703159cf035c439a4ff31a413164eea187816e56bb2e26"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "base_sha256": "e9a68cac6850dd564ce3f20d8b3e9dd1fbb9c2ce0ac8f7353c9371faccc15df4",
+    "candidate_sha256": "5455a5edf7d0d1aee5f9c67a2b4141f41d69d75b54f7c26566f5555f1292ac7f"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/statement.rs",
+    "base_sha256": "673d0c99154ce8843d3a1680df0d06eabf773f6b211909256e146ff5af375e9d",
+    "candidate_sha256": "35be43cb0127301cfa68d43a76cb03275a102ab5f72b5a385cbbf200f1ce38fa"
+  }
+]

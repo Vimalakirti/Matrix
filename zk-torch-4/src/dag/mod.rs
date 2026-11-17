@@ -11,10 +11,13 @@ pub mod streaming_accumulator;
 pub mod gpt2;
 pub mod gptj;
 pub mod lenet;
+pub mod maxpool;
+pub mod instancenorm;
 pub mod llama;
 pub mod lookups;
 pub mod nanogpt;
 pub mod oneshot;
+pub mod softmax;
 pub mod partition;
 pub mod pointpillar;
 pub mod proving;
@@ -85,6 +88,16 @@ pub enum PolyType {
 /// `data` is `Option` because the witness can be cleared once it's no longer
 /// needed (commit step keeps committed edges; everything else can be freed
 /// during the backward pass to reclaim memory).
+
+/// Lean lookup auxiliaries: the Morpheus prover derives every range/rescale
+/// selector from the dense input and output values (piop::ProverData), so the
+/// sparse selection witnesses of NonNegative / ScaleDown / ScaleUp are not
+/// built (data None, same shape and type). Set by MORPHEUS_LEAN_AUX or
+/// MORPHEUS_AT_RUN.
+pub fn lean_aux() -> bool {
+    static L: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *L.get_or_init(|| std::env::var_os("MORPHEUS_LEAN_AUX").is_some() || std::env::var_os("MORPHEUS_AT_RUN").is_some())
+}
 pub struct Witness {
     pub shape: Vec<usize>,
     pub data: Option<Box<dyn MLPoly>>,
@@ -92,6 +105,9 @@ pub struct Witness {
     pub data_type: DataType,
     pub sf: usize,
     pub role: Role,
+    /// A weight stored per output channel (see
+    /// dag::builder::register_channel_shift); None for everything else.
+    pub channel_shift: Option<std::sync::Arc<Vec<u32>>>,
 }
 
 impl std::fmt::Debug for Witness {
@@ -133,6 +149,7 @@ impl Witness {
             data_type,
             sf,
             role,
+            channel_shift: None,
         }
     }
 
@@ -150,6 +167,7 @@ impl Witness {
             data_type,
             sf,
             role,
+            channel_shift: None,
         }
     }
 
@@ -167,6 +185,7 @@ impl Witness {
             data_type,
             sf,
             role,
+            channel_shift: None,
         }
     }
 
@@ -195,6 +214,7 @@ impl Witness {
             data_type,
             sf,
             role,
+            channel_shift: None,
         }
     }
 
@@ -206,6 +226,7 @@ impl Witness {
             data_type,
             sf,
             role,
+            channel_shift: None,
         }
     }
 
@@ -323,6 +344,7 @@ impl Clone for Witness {
             data_type: self.data_type,
             sf: self.sf,
             role: self.role,
+            channel_shift: self.channel_shift.clone(),
         }
     }
 }
@@ -439,6 +461,10 @@ pub struct Node {
 /// tree protocol; the structural plumbing here is shared between zk-torch-3
 /// and zk-torch-4.
 pub struct Dag {
+    /// Four canonical exp domain/remainder range roots per helper.
+    pub(crate) exp_guard_nodes: std::collections::BTreeMap<NodeId, [NodeId; 4]>,
+    /// Verifier-trusted literal values, frozen by the builder (never request data).
+    pub(crate) program_literals: std::collections::BTreeMap<EdgeId, Vec<u64>>,
     pub nodes: Vec<Node>,
     pub num_edges: usize,
     pub topo: Vec<NodeId>,
@@ -701,6 +727,32 @@ impl Dag {
     }
 
     pub fn run(&self, witnesses: &mut [Vec<Witness>], feed: &[(EdgeId, Witness)]) {
+        self.run_inner(witnesses, feed);
+        // E2 bounds pass: certified integer bounds / no-wrap checks. Runs after
+        // the first forward pass only so that edge scale metadata (sf) is what
+        // the Morpheus statement sees; it reads only public statement data
+        // (shapes, roles, scales, literals, model/public values), never
+        // computed request values.
+        if std::env::var_os("MORPHEUS_RESCALE_STATS").is_some() {
+            crate::morpheus::bounds::rescale_stats(self, witnesses);
+        }
+        if let Ok(prefix) = std::env::var("MORPHEUS_BOUNDS") {
+            crate::morpheus::bounds::run(self, witnesses, &prefix);
+            std::process::exit(0);
+        }
+        // Morpheus hand-off: the MORPHEUS_AT_RUN-th forward pass of this
+        // process is proven by the Morpheus prover (same graph and witness
+        // as the calling benchmark), then the process exits.
+        if let Some(k) = std::env::var("MORPHEUS_AT_RUN").ok().and_then(|s| s.parse::<usize>().ok()) {
+            static RUNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            if RUNS.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 == k {
+                crate::morpheus::driver::run_hook(self, witnesses);
+                std::process::exit(0);
+            }
+        }
+    }
+
+    fn run_inner(&self, witnesses: &mut [Vec<Witness>], feed: &[(EdgeId, Witness)]) {
         use crate::basicblock::BasicBlock;
         use rayon::prelude::*;
 
@@ -837,8 +889,16 @@ impl Dag {
             let _ = almost_goldilocks_cuda::set_device(devices[0]);
         } else {
             let prof = std::env::var("ZKT_RUN_PROFILE").ok().as_deref() == Some("1");
+            // MORPHEUS_RSS=1: name the nodes whose run grows the process by > 1 GB.
+            let rss_trace = std::env::var("MORPHEUS_RSS").is_ok();
+            let rss = || -> f64 { std::fs::read_to_string("/proc/self/statm").ok().and_then(|s| s.split_whitespace().nth(1).and_then(|v| v.parse::<f64>().ok())).unwrap_or(0.0) * 4096.0 / 1e9 };
+            let mut last_rss = if rss_trace { rss() } else { 0.0 };
             let mut prof_map: std::collections::BTreeMap<String, (std::time::Duration, usize)> =
                 std::collections::BTreeMap::new();
+            // Host-memory growth attributed to operator kinds (a level's
+            // growth is split evenly over its nodes).
+            let mut rss_by: std::collections::BTreeMap<String, f64> = std::collections::BTreeMap::new();
+            let kind_of = |nid: usize| -> String { let s = format!("{:?}", self.nodes[nid].kind); s.split(['(', ' ', '{']).next().unwrap_or("?").to_string() };
             for level in &self.topo_levels {
                 if level.len() == 1 {
                     let nid = level[0];
@@ -857,6 +917,7 @@ impl Dag {
                     for (&eid, out) in node.outputs.iter().zip(outs.into_iter()) {
                         witnesses[eid] = vec![out];
                     }
+                    if rss_trace { let r = rss(); *rss_by.entry(kind_of(nid)).or_default() += r - last_rss; if r - last_rss > 1.0 { eprintln!("[rss] node {nid} {:.60} +{:.1} GB -> {:.1} GB", format!("{:?}", node.kind), r - last_rss, r); } last_rss = r; }
                 } else {
                     let results: Vec<(NodeId, Vec<Witness>, String, std::time::Duration)> = level
                         .par_iter()
@@ -884,7 +945,13 @@ impl Dag {
                             witnesses[eid] = vec![out];
                         }
                     }
+                    if rss_trace { let r = rss(); for &nid in level.iter() { *rss_by.entry(kind_of(nid)).or_default() += (r - last_rss) / level.len() as f64; } if r - last_rss > 1.0 { eprintln!("[rss] level of {} nodes (first {:.60}) +{:.1} GB -> {:.1} GB", level.len(), format!("{:?}", self.nodes[level[0]].kind), r - last_rss, r); } last_rss = r; }
                 }
+            }
+            if rss_trace {
+                let mut v: Vec<_> = rss_by.into_iter().collect();
+                v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+                for (k, gb) in v.iter().take(12) { eprintln!("[rss] run: {k:22} {gb:+7.2} GB"); }
             }
             if prof {
                 let mut v: Vec<_> = prof_map.into_iter().collect();
@@ -1275,3 +1342,26 @@ mod tests {
         assert_eq!(downloaded, vec![0u64, 1, 2, 3]);
     }
 }
+
+#[cfg(test)]
+mod normalization_tests;
+
+#[cfg(test)]
+mod softmax_tests;
+
+#[cfg(test)]
+mod instancenorm_tests;
+
+#[cfg(test)]
+mod cnn_layout_tests;
+
+#[cfg(test)]
+mod cnn_finite_activation_tests;
+
+#[cfg(test)]
+mod maxpool_tests;
+
+pub(crate) mod grid_routing;
+
+#[cfg(test)]
+mod grid_routing_tests;

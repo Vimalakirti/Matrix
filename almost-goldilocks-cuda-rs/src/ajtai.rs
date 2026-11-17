@@ -180,7 +180,7 @@ pub fn commit_batched(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut out = Vec::with_capacity(b);
@@ -248,7 +248,7 @@ pub fn commit_batched_at(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut out = Vec::with_capacity(b);
@@ -330,7 +330,7 @@ pub fn commit_wide(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut c = RingCommitment::zero();
@@ -373,7 +373,7 @@ pub fn commit_wide_device(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut c = RingCommitment::zero();
@@ -484,7 +484,7 @@ pub fn fold_witness(
     let d_z2 = DeviceBuffer::<u64>::from_slice(z2)?;
     let mut d_out = DeviceBuffer::<u64>::new(n_ring * RING_DIM)?;
     fold_witness_device(&d_z1, r, &d_z2, &mut d_out)?;
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     d_out.to_vec()
 }
 
@@ -518,7 +518,7 @@ pub fn fold_commitment(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     let flat = d_out.to_vec()?;
     let mut out = RingCommitment::zero();
     for i in 0..KAPPA {
@@ -646,7 +646,7 @@ pub fn multifold_witness(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     d_out.to_vec()
 }
 
@@ -766,7 +766,7 @@ pub fn multifold_mixed_witness(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     d_out.to_vec()
 }
 
@@ -865,7 +865,7 @@ pub fn multifold_mixed_witness_tc(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     d_out.to_vec()
 }
 
@@ -962,7 +962,7 @@ pub fn multifold_mixed_witness_tc_fused(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
     let t2 = std::time::Instant::now();
     let out = d_out.to_vec();
     if timing {
@@ -1126,7 +1126,7 @@ pub fn multifold_commitment(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut out = RingCommitment::zero();
@@ -1288,7 +1288,7 @@ pub fn split_witness(z_wide: &[i16]) -> Result<TernaryChunks> {
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     Ok(TernaryChunks {
         n_ring,
@@ -1380,7 +1380,7 @@ pub fn commit_ternary(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut out = Vec::with_capacity(SPLIT_K_CHUNKS);
@@ -1424,7 +1424,7 @@ impl MaterializedM {
         if ret != 0 {
             return Err(CudaError::KernelFailed);
         }
-        crate::memory::synchronize()?;
+        crate::memory::sync_mine()?;
         Ok(Self { n, buf })
     }
 }
@@ -1474,7 +1474,7 @@ pub fn commit_ternary_premat(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut out = Vec::with_capacity(SPLIT_K_CHUNKS);
@@ -1520,7 +1520,7 @@ pub fn commit_sparse(
     if ret != 0 {
         return Err(CudaError::KernelFailed);
     }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let flat = d_out.to_vec()?;
     let mut c = RingCommitment::zero();

@@ -34,6 +34,231 @@ use crate::util::arith::{calc_pow_vec_ext2, ext2_add, ext2_field_eq, ext2_mul, e
 /// so the two cannot drift -- a mismatch produces a verification failure with
 /// no other symptom, which is expensive to chase. `n_sub` matches
 /// `slice::chunks(per).count()` exactly, including 0 for no terms.
+
+/// One-hot histogram `part_aux[t] = sum_i eq(point, i) * [t_i = t]` without the
+/// 2^n Lagrange table. With `eq(point, i) = eq_lo[i_lo] * eq_hi[i_hi]`:
+///   part_aux[t] = sum_hi eq_hi[hi] * (sum_lo eq_lo[lo] * [t(hi, lo) = t]),
+/// where the inner sum is ADDS ONLY into per-row bins, and multiplies drop to
+/// `table_size` per row of 2^(n/2). Requires the selection to hold exactly one
+/// entry per row in row order (`sel[k].0 == k`, which is how the range and
+/// two-pow basicblocks build it) and a small table; returns None otherwise so
+/// the caller keeps the Lagrange-table path. Host field ops are canonical, so
+/// the result is bit-identical to the table path.
+fn onehot_hist_split(
+    sel: &[(usize, usize)],
+    eq_lo: &[AlmostGoldilocksExt2],
+    eq_hi: &[AlmostGoldilocksExt2],
+    table_size: usize,
+) -> Option<Vec<AlmostGoldilocksExt2>> {
+    use rayon::prelude::*;
+    let l = eq_lo.len();
+    if table_size > 64 || sel.len() != l * eq_hi.len() { return None; }
+    let in_order = sel.par_iter().enumerate().all(|(k, &(i, t))| i == k && t < table_size);
+    if !in_order { return None; }
+    let zero = AlmostGoldilocksExt2::zero();
+    let out = sel
+        .par_chunks(l)
+        .zip(eq_hi.par_iter())
+        .fold(|| vec![zero; table_size], |mut acc, (row, &eh)| {
+            let mut bins = [zero; 64];
+            for (&(_, t), &e) in row.iter().zip(eq_lo.iter()) {
+                bins[t] = ext2_add(bins[t], e);
+            }
+            for t in 0..table_size {
+                if bins[t] != zero { acc[t] = ext2_add(acc[t], ext2_mul(eh, bins[t])); }
+            }
+            acc
+        })
+        .reduce(|| vec![zero; table_size], |mut a, b| {
+            for t in 0..table_size { a[t] = ext2_add(a[t], b[t]); }
+            a
+        });
+    Some(out)
+}
+
+/// Raw pointer for disjoint parallel writes (each row block writes its own
+/// precomputed slots).
+#[derive(Clone, Copy)]
+struct SyncPtr(*mut u32);
+unsafe impl Send for SyncPtr {}
+unsafe impl Sync for SyncPtr {}
+
+/// One fused scan of a one-hot chunk's selection list, replacing three passes
+/// (order check, histogram, positions) over its 16-byte-per-row entries:
+///   * `hist[t] = sum_i eq(point, i) * [t_i = t]` via the split-eq form of
+///     `onehot_hist_split`, with each row's per-bin sums of eq_lo accumulated
+///     as raw u128 integers and reduced ONCE (canonical eq values < P, at most
+///     2^32 terms per row, so no overflow); reduce128 is the canonical residue,
+///     so the bins are bit-identical to summing with field adds;
+///   * the bool prover's positions `i + t << input_n`, scattered straight into
+///     sorted order (by t, then row), so its setup's O(n) sortedness check
+///     passes and it skips the counting sort.
+/// Returns None when the selection is not one entry per row in row order or
+/// the table is large; the caller then keeps the general path.
+fn onehot_scan(
+    sel: &[(usize, usize)],
+    eq_lo: &[AlmostGoldilocksExt2],
+    eq_hi: &[AlmostGoldilocksExt2],
+    table_size: usize,
+    input_n: usize,
+) -> Option<(Vec<AlmostGoldilocksExt2>, Vec<u32>)> {
+    use rayon::prelude::*;
+    use almost_goldilocks_cuda::field::{reduce128, AlmostGoldilocksField as F};
+    // u32 positions: the GPU bool prover's index width. Caller-guaranteed by
+    // arity <= 31 (the bool cube is input_n + table bits).
+    if input_n + 6 >= 32 { return None; }
+    let l = eq_lo.len();
+    let rows = eq_hi.len();
+    if table_size > 64 || sel.len() != l * rows || l == 0 { return None; }
+    let zero = AlmostGoldilocksExt2::zero();
+    // Pass 1, per row block: order check, bin counts, lazy eq_lo sums.
+    let per_row: Vec<Option<([u32; 64], Vec<AlmostGoldilocksExt2>)>> = sel
+        .par_chunks(l)
+        .zip(eq_hi.par_iter())
+        .enumerate()
+        .map(|(r, (row, &eh))| {
+            let mut cnt = [0u32; 64];
+            let mut s0 = [0u128; 64];
+            let mut s1 = [0u128; 64];
+            let base = r * l;
+            for (k, (&(i, t), e)) in row.iter().zip(eq_lo.iter()).enumerate() {
+                if i != base + k || t >= table_size { return None; }
+                cnt[t] += 1;
+                s0[t] += e.c0.reduce().0 as u128;
+                s1[t] += e.c1.reduce().0 as u128;
+            }
+            let mut contrib = vec![zero; table_size];
+            for t in 0..table_size {
+                if cnt[t] != 0 {
+                    let b = AlmostGoldilocksExt2::new(F(reduce128(s0[t])), F(reduce128(s1[t])));
+                    contrib[t] = ext2_mul(eh, b);
+                }
+            }
+            Some((cnt, contrib))
+        })
+        .collect();
+    if per_row.iter().any(|x| x.is_none()) { return None; }
+    let per_row: Vec<([u32; 64], Vec<AlmostGoldilocksExt2>)> = per_row.into_iter().map(|x| x.unwrap()).collect();
+    let mut hist = vec![zero; table_size];
+    let mut total = [0usize; 64];
+    for (cnt, contrib) in &per_row {
+        for t in 0..table_size {
+            hist[t] = ext2_add(hist[t], contrib[t]);
+            total[t] += cnt[t] as usize;
+        }
+    }
+    // Pass 2: scatter positions into sorted order.
+    let mut bucket_start = [0usize; 64];
+    for t in 1..table_size { bucket_start[t] = bucket_start[t - 1] + total[t - 1]; }
+    let mut row_off: Vec<[usize; 64]> = Vec::with_capacity(rows);
+    let mut run = bucket_start;
+    for (cnt, _) in &per_row {
+        row_off.push(run);
+        for t in 0..table_size { run[t] += cnt[t] as usize; }
+    }
+    let mut positions: Vec<u32> = vec![0u32; sel.len()];
+    let ptr = SyncPtr(positions.as_mut_ptr());
+    sel.par_chunks(l).zip(row_off.par_iter()).for_each(|(row, off)| {
+        let ptr = ptr;
+        let mut o = *off;
+        for &(i, t) in row {
+            // SAFETY: slots [row_off[r][t], row_off[r][t] + cnt[r][t]) are
+            // disjoint across rows and bins by construction and < sel.len().
+            unsafe { *ptr.0.add(o[t]) = (i + (t << input_n)) as u32; }
+            o[t] += 1;
+        }
+    });
+    Some((hist, positions))
+}
+
+/// `onehot_scan` over the compact row-ordered table indices
+/// (`SelectionPolynomial::tidx`, 1 B per row) instead of the 16 B selection
+/// entries. Same outputs, bit-identical (same lazy-sum-then-reduce bins, same
+/// scatter order); the order check is unnecessary because `tidx` exists only
+/// for row-ordered selections.
+fn onehot_scan_u8(
+    tidx: &[u8],
+    eq_lo: &[AlmostGoldilocksExt2],
+    eq_hi: &[AlmostGoldilocksExt2],
+    table_size: usize,
+    input_n: usize,
+) -> Option<(Vec<AlmostGoldilocksExt2>, Vec<u32>)> {
+    use rayon::prelude::*;
+    use almost_goldilocks_cuda::field::{reduce128, AlmostGoldilocksField as F};
+    let l = eq_lo.len();
+    let rows = eq_hi.len();
+    if table_size > 64 || tidx.len() != l * rows || l == 0 || input_n + 6 >= 32 { return None; }
+    let zero = AlmostGoldilocksExt2::zero();
+    let lo0: Vec<u64> = eq_lo.iter().map(|e| e.c0.reduce().0).collect();
+    let lo1: Vec<u64> = eq_lo.iter().map(|e| e.c1.reduce().0).collect();
+    let per_row: Vec<([u32; 64], Vec<AlmostGoldilocksExt2>)> = tidx
+        .par_chunks(l)
+        .zip(eq_hi.par_iter())
+        .map(|(row, &eh)| {
+            let mut cnt = [0u32; 64];
+            let mut s0 = [0u128; 64];
+            let mut s1 = [0u128; 64];
+            for ((&t, &a), &b) in row.iter().zip(lo0.iter()).zip(lo1.iter()) {
+                let t = t as usize;
+                cnt[t] += 1;
+                s0[t] += a as u128;
+                s1[t] += b as u128;
+            }
+            let mut contrib = vec![zero; table_size];
+            for t in 0..table_size {
+                if cnt[t] != 0 {
+                    let b = AlmostGoldilocksExt2::new(F(reduce128(s0[t])), F(reduce128(s1[t])));
+                    contrib[t] = ext2_mul(eh, b);
+                }
+            }
+            (cnt, contrib)
+        })
+        .collect();
+    if per_row.iter().any(|(c, _)| c[table_size..].iter().any(|&x| x != 0)) { return None; }
+    let mut hist = vec![zero; table_size];
+    let mut total = [0usize; 64];
+    for (cnt, contrib) in &per_row {
+        for t in 0..table_size {
+            hist[t] = ext2_add(hist[t], contrib[t]);
+            total[t] += cnt[t] as usize;
+        }
+    }
+    let mut bucket_start = [0usize; 64];
+    for t in 1..table_size { bucket_start[t] = bucket_start[t - 1] + total[t - 1]; }
+    let mut row_off: Vec<[usize; 64]> = Vec::with_capacity(rows);
+    let mut run = bucket_start;
+    for (cnt, _) in &per_row {
+        row_off.push(run);
+        for t in 0..table_size { run[t] += cnt[t] as usize; }
+    }
+    let mut positions: Vec<u32> = vec![0u32; tidx.len()];
+    let ptr = SyncPtr(positions.as_mut_ptr());
+    tidx.par_chunks(l).zip(row_off.par_iter()).enumerate().for_each(|(r, (row, off))| {
+        let ptr = ptr;
+        let mut o = *off;
+        let base = r * l;
+        for (k, &t) in row.iter().enumerate() {
+            let t = t as usize;
+            // SAFETY: disjoint slots per (row, bin), as in onehot_scan.
+            unsafe { *ptr.0.add(o[t]) = ((base + k) + (t << input_n)) as u32; }
+            o[t] += 1;
+        }
+    });
+    Some((hist, positions))
+}
+
+/// eq tables for `onehot_hist_split`: low half and high half of `point`.
+fn split_eq_tables(point: &[AlmostGoldilocksExt2]) -> (Vec<AlmostGoldilocksExt2>, Vec<AlmostGoldilocksExt2>) {
+    let lo = point.len() / 2;
+    (evaluate_lagrange_basis_ext2(&point[..lo]), evaluate_lagrange_basis_ext2(&point[lo..]))
+}
+
+static RT_LAG_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static RT_SCAT_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static RT_POS_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn rt_add(c: &std::sync::atomic::AtomicU64, t: std::time::Instant) {
+    c.fetch_add(t.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
+}
 fn bool_subgroups(terms: usize, split: usize) -> (usize, usize) {
     let per = if split <= 1 { terms.max(1) } else { (terms + split - 1) / split };
     let per = per.max(1);
@@ -258,13 +483,14 @@ impl Dag {
         // is zero. Per-node `middle_claim` is computed on each node's
         // *native*-sized `part_aux` so the verifier can still pin it
         // against the input claim.
+        let _nv_pa = almost_goldilocks_cuda::nvtx("range part_aux");
         let mut combined_part_aux: Vec<AlmostGoldilocksExt2> = Vec::new();
         let mut middle_claims: Vec<Vec<AlmostGoldilocksExt2>> = Vec::with_capacity(self.range.len());
 
         // Bool-check grouping: by aux_num_var → (weights, positions per term).
         let mut bool_groups: std::collections::BTreeMap<
             usize,
-            (Vec<AlmostGoldilocksExt2>, Vec<Vec<usize>>),
+            (Vec<AlmostGoldilocksExt2>, Vec<Vec<u32>>),
         > = std::collections::BTreeMap::new();
 
         // First pass: compute the max table_size across all (node, chunk) pairs.
@@ -297,11 +523,17 @@ impl Dag {
         // self.range order, byte-identical to the old serial loop.
         struct NodePart {
             middle: Vec<AlmostGoldilocksExt2>,
+            // Per chunk: the UNWEIGHTED histogram part_aux[t] = sum of
+            // eq(input_point, i) over rows i that select table entry t. Kept
+            // because it already determines the chunk's claim at
+            // (input_point ++ r_table): see step 5.
+            raw: Vec<Vec<AlmostGoldilocksExt2>>,
             // Per chunk: (table_size, weight-scaled part_aux).
             weighted: Vec<(usize, Vec<AlmostGoldilocksExt2>)>,
             // Per chunk: (aux_num_var, bool_weight, positions).
-            bools: Vec<(usize, AlmostGoldilocksExt2, Vec<usize>)>,
+            bools: Vec<(usize, AlmostGoldilocksExt2, Vec<u32>)>,
         }
+        let t_pa_pre = t0.elapsed();
         let parts: Vec<NodePart> = self.range.par_iter().enumerate().map(|(i, &n)| {
             let node = &self.nodes[n];
             let aux_id = range_aux_id(&node.kind);
@@ -314,10 +546,15 @@ impl Dag {
                 .unwrap_or_else(|| panic!("prove_range: empty claim list for input edge {} of node {}", node.inputs[0], n));
             let input_point = inp_claim.point.clone();
             let input_n = input_point.len();
-            let lagrange = evaluate_lagrange_basis_ext2(&input_point);
+            let t_lag = std::time::Instant::now();
+            let (eq_lo, eq_hi) = split_eq_tables(&input_point);
+            // Full Lagrange table only if some chunk cannot use the split path.
+            let lagrange_cell: std::cell::OnceCell<Vec<AlmostGoldilocksExt2>> = std::cell::OnceCell::new();
+            rt_add(&RT_LAG_US, t_lag);
 
             let mut part = NodePart {
                 middle: Vec::with_capacity(auxs.len()),
+                raw: Vec::with_capacity(auxs.len()),
                 weighted: Vec::with_capacity(auxs.len()),
                 bools: Vec::with_capacity(auxs.len()),
             };
@@ -333,13 +570,37 @@ impl Dag {
                     "prove_range: aux_n {} < input_n {}", aux_poly.n, input_n);
                 let table_n = aux_poly.n - input_n;
                 let table_size = 1usize << table_n;
-                let mut part_aux = vec![AlmostGoldilocksExt2::zero(); table_size];
-                for &(input_idx, table_idx) in &aux_poly.selection.selection {
-                    debug_assert!(input_idx < (1usize << input_n));
-                    debug_assert!(table_idx < table_size);
-                    part_aux[table_idx] = ext2_add(part_aux[table_idx], lagrange[input_idx]);
+                let t_sc = std::time::Instant::now();
+                let tidx = &aux_poly.selection.tidx;
+                if std::env::var("ZK4_TIDX_DBG").is_ok() {
+                    eprintln!("[tidx] node {} chunk {} tidx={} sel={} in_n={} tsize={}",
+                        n, sparse_id, tidx.len(), aux_poly.selection.selection.len(), input_n, table_size);
                 }
+                let scan = if !tidx.is_empty() {
+                    onehot_scan_u8(tidx, &eq_lo, &eq_hi, table_size, input_n)
+                } else {
+                    onehot_scan(&aux_poly.selection.selection, &eq_lo, &eq_hi, table_size, input_n)
+                };
+                let (scan_hist, mut scan_pos) = match scan {
+                    Some((h, p)) => (Some(h), Some(p)),
+                    None => (None, None),
+                };
+                let mut part_aux = match scan_hist {
+                    Some(h) => h,
+                    None => {
+                        let lagrange = lagrange_cell.get_or_init(|| evaluate_lagrange_basis_ext2(&input_point));
+                        let mut part_aux = vec![AlmostGoldilocksExt2::zero(); table_size];
+                        for &(input_idx, table_idx) in &aux_poly.selection.selection {
+                            debug_assert!(input_idx < (1usize << input_n));
+                            debug_assert!(table_idx < table_size);
+                            part_aux[table_idx] = ext2_add(part_aux[table_idx], lagrange[input_idx]);
+                        }
+                        part_aux
+                    }
+                };
+                rt_add(&RT_SCAT_US, t_sc);
                 part.middle.push(indexed_sum_ext2(&part_aux));
+                part.raw.push(part_aux.clone());
 
                 let weight = ext2_mul(betas[i], gammas[sparse_id]);
                 for t in 0..table_size {
@@ -348,12 +609,50 @@ impl Dag {
                 part.weighted.push((table_size, part_aux));
 
                 let bool_weight = ext2_mul(weight, weight);
-                let positions: Vec<usize> = aux_poly.evaluations.keys().copied().collect();
+                // Positions in ROW order, from the selection list, rather than in
+                // HashMap order from `evaluations.keys()`. The set is the same (a
+                // selection poly has exactly its selection entries set to 1, at
+                // i + t_i * 2^input_n), and both bool provers sort it before use,
+                // so the sumcheck is unchanged. Row order is what makes the GPU
+                // prover's counting sort by t complete on its own: within a
+                // bucket the rows are already ascending, so it no longer has to
+                // comparison-sort every bucket (most of its ~600 ms setup per
+                // arity-24 sub-group). Falls back to the keys if the two ever
+                // disagree in size.
+                let t_pos = std::time::Instant::now();
+                let sel = &aux_poly.selection;
+                // Positions are u32 SORTED ascending: the bool prover uploads
+                // them as-is (prove_u32). The cube index must fit in 32 bits,
+                // as the GPU bool prover's index buffer always required.
+                assert!(aux_poly.n < 32,
+                    "prove_range: bool arity {} needs > 32-bit positions; lower it via \
+                     VOCAB_SHARDS / ZK4_TABLE_COMMIT_LOG", aux_poly.n);
+                let positions: Vec<u32> = if let Some(p) = scan_pos.take() {
+                    p
+                } else {
+                    // General path (selection not one entry per row in row order,
+                    // or a large table): build and sort.
+                    let mut p: Vec<u32> = if !sel.selection.is_empty()
+                        && sel.selection.len() == aux_poly.evaluations.len()
+                    {
+                        sel.selection.iter()
+                            .map(|&(i, t)| (i + (t << sel.input_num_vars)) as u32)
+                            .collect()
+                    } else {
+                        aux_poly.evaluations.keys().map(|&k| k as u32).collect()
+                    };
+                    p.sort_unstable();
+                    p
+                };
+                rt_add(&RT_POS_US, t_pos);
                 part.bools.push((aux_poly.n, bool_weight, positions));
             }
             part
         }).collect();
-        for part in parts {
+        let t_pa_map = t0.elapsed();
+        let mut raw_hist: Vec<Vec<Vec<AlmostGoldilocksExt2>>> = Vec::with_capacity(parts.len());
+        for mut part in parts {
+            raw_hist.push(std::mem::take(&mut part.raw));
             for (table_size, w) in &part.weighted {
                 assert!(*table_size <= combined_part_aux.len(),
                     "prove_range: chunk table_size {} exceeds max {}",
@@ -373,6 +672,7 @@ impl Dag {
         }
 
         let t_part_aux = t0.elapsed();
+        drop(_nv_pa);
         // ---- 3. Build range_poly = [0, 1, 2, …] + α, then table sumcheck. ----
         let table_n_combined = (combined_part_aux.len() as f64).log2().round() as usize;
         let range_poly: Vec<AlmostGoldilocksExt2> = (0..combined_part_aux.len())
@@ -405,7 +705,7 @@ impl Dag {
         // and PINS the count; see the soundness note there. 1 is byte-identical
         // to the unsplit path, fork id included.
         let bool_split: usize = *crate::BOOL_SPLIT;
-        let bool_groups_vec: Vec<(usize, usize, &[AlmostGoldilocksExt2], &[Vec<usize>])> =
+        let bool_groups_vec: Vec<(usize, usize, &[AlmostGoldilocksExt2], &[Vec<u32>])> =
             bool_groups
                 .iter()
                 .flat_map(|(k, (w, p))| {
@@ -436,7 +736,7 @@ impl Dag {
         // Only bind a device when a GPU bool path is actually enabled: with the
         // CPU path (the default) these set_device calls bind a CUDA context on
         // every rayon worker for no benefit.
-        let bool_gpu_on = std::env::var("ZK4_GPU_BOOL").is_ok()
+        let bool_gpu_on = std::env::var("ZK4_GPU_BOOL").ok().as_deref() != Some("0")
             || std::env::var("ZK4_GPU_BOOL_EQ").ok().as_deref() == Some("1");
         let bool_pool = crate::fold::tree::gpu_device_pool();
         let bool_ndev = bool_pool.len().max(1);
@@ -446,12 +746,13 @@ impl Dag {
                 let _ = almost_goldilocks_cuda::set_device(bool_pool[gi % bool_ndev]);
             }
             let t_grp = std::time::Instant::now();
+            let _nv = almost_goldilocks_cuda::nvtx(&format!("bool a{} s{}", aux_num_var, sub));
             let mut fork_t = parent_snapshot.fork(b"lookup_bool", fork_id(*aux_num_var, *sub));
             let mut bool_prover = SparseBoolSumcheckProverExt2::new(*aux_num_var, &mut fork_t);
             let challenge: Vec<AlmostGoldilocksExt2> = (0..*aux_num_var)
                 .map(|_| fork_t.challenge_ext2(b"challenge"))
                 .collect();
-            let pf = bool_prover.prove(weights, positions, &challenge, &mut fork_t);
+            let pf = bool_prover.prove_u32(weights, positions, &challenge, &mut fork_t);
             if timing {
                 let nnz: usize = positions.iter().map(|p| p.len()).sum();
                 eprintln!("[prove_range][bool] arity={} sub={} terms={} nnz={} time={:?}",
@@ -487,7 +788,20 @@ impl Dag {
         // the claim pushes happen serially afterwards in the exact node /
         // chunk order the old serial loop used. Was ~1.0 s single-threaded
         // on Llama 8L (1593 nodes) — the dominant prove_range cost.
-        let new_claims: Vec<(usize, Vec<Claim>)> = self.range.par_iter().map(|&n| {
+        //
+        // The eval needs no pass over the chunk's nonzeros. A chunk is one-hot:
+        // row i holds a single 1 at table entry t_i, stored at flat index
+        // i + t_i * 2^input_n. Its MLE at (input_point ++ r_table) is therefore
+        //   sum_i eq(input_point, i) * eq(r_table, t_i)
+        //   = sum_t part_aux[t] * eq(r_table, t),
+        // and part_aux is exactly the histogram step 2 built (before weighting).
+        // That turns an O(nnz * arity) walk over a HashMap -- 2.7 s of a 5.5 s
+        // prove_range on 2-layer GPT-2 seq 128 -- into a 2^table_n dot product.
+        // The value is identical, so the proof and transcript are unchanged.
+        // ZK4_RANGE_CLAIM_CHECK=1 recomputes every eval the old way and panics
+        // on any difference.
+        let claim_check = std::env::var("ZK4_RANGE_CLAIM_CHECK").ok().as_deref() == Some("1");
+        let new_claims: Vec<(usize, Vec<Claim>)> = self.range.par_iter().enumerate().map(|(ri, &n)| {
             let node = &self.nodes[n];
             let aux_id = range_aux_id(&node.kind);
             let aux_edge = node.outputs[aux_id];
@@ -497,9 +811,25 @@ impl Dag {
                     let chunk_poly = aux.data.as_ref().unwrap().as_any()
                         .downcast_ref::<SparseMLPoly>().unwrap();
                     let table_n = chunk_poly.n - inp_point.len();
+                    let r_table: Vec<AlmostGoldilocksExt2> =
+                        table_prover.challenges.iter().take(table_n).cloned().collect();
+                    let eq_t = evaluate_lagrange_basis_ext2(&r_table);
+                    let hist = &raw_hist[ri][sparse_id];
+                    let mut eval = AlmostGoldilocksExt2::zero();
+                    for (h, e) in hist.iter().zip(eq_t.iter()) {
+                        eval = ext2_add(eval, ext2_mul(*h, *e));
+                    }
                     let mut point = inp_point.clone();
-                    point.extend(table_prover.challenges.iter().take(table_n).cloned());
-                    let eval = chunk_poly.evaluate_at_point_ext2(&point);
+                    point.extend(r_table);
+                    if claim_check {
+                        let slow = chunk_poly.evaluate_at_point_ext2(&point);
+                        assert!(ext2_field_eq(slow, eval),
+                            "range claim fast path mismatch: node {} chunk {}", n, sparse_id);
+                        if slow != eval {
+                            eprintln!("[range_claim_check] node {} chunk {}: equal in the field, \
+                                       different representation", n, sparse_id);
+                        }
+                    }
                     Claim { edge_id: aux_edge, sparse_id, point, eval }
                 })
                 .collect();
@@ -510,6 +840,11 @@ impl Dag {
         }
 
         if timing {
+            use std::sync::atomic::Ordering::Relaxed;
+            eprintln!("[prove_range] part_aux wall: pre {:?} map {:?} merge {:?}",
+                t_pa_pre, t_pa_map - t_pa_pre, t_part_aux - t_pa_map);
+            eprintln!("[prove_range] part_aux thread-time: lagrange {}ms scatter {}ms positions {}ms",
+                RT_LAG_US.swap(0, Relaxed) / 1000, RT_SCAT_US.swap(0, Relaxed) / 1000, RT_POS_US.swap(0, Relaxed) / 1000);
             eprintln!("[prove_range] nodes={} bool_groups={} part_aux={:?} table={:?} bool={:?} claims={:?} total={:?}",
                 self.range.len(), bool_groups_vec.len(),
                 t_part_aux, t_table - t_part_aux, t_bool - t_table,
@@ -746,19 +1081,29 @@ impl Dag {
             // The two-pow claim point is on the node's *output* edge.
             let out_claim = claims[node.outputs[0]].last()
                 .expect("prove_two_pow: missing output claim");
-            let lagrange = evaluate_lagrange_basis_ext2(&out_claim.point);
-
             let table_n = aux_poly.n - out_claim.point.len();
             let table_size = 1usize << table_n;
-            let mut part_aux = vec![AlmostGoldilocksExt2::zero(); table_size];
-            for &(input_idx, table_idx) in &aux_poly.selection.selection {
-                debug_assert!(table_idx < table_size);
-                part_aux[table_idx] = ext2_add(part_aux[table_idx], lagrange[input_idx]);
-            }
+            let (eq_lo, eq_hi) = split_eq_tables(&out_claim.point);
+            let part_aux = match onehot_hist_split(&aux_poly.selection.selection, &eq_lo, &eq_hi, table_size) {
+                Some(h) => h,
+                None => {
+                    let lagrange = evaluate_lagrange_basis_ext2(&out_claim.point);
+                    let mut part_aux = vec![AlmostGoldilocksExt2::zero(); table_size];
+                    for &(input_idx, table_idx) in &aux_poly.selection.selection {
+                        debug_assert!(table_idx < table_size);
+                        part_aux[table_idx] = ext2_add(part_aux[table_idx], lagrange[input_idx]);
+                    }
+                    part_aux
+                }
+            };
             let middle = two_pow_indexed_sum_ext2(&part_aux, top_for_indexed);
             TpPart { middle, part_aux }
         }).collect();
 
+        // Unweighted histograms, kept for the aux claims below (same identity as
+        // prove_range step 5: a one-hot MLE at (point ++ r_table) is
+        // sum_t part_aux[t] * eq(r_table, t)).
+        let tp_raw: Vec<Vec<AlmostGoldilocksExt2>> = tp_parts.iter().map(|p| p.part_aux.clone()).collect();
         for (i, part) in tp_parts.into_iter().enumerate() {
             let table_size = part.part_aux.len();
             middle_claims.push(vec![part.middle]);
@@ -795,7 +1140,8 @@ impl Dag {
         // Same split again: the sparse-poly evaluations are pure data (the
         // points derive from already-fixed output claims + table challenges),
         // so evaluate in parallel and push serially in `self.two_pow` order.
-        let tp_claims: Vec<(usize, Claim)> = self.two_pow.par_iter().map(|&n| {
+        let claim_check = std::env::var("ZK4_RANGE_CLAIM_CHECK").ok().as_deref() == Some("1");
+        let tp_claims: Vec<(usize, Claim)> = self.two_pow.par_iter().enumerate().map(|(ti, &n)| {
             let node = &self.nodes[n];
             let aux_edge = node.inputs[0];
             let out_point = claims[node.outputs[0]].last().unwrap().point.clone();
@@ -804,7 +1150,20 @@ impl Dag {
             let take_n = aux_poly.n - out_point.len();
             let mut point = out_point;
             point.extend(table_prover.challenges.iter().take(take_n).cloned());
-            let eval = aux_poly.evaluate_at_point_ext2(&point);
+            let sel = &aux_poly.selection.selection;
+            let one_hot = !sel.is_empty() && sel.len() == aux_poly.evaluations.len();
+            let eval = if one_hot {
+                let eq_t = evaluate_lagrange_basis_ext2(&point[point.len() - take_n..]);
+                let mut e = AlmostGoldilocksExt2::zero();
+                for (h, q) in tp_raw[ti].iter().zip(eq_t.iter()) { e = ext2_add(e, ext2_mul(*h, *q)); }
+                if claim_check {
+                    assert!(ext2_field_eq(e, aux_poly.evaluate_at_point_ext2(&point)),
+                        "two_pow claim fast path mismatch: node {}", n);
+                }
+                e
+            } else {
+                aux_poly.evaluate_at_point_ext2(&point)
+            };
             (aux_edge, Claim { edge_id: aux_edge, sparse_id: 0, point, eval })
         }).collect();
         for (aux_edge, claim) in tp_claims {
@@ -1041,5 +1400,62 @@ mod bool_split_tests {
                 assert_eq!(vec![0u8; terms].chunks(per).count(), n_sub);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod onehot_scan_bench {
+    use super::*;
+    use almost_goldilocks_cuda::field::AlmostGoldilocksField as F;
+    #[test]
+    #[ignore]
+    fn bench_onehot_scan() {
+        let input_n = 20usize;
+        let rows = 1usize << input_n;
+        let mut x: u64 = 7;
+        let sel: Vec<(usize, usize)> = (0..rows).map(|i| { x ^= x << 13; x ^= x >> 7; x ^= x << 17; (i, (x & 15) as usize) }).collect();
+        let point: Vec<AlmostGoldilocksExt2> = (0..input_n).map(|k| AlmostGoldilocksExt2::new(F(k as u64 * 977 + 3), F(k as u64 + 11))).collect();
+        let (lo, hi) = split_eq_tables(&point);
+        for _ in 0..3 {
+            let t = std::time::Instant::now();
+            let r = onehot_scan(&sel, &lo, &hi, 16, input_n).unwrap();
+            let d1 = t.elapsed();
+            let t = std::time::Instant::now();
+            let h = onehot_hist_split(&sel, &lo, &hi, 16).unwrap();
+            let d2 = t.elapsed();
+            assert_eq!(r.0, h);
+            let tid: Vec<u8> = sel.iter().map(|&(_, t)| t as u8).collect();
+            let t = std::time::Instant::now();
+            let r8 = onehot_scan_u8(&tid, &lo, &hi, 16, input_n).unwrap();
+            eprintln!("onehot_scan_u8 2^20: {:?}", t.elapsed());
+            assert_eq!(r8.0, r.0);
+            assert_eq!(r8.1, r.1);
+            eprintln!("onehot_scan 2^20: {:?}   hist_split: {:?}", d1, d2);
+        }
+        // Realistic total: ~110 nodes x 6 chunks, nested parallel like prove_range.
+        let chunks: Vec<(Vec<(usize, usize)>, Vec<u8>)> = (0..6).map(|c| {
+            let s2: Vec<(usize, usize)> = sel.iter().map(|&(i, t)| (i, (t + c) & 15)).collect();
+            let t2: Vec<u8> = s2.iter().map(|&(_, t)| t as u8).collect();
+            (s2, t2)
+        }).collect();
+        use rayon::prelude::*;
+        for use_u8 in [false, true, false, true] {
+            let t = std::time::Instant::now();
+            let tot: usize = (0..110usize).into_par_iter().map(|_| {
+                let (lo, hi) = split_eq_tables(&point);
+                chunks.iter().map(|(s2, t2)| {
+                    let r = if use_u8 { onehot_scan_u8(t2, &lo, &hi, 16, input_n) } else { onehot_scan(s2, &lo, &hi, 16, input_n) };
+                    r.unwrap().1.len()
+                }).sum::<usize>()
+            }).sum();
+            eprintln!("110 nodes x 6 chunks (u8={}): {:?} rows={}", use_u8, t.elapsed(), tot);
+        }
+        // serial (1 thread) for per-row cost
+        let pool = rayon::ThreadPoolBuilder::new().num_threads(1).build().unwrap();
+        pool.install(|| {
+            let t = std::time::Instant::now();
+            let _ = onehot_scan(&sel, &lo, &hi, 16, input_n).unwrap();
+            eprintln!("onehot_scan 2^20 single-thread: {:?} ({:.1} ns/row)", t.elapsed(), t.elapsed().as_nanos() as f64 / rows as f64);
+        });
     }
 }

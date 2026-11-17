@@ -1,0 +1,26 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "git",
+        "apply",
+        "--check",
+        "/workspace/shared/morpheus-mean-rms-q20-evidence/mean-rms.patch"
+      ],
+      "exit_code": 0,
+      "output": ""
+    },
+    {
+      "argv": [
+        "git",
+        "apply",
+        "/workspace/shared/morpheus-mean-rms-q20-evidence/mean-rms.patch"
+      ],
+      "exit_code": 0,
+      "output": ""
+    }
+  ],
+  "source_files_checked": 443,
+  "mismatches": [],
+  "reconstruction_path": "/tmp/morpheus-q20-recovery-f6ocyjak/source"
+}

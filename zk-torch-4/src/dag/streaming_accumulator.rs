@@ -111,8 +111,15 @@ pub struct AccumulatorState {
     edge_device: HashMap<EdgeId, i32>,
 }
 
+/// Default ON (opt out with ZK4_STREAM_X_EXT2_CACHE=0). Without the cache
+/// every proof's reducer re-uploads and re-lifts each deferred weight and runs
+/// the jobs one after another on a single GPU: 1.15 s of the per-proof
+/// acc-update on GPT-2 2L seq 128 vs 48 ms with it (byte-identical proofs,
+/// checked by fingerprint). The cache costs 16 B per weight element on the
+/// GPUs, sharded round-robin by edge; an edge whose allocation fails simply
+/// stays uncached (same proof), so a full device degrades instead of failing.
 fn x_ext2_cache_enabled() -> bool {
-    std::env::var("ZK4_STREAM_X_EXT2_CACHE").ok().as_deref() == Some("1")
+    std::env::var("ZK4_STREAM_X_EXT2_CACHE").ok().as_deref() != Some("0")
 }
 
 /// Factored-eq (Gruen) reducer sumcheck. Default ON when the x_ext2 cache
@@ -190,10 +197,10 @@ fn run_one_reducer_job_seq(
     let w = &witnesses[edge_id][0];
     let edge_ids = &[edge_id];
     let out_claims: &[&Claim] = &[&prior, &incoming];
-    let (mut sumcheck_proofs, mut new_claims) = if use_cache {
-        let cached_x = x_ext2_cache
-            .get(&edge_id)
-            .expect("sequential reducer: x_ext2 cache miss");
+    // An edge whose cache allocation failed (device full) takes the uncached
+    // reducer, which produces the identical proof.
+    let cached_x_opt = if use_cache { x_ext2_cache.get(&edge_id) } else { None };
+    let (mut sumcheck_proofs, mut new_claims) = if let Some(cached_x) = cached_x_opt {
         let n = w.data.as_ref().unwrap().n();
         if factored_reducer_enabled() {
             Reducer.prove_with_cached_buffers_factored(
@@ -337,10 +344,9 @@ impl AccumulatorState {
                     let _ = almost_goldilocks_cuda::set_device(device);
                     if !self.x_ext2_cache.contains_key(&dc.edge_id) {
                         let d_x_base = w.as_device_buf();
-                        let mut d_x_ext2 = DeviceBuffer::<u64>::new(size * 2)
-                            .expect("Reducer cache: x_ext2 alloc failed");
-                        AlmostExt2Batch::from_base(&d_x_base, &mut d_x_ext2)
-                            .expect("Reducer cache: base→Ext2 failed");
+                        // Fail soft: an edge that does not fit stays uncached.
+                        let Ok(mut d_x_ext2) = DeviceBuffer::<u64>::new(size * 2) else { continue };
+                        if AlmostExt2Batch::from_base(&d_x_base, &mut d_x_ext2).is_err() { continue; }
                         self.x_ext2_cache.insert(dc.edge_id, d_x_ext2);
                     }
                     // The factored reducer never touches d_acc — skip the
@@ -439,19 +445,26 @@ impl AccumulatorState {
                                 let mut local: Vec<(EdgeId, ReducerStep, Claim, DeviceBuffer<u64>)> =
                                     Vec::with_capacity(jobs_for_dev.len());
                                 let factored = factored_reducer_enabled();
+                                let timing_jobs = std::env::var("ZK4_TIMING").ok().as_deref() == Some("1");
                                 for (edge_id, prior, incoming, mut fork, mut d_acc) in jobs_for_dev {
+                                    let t_job = std::time::Instant::now();
                                     let w = &witnesses[edge_id][0];
                                     let n = w.data.as_ref().unwrap().n();
-                                    let cached_x = x_cache.get(&edge_id)
-                                        .expect("multi_gpu: x_ext2 cache miss");
                                     let out_claims: &[&Claim] = &[&prior, &incoming];
-                                    let (mut sumcheck_proofs, mut new_claims) = if factored {
+                                    // Uncached fallback (allocation failed at
+                                    // cache build): same proof, slower.
+                                    let cached_x_opt = x_cache.get(&edge_id);
+                                    let (mut sumcheck_proofs, mut new_claims) = if cached_x_opt.is_none() {
+                                        Reducer.prove(&[w], &[edge_id], out_claims, &mut fork)
+                                    } else if factored {
+                                        let cached_x = cached_x_opt.unwrap();
                                         // d_acc unused by the factored path (kept in the
                                         // tuple so the cache round-trip stays identical).
                                         Reducer.prove_with_cached_buffers_factored(
                                             cached_x, n, &[edge_id], out_claims, &mut fork,
                                         )
                                     } else {
+                                        let cached_x = cached_x_opt.unwrap();
                                         Reducer.prove_with_cached_buffers(
                                             cached_x, &mut d_acc, n,
                                             &[edge_id], out_claims, &mut fork,
@@ -464,6 +477,10 @@ impl AccumulatorState {
                                         sumcheck_proof,
                                         new_eval: new_claim.eval,
                                     };
+                                    if timing_jobs {
+                                        eprintln!("[acc-job] dev={} edge={} n={} factored={} time={:?}",
+                                            device, edge_id, n, factored, t_job.elapsed());
+                                    }
                                     local.push((edge_id, step, new_claim, d_acc));
                                 }
                                 local

@@ -102,6 +102,19 @@ impl FinalWitness {
         }
     }
 
+    /// As `from_fold_data`, consuming the data: the bucket driver owns its
+    /// final instance and dropped it right after cloning ~54 MB of chunk
+    /// words at arity 24 into fresh (page-faulting) buffers.
+    pub fn from_fold_data_owned(data: FoldData) -> Self {
+        match data {
+            FoldData::Binary(v) => Self::Binary { n_ring: v.len(), packed: v },
+            FoldData::Ternary(c) => Self::Ternary { n_ring: c.n_ring, pos: c.pos, neg: c.neg },
+            FoldData::Digit { .. } => {
+                unreachable!("Digit not yet wired through final-witness (phase 2 WIP)")
+            }
+        }
+    }
+
     pub fn to_fold_data(&self) -> FoldData {
         match self {
             Self::Binary { packed, .. } => FoldData::Binary(packed.clone()),
@@ -204,6 +217,8 @@ pub fn prove_fold_tree(
     let groups_per_gpu: usize = std::env::var("ZK4_FOLD_GROUPS_PER_GPU").ok()
         .and_then(|s| s.parse::<usize>().ok()).filter(|&k| k >= 1).unwrap_or(3);
     let queues = std::sync::Arc::new(TaskQueues::new(device_pool.len()));
+    // Before any worker exists, so no worker can see an open gate early.
+    queues.set_drivers(arities_ordered.len());
     let workers: Vec<std::thread::JoinHandle<()>> = device_pool.iter().enumerate()
         .flat_map(|(di, &dev)| {
             (0..groups_per_gpu).map(|_| {
@@ -260,8 +275,11 @@ pub fn prove_fold_tree(
     let buckets: Vec<BucketFoldProof> = driver_handles.into_iter()
         .map(|h| h.join().expect("fold-tree bucket driver panicked"))
         .collect();
+    let _nv_tail = almost_goldilocks_cuda::nvtx("ft tail: worker join");
     queues.close(); // workers drain remaining tasks (none) and exit
     for w in workers { let _ = w.join(); }
+    drop(_nv_tail);
+    let _nv_tail2 = almost_goldilocks_cuda::nvtx("ft tail: absorb + pools");
     if timing_on {
         use std::sync::atomic::Ordering;
         let hit = MIRROR_HIT.swap(0, Ordering::Relaxed);
@@ -373,9 +391,29 @@ struct TaskQueues {
     gate: std::sync::Mutex<()>,
     open: std::sync::atomic::AtomicBool,
     pending: std::sync::atomic::AtomicUsize,
+    /// Start gate: workers take no task until every bucket driver has pushed
+    /// its first level (`driver_ready`). Without it the arity priority never
+    /// applied to the first wave: drivers are spawned in ascending arity, the
+    /// workers grabbed the small buckets' groups the moment they appeared,
+    /// and the critical-path (largest-arity) bucket's groups waited ~200 ms
+    /// behind them on GPT-2 2L (fold tree 677 ms, of which its level-0 group
+    /// only started at 208 ms).
+    ready: std::sync::atomic::AtomicUsize,
+    need_ready: std::sync::atomic::AtomicUsize,
 }
 
 impl TaskQueues {
+    fn set_drivers(&self, n: usize) {
+        self.need_ready.store(n, std::sync::atomic::Ordering::SeqCst);
+    }
+    fn driver_ready(&self) {
+        self.ready.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.cv.notify_all();
+    }
+    fn gate_open(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.ready.load(Ordering::SeqCst) >= self.need_ready.load(Ordering::SeqCst)
+    }
     fn new(n_dev: usize) -> Self {
         TaskQueues {
             queues: (0..=n_dev)
@@ -386,6 +424,8 @@ impl TaskQueues {
             gate: std::sync::Mutex::new(()),
             open: std::sync::atomic::AtomicBool::new(true),
             pending: std::sync::atomic::AtomicUsize::new(0),
+            ready: std::sync::atomic::AtomicUsize::new(0),
+            need_ready: std::sync::atomic::AtomicUsize::new(0),
         }
     }
     fn push(&self, pref: Option<usize>, prio: usize, task: GroupTask) {
@@ -403,6 +443,13 @@ impl TaskQueues {
     fn pop(&self, own: usize) -> Option<GroupTask> {
         use std::sync::atomic::Ordering;
         let n_q = self.queues.len();
+        // Start gate (see `ready`). Bounded so a driver that panics before
+        // signalling cannot stall the pool: after 50 ms we start regardless.
+        let t_gate = std::time::Instant::now();
+        while !self.gate_open() && t_gate.elapsed() < std::time::Duration::from_millis(50) {
+            let g = self.gate.lock().unwrap();
+            let _ = self.cv.wait_timeout(g, std::time::Duration::from_millis(1)).unwrap();
+        }
         loop {
             // Own queue → no-pref queue → steal round-robin from others.
             let mut order: Vec<usize> = vec![own, n_q - 1];
@@ -492,6 +539,10 @@ fn prove_fold_tree_uniform(
     // parent in deterministic (group_idx ascending) order so the next
     // level's challenges Fiat-Shamir-bind to this level's outputs.
     let per_group = group_size_for_arity(max_num_vars);
+    let final_dev_on = std::env::var("ZK4_DEVICE_RESIDENT_FOLD").ok().as_deref() != Some("0")
+        && std::env::var("ZK4_FINAL_DEV").ok().as_deref() != Some("0");
+    let mut signalled = false;
+    if working_set.len() <= per_group { queues.driver_ready(); signalled = true; }
     while working_set.len() > per_group {
         transcript.append_u64(b"ft_level", level_idx);
 
@@ -508,6 +559,9 @@ fn prove_fold_tree_uniform(
         let level_mirrors = std::sync::Arc::new(std::mem::take(&mut working_mirrors));
         let n = level_in.len();
         let n_groups = n.div_ceil(per_group);
+        // Next level is the final group (and runs from the mirrors): the
+        // chunks' host copies are not needed. 13 = chunks per group.
+        let need_host = !(final_dev_on && n_groups * 13 <= per_group && n_groups * 13 > 1);
         let mut result_rxs = Vec::with_capacity(n_groups);
         for gi in 0..n_groups {
             let (rtx, rrx) = std::sync::mpsc::channel::<(
@@ -543,11 +597,12 @@ fn prove_fold_tree_uniform(
             queues.push(pref, max_num_vars, Box::new(move || {
                 let r = run_internal_group(
                     &input[start..end], &mirrors[start..end],
-                    max_num_vars, seed, &mut group_transcript);
+                    max_num_vars, seed, &mut group_transcript, need_host);
                 let _ = rtx.send(r);
             }));
             result_rxs.push(rrx);
         }
+        if !signalled { queues.driver_ready(); signalled = true; }
         let mut groups_out: Vec<FoldGroupProof> = Vec::with_capacity(n_groups);
         let mut next_level: Vec<FoldInstance> = Vec::new();
         let mut next_mirrors: Vec<Option<ChunkMirror>> = Vec::new();
@@ -573,15 +628,15 @@ fn prove_fold_tree_uniform(
     // Final level: ≤ 63 instances, single same_point + multifold, no split.
     transcript.append_u64(b"ft_level", level_idx);
     let mut group_transcript = transcript.fork(b"ft_group", 0);
-    let (group_proof, final_inst) = run_final_group(&working_set, max_num_vars, &mut group_transcript);
+    let (group_proof, final_inst) = run_final_group_any(&working_set, &working_mirrors, max_num_vars, &mut group_transcript);
     absorb_group_commitments(transcript, 0, &group_proof);
     levels.push(FoldLevelProof { groups: vec![group_proof] });
 
     BucketFoldProof {
         arity: max_num_vars,
         levels,
-        final_witness: FinalWitness::from_fold_data(&final_inst.data),
         final_commitment: WireCommitment::from_ring(&final_inst.commitment),
+        final_witness: FinalWitness::from_fold_data_owned(final_inst.data),
         final_pt: final_inst.claim_pt,
         final_val: final_inst.claim_val,
     }
@@ -604,6 +659,7 @@ fn run_internal_group(
     max_num_vars: usize,
     seed: Seed,
     transcript: &mut Transcript,
+    need_host: bool,
 ) -> (FoldGroupProof, Vec<FoldInstance>, Vec<Option<ChunkMirror>>) {
     let devres_on = std::env::var("ZK4_DEVICE_RESIDENT_FOLD").ok().as_deref() != Some("0");
     let devres_min = std::env::var("ZK4_DEVRES_MIN_ARITY").ok()
@@ -619,7 +675,7 @@ fn run_internal_group(
         && (all_binary || all_tern1);
     if eligible {
         let snapshot = transcript.clone();
-        match run_internal_group_dev(group, mirrors, max_num_vars, seed, transcript) {
+        match run_internal_group_dev(group, mirrors, max_num_vars, seed, transcript, need_host) {
             Ok(r) => return r,
             Err(e) => {
                 eprintln!("[fold_tree] device-resident group failed ({:?}) — host fallback", e);
@@ -632,40 +688,27 @@ fn run_internal_group(
     (gp, chunks, vec![None; n])
 }
 
-/// Device-resident internal group. See [`run_internal_group`] for the
-/// contract; returns `Err` (caller restores transcript + falls back) on
-/// any GPU failure.
-fn run_internal_group_dev(
+
+/// A group's witness concat on the CURRENT device: one binary buffer, or a
+/// ternary (pos, neg) pair, leaf i at element offset `i * n_ring`.
+enum Concat {
+    Bin(almost_goldilocks_cuda::memory::DeviceBuffer<u64>),
+    Tern(almost_goldilocks_cuda::memory::DeviceBuffer<u64>, almost_goldilocks_cuda::memory::DeviceBuffer<u64>),
+}
+
+/// Assemble a group's concat on the local device, once. Sources, in
+/// preference order: a same-device parent chunk mirror (DtoD), else the host
+/// copy (pageable upload: level-0 leaves, cross-device parents, host-fallback
+/// parents). Shared by internal and final groups.
+fn assemble_concat(
     group: &[FoldInstance],
     mirrors: &[Option<ChunkMirror>],
-    max_num_vars: usize,
-    seed: Seed,
-    transcript: &mut Transcript,
-) -> Result<
-    (FoldGroupProof, Vec<FoldInstance>, Vec<Option<ChunkMirror>>),
-    almost_goldilocks_cuda::error::CudaError,
-> {
-    use almost_goldilocks_cuda::memory::DeviceBuffer;
-    use almost_goldilocks_cuda::sumcheck_prover::{pool_take, pool_return};
-    use crate::util::arith::{ext2_add, ext2_mul, ext2_sub};
-    use almost_goldilocks_cuda::field::AlmostGoldilocksField;
-
-    let arity = max_num_vars;
-    let n_ring = 1usize << (arity - 6); // eligibility guarantees arity ≥ 18
+    n_ring: usize,
+    all_binary: bool,
+) -> Result<Concat, almost_goldilocks_cuda::error::CudaError> {
+    use almost_goldilocks_cuda::sumcheck_prover::pool_take;
     let m = group.len();
-    let all_binary = group.iter().all(|i| matches!(i.data, FoldData::Binary(_)));
-    let timing_grp = std::env::var("ZK4_TIMING_GROUP").is_ok();
-    let t0 = std::time::Instant::now();
-
-    // ---- 1. Assemble the group's witness concat on the LOCAL device,
-    // once. Sources, in preference order: parent chunk mirror on any
-    // device (DtoD / UVA peer copy), else host data (pageable upload —
-    // level-0 leaves and host-fallback parents).
-    enum Concat {
-        Bin(DeviceBuffer<u64>),
-        Tern(DeviceBuffer<u64>, DeviceBuffer<u64>),
-    }
-    let concat = if all_binary {
+    Ok(if all_binary {
         let mut d = pool_take(m * n_ring)?;
         for (i, inst) in group.iter().enumerate() {
             match &inst.data {
@@ -700,6 +743,13 @@ fn run_internal_group_dev(
                         MIRROR_XDEV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                     match &inst.data {
+                        FoldData::Ternary(c) if c.pos.is_empty() && n_ring > 0 => {
+                            // Device-only chunk on another device.
+                            let (hp, hn) = fetch_chunk_from_mirror(
+                                mirrors[i].as_ref().expect("device-only chunk without a mirror"))?;
+                            dp.write_slice_at(i * n_ring, &hp)?;
+                            dn.write_slice_at(i * n_ring, &hn)?;
+                        }
                         FoldData::Ternary(c) => {
                             dp.write_slice_at(i * n_ring, &c.pos)?;
                             dn.write_slice_at(i * n_ring, &c.neg)?;
@@ -710,9 +760,45 @@ fn run_internal_group_dev(
             }
         }
         Concat::Tern(dp, dn)
-    };
+    })
+}
+
+/// Device-resident internal group. See [`run_internal_group`] for the
+/// contract; returns `Err` (caller restores transcript + falls back) on
+/// any GPU failure.
+fn run_internal_group_dev(
+    group: &[FoldInstance],
+    mirrors: &[Option<ChunkMirror>],
+    max_num_vars: usize,
+    seed: Seed,
+    transcript: &mut Transcript,
+    need_host: bool,
+) -> Result<
+    (FoldGroupProof, Vec<FoldInstance>, Vec<Option<ChunkMirror>>),
+    almost_goldilocks_cuda::error::CudaError,
+> {
+    use almost_goldilocks_cuda::sumcheck_prover::pool_return;
+    use crate::util::arith::{ext2_add, ext2_mul, ext2_sub};
+    use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+
+    let arity = max_num_vars;
+    let n_ring = 1usize << (arity - 6); // eligibility guarantees arity ≥ 18
+    let m = group.len();
+    let all_binary = group.iter().all(|i| matches!(i.data, FoldData::Binary(_)));
+    let timing_grp = std::env::var("ZK4_TIMING_GROUP").is_ok();
+    let t0 = std::time::Instant::now();
+
+    // ---- 1. Assemble the group's witness concat on the LOCAL device,
+    // once. Sources, in preference order: parent chunk mirror on any
+    // device (DtoD / UVA peer copy), else host data (pageable upload —
+    // level-0 leaves and host-fallback parents).
+    let _nv_g = almost_goldilocks_cuda::nvtx(&format!("group a{} M{}", arity, m));
+    let nv_asm = almost_goldilocks_cuda::nvtx("asm");
+    let concat = assemble_concat(group, mirrors, n_ring, all_binary)?;
 
     let t_asm = t0.elapsed();
+    drop(nv_asm);
+    let nv_sp = almost_goldilocks_cuda::nvtx("sp");
     // ---- 2. Same-point sumcheck from the device concat (falls back to
     // the CPU prover internally on GPU error — transcript stays valid).
     // `d_shared_eq` is the eq table at shared_r built for the f_evals
@@ -725,6 +811,8 @@ fn run_internal_group_dev(
     };
 
     let t_sp = t0.elapsed();
+    drop(nv_sp);
+    let nv_mf = almost_goldilocks_cuda::nvtx("mf");
     // The multifold needs the leaves' claims promoted to shared_r — but
     // only their COMMITMENTS and the γ challenges enter the proof, so no
     // promoted FoldInstance materialization is needed on this path.
@@ -743,6 +831,8 @@ fn run_internal_group_dev(
     }
     let (d_wide, mut mf_proof) = mf_result?;
     let t_mf = t0.elapsed();
+    drop(nv_mf);
+    let nv_cm = almost_goldilocks_cuda::nvtx("split+commit");
 
     // ---- 4. Split decomposition on device + Ajtai chunk commits.
     let (d_cpos, d_cneg) =
@@ -760,6 +850,8 @@ fn run_internal_group_dev(
         chunk_commitments: chunk_commits.iter().map(WireCommitment::from_ring).collect(),
     };
     let t_commit = t0.elapsed();
+    drop(nv_cm);
+    let nv_ev = almost_goldilocks_cuda::nvtx("eval");
 
     // ---- 5. Chunk evals at shared_r straight from the device planes.
     let k = almost_goldilocks_cuda::ajtai::SPLIT_K_CHUNKS;
@@ -784,10 +876,22 @@ fn run_internal_group_dev(
     mf_proof.combined_claim = combined_y;
 
     let t_eval = t0.elapsed();
+    drop(nv_ev);
+    let _nv_dl = almost_goldilocks_cuda::nvtx("dl");
     // ---- 6. Host copies (next-level fallback, final witness, cross-run
     // serialization) + the device mirror for next-level assembly.
-    let host_pos = dev_chunks.pos.to_vec()?;
-    let host_neg = dev_chunks.neg.to_vec()?;
+    // Host copies only when a consumer may need them. When the next level is
+    // the bucket's final group and runs device-resident, its inputs come from
+    // the mirrors below; the ~54 MB download (83 ms at arity 24, on the
+    // critical path) is skipped and the chunks are left DEVICE-ONLY: empty
+    // pos/neg with n_ring set. The two consumers that can still see them,
+    // assemble_concat's cross-device branch and the final group's host
+    // fallback, fetch from the mirror first (`fetch_chunk_from_mirror`).
+    let (host_pos, host_neg) = if need_host {
+        (dev_chunks.pos.to_vec()?, dev_chunks.neg.to_vec()?)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let arc = std::sync::Arc::new(DevChunks {
         device: almost_goldilocks_cuda::current_device(),
         n_ring,
@@ -800,8 +904,8 @@ fn run_internal_group_dev(
         let single = almost_goldilocks_cuda::ajtai::TernaryChunks {
             n_ring,
             k_chunks: 1,
-            pos: host_pos[ci * n_ring..(ci + 1) * n_ring].to_vec(),
-            neg: host_neg[ci * n_ring..(ci + 1) * n_ring].to_vec(),
+            pos: if need_host { host_pos[ci * n_ring..(ci + 1) * n_ring].to_vec() } else { Vec::new() },
+            neg: if need_host { host_neg[ci * n_ring..(ci + 1) * n_ring].to_vec() } else { Vec::new() },
         };
         chunk_instances.push(FoldInstance {
             commitment: chunk_commits[ci].clone(),
@@ -1027,6 +1131,160 @@ fn eval_ternary_chunks(
             FoldData::Ternary(single).evaluate_with_eq(&eq)
         })
         .collect()
+}
+
+
+
+/// Host copy of one device-only chunk, read on the mirror's own device
+/// (cross-device peer copies are avoided: see assemble_concat).
+fn fetch_chunk_from_mirror(m: &ChunkMirror)
+    -> Result<(Vec<u64>, Vec<u64>), almost_goldilocks_cuda::error::CudaError>
+{
+    let (dc, idx) = m;
+    let prev = almost_goldilocks_cuda::current_device();
+    let _ = almost_goldilocks_cuda::set_device(dc.device);
+    let r = (|| Ok((dc.pos.read_slice(idx * dc.n_ring, dc.n_ring)?,
+                    dc.neg.read_slice(idx * dc.n_ring, dc.n_ring)?)))();
+    let _ = almost_goldilocks_cuda::set_device(prev);
+    r
+}
+
+/// Give every device-only chunk in `group` its host copy (before a host path).
+fn rehydrate_host(group: &mut [FoldInstance], mirrors: &[Option<ChunkMirror>]) {
+    for (inst, m) in group.iter_mut().zip(mirrors.iter()) {
+        if let FoldData::Ternary(c) = &mut inst.data {
+            if c.pos.is_empty() && c.n_ring > 0 {
+                let (p, n) = fetch_chunk_from_mirror(m.as_ref().expect("device-only chunk without a mirror"))
+                    .expect("fetching a device-only chunk for the host path");
+                c.pos = p;
+                c.neg = n;
+            }
+        }
+    }
+}
+
+/// Device-resident final group: same contract as [`run_final_group`], but the
+/// inputs come from the previous level's device chunk mirrors (DtoD) and stay
+/// on the device through same-point and multifold. The host path re-uploaded
+/// every chunk from host copies, cloned them all for `promote` (63 ms at
+/// arity 24), and ran a host-input multifold.
+///
+/// `combined_y = f*(shared_r)` comes from the split identity
+/// `sum_i 2^i * chunk_i(shared_r)` over device chunk evals, as the internal
+/// groups do; the final witness is downloaded once and encoded with the same
+/// host encoder as the host path, so the proof is byte-identical.
+fn run_final_group_dev(
+    group: &[FoldInstance],
+    mirrors: &[Option<ChunkMirror>],
+    max_num_vars: usize,
+    transcript: &mut Transcript,
+) -> Result<(FoldGroupProof, FoldInstance), almost_goldilocks_cuda::error::CudaError> {
+    use almost_goldilocks_cuda::sumcheck_prover::pool_return;
+    use crate::util::arith::{ext2_add, ext2_mul, ext2_sub};
+    use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+    let _nv = almost_goldilocks_cuda::nvtx(&format!("final_dev a{} M{}", max_num_vars, group.len()));
+    let arity = max_num_vars;
+    let n_ring = 1usize << (arity - 6);
+    let all_binary = group.iter().all(|i| matches!(i.data, FoldData::Binary(_)));
+    let concat = assemble_concat(group, mirrors, n_ring, all_binary)?;
+    let (sp_proof, shared_r, d_shared_eq) = match &concat {
+        Concat::Bin(d) => same_point_sumcheck::prove_same_point_gpu_batched_dev(
+            group, same_point_sumcheck::SpDevInput::Binary(d), arity, transcript),
+        Concat::Tern(dp, dn) => same_point_sumcheck::prove_same_point_gpu_batched_dev(
+            group, same_point_sumcheck::SpDevInput::Ternary(dp, dn), arity, transcript),
+    };
+    let mf_result = match &concat {
+        Concat::Bin(d) => multifold::prove_multifold_defer_y_dev(group, Some(d), None, transcript),
+        Concat::Tern(dp, dn) => multifold::prove_multifold_defer_y_dev(group, None, Some((dp, dn)), transcript),
+    };
+    match concat {
+        Concat::Bin(d) => pool_return(d),
+        Concat::Tern(a, b) => { pool_return(a); pool_return(b); }
+    }
+    let (d_wide, mut mf_proof) = mf_result?;
+
+    let k = almost_goldilocks_cuda::ajtai::SPLIT_K_CHUNKS;
+    let (d_cpos, d_cneg) = almost_goldilocks_cuda::ajtai::wide_to_ternary_device(&d_wide, n_ring)?;
+    let evals = match &d_shared_eq {
+        Some(d_eq) => almost_goldilocks_cuda::eq_lagrange::eval_binary_planes_with_eq_dev(
+            d_eq, arity, &[(&d_cpos, k), (&d_cneg, k)])?,
+        None => almost_goldilocks_cuda::eq_lagrange::eval_binary_planes_from_dev(
+            &shared_r, &[(&d_cpos, k), (&d_cneg, k)])?,
+    };
+    drop(d_cpos); drop(d_cneg);
+    let two = AlmostGoldilocksExt2::from_base(AlmostGoldilocksField(2));
+    let mut combined_y = AlmostGoldilocksExt2::zero();
+    let mut pow_two = AlmostGoldilocksExt2::from_base(AlmostGoldilocksField(1));
+    for i in 0..k {
+        combined_y = ext2_add(combined_y, ext2_mul(pow_two, ext2_sub(evals[i], evals[k + i])));
+        pow_two = ext2_mul(pow_two, two);
+    }
+    mf_proof.combined_claim = combined_y;
+
+    let wide_host: Vec<i16> = d_wide.to_vec()?;
+    let data = multifold::encode_wide_as_fold_data(&wide_host, arity);
+    let combined = FoldInstance {
+        commitment: mf_proof.combined_commitment.to_ring(),
+        data,
+        arity,
+        claim_pt: shared_r,
+        claim_val: combined_y,
+    };
+    let proof = FoldGroupProof {
+        same_point: sp_proof,
+        multifold: mf_proof,
+        split: None,
+        chunk_claim_vals: Vec::new(),
+    };
+    Ok((proof, combined))
+}
+
+/// Final group dispatch: device-resident when eligible (same gate as the
+/// internal groups), host path otherwise or on any GPU failure.
+fn run_final_group_any(
+    group: &[FoldInstance],
+    mirrors: &[Option<ChunkMirror>],
+    max_num_vars: usize,
+    transcript: &mut Transcript,
+) -> (FoldGroupProof, FoldInstance) {
+    let devres_on = std::env::var("ZK4_DEVICE_RESIDENT_FOLD").ok().as_deref() != Some("0")
+        && std::env::var("ZK4_FINAL_DEV").ok().as_deref() != Some("0");
+    let devres_min = std::env::var("ZK4_DEVRES_MIN_ARITY").ok()
+        .and_then(|s| s.parse::<usize>().ok()).unwrap_or(18);
+    let gpu_arity_cap = std::env::var("ZK4_MULTIFOLD_GPU_MAX_ARITY").ok()
+        .and_then(|s| s.parse::<usize>().ok()).unwrap_or(24);
+    let all_binary = group.iter().all(|i| matches!(i.data, FoldData::Binary(_)));
+    let all_tern1 = group.iter().all(|i| matches!(&i.data, FoldData::Ternary(c) if c.k_chunks == 1));
+    let eligible = devres_on && !group.is_empty() && group.len() > 1
+        && max_num_vars >= devres_min && max_num_vars <= gpu_arity_cap
+        && (all_binary || all_tern1);
+    if eligible {
+        // Run where most input mirrors live, so assembly is DtoD.
+        let pool = gpu_device_pool();
+        let mut counts: std::collections::HashMap<i32, usize> = std::collections::HashMap::new();
+        for m in mirrors.iter().flatten() { *counts.entry(m.0.device).or_default() += 1; }
+        let prev = almost_goldilocks_cuda::current_device();
+        if let Some((&d, _)) = counts.iter().max_by_key(|(_, c)| **c) {
+            if pool.contains(&d) { let _ = almost_goldilocks_cuda::set_device(d); }
+        }
+        let snapshot = transcript.clone();
+        let r = run_final_group_dev(group, mirrors, max_num_vars, transcript);
+        let _ = almost_goldilocks_cuda::set_device(prev);
+        match r {
+            Ok(x) => return x,
+            Err(e) => {
+                eprintln!("[fold_tree] device-resident final group failed ({:?}) — host fallback", e);
+                *transcript = snapshot;
+            }
+        }
+    }
+    let device_only = group.iter().any(|i| matches!(&i.data, FoldData::Ternary(c) if c.pos.is_empty() && c.n_ring > 0));
+    if device_only {
+        let mut owned: Vec<FoldInstance> = group.to_vec();
+        rehydrate_host(&mut owned, mirrors);
+        return run_final_group(&owned, max_num_vars, transcript);
+    }
+    run_final_group(group, max_num_vars, transcript)
 }
 
 /// Run the final group: same_point → multifold → done. No split.

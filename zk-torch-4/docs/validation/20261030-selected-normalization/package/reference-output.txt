@@ -1,0 +1,21 @@
+PASS all32769 internal remainder values: h>0, h<2Qe and k0 h<=Qe; implies all31-scale E bounds0..Qs, E(0)=Qs.
+PASS SF10 causal/padding/max-only/denominator-only/free-normalizer counterexamples.
+PASS SF16 causal/padding/max-only/denominator-only/free-normalizer counterexamples.
+PASS SF20 causal/padding/max-only/denominator-only/free-normalizer counterexamples.
+PASS concrete SF30 row9 wrap counterfeit: eight e=Q, one e=0; D=8Q; false tail w=Q; rho= 4294967265 tau= 12884901918 ; public budget rejects.
+budget 16 7 (True, 458752, 20, 60130131967)
+budget 16 9 (True, 589824, 21, 77310918655)
+budget 16 512 (True, 33554432, 26, 4398080065535)
+budget 16 4096 (True, 268435456, 29, 35184640524287)
+budget 16 1048576 (True, 68719476736, 37, 9007267974217727)
+budget 20 7 (True, 7340032, 24, 15393172226047)
+budget 20 9 (True, 9437184, 25, 19791233417215)
+budget 20 512 (True, 536870912, 30, 1125900443713535)
+budget 20 4096 (True, 4294967296, 33, 9007203549708287)
+budget 20 1048576 (True, 1099511627776, 41, 2305844108725321727)
+budget 30 7 (True, 7516192768, 34, 16140901074159534079)
+budget 30 9 (False, 9663676416, 35, 20752587107619307519)
+budget 30 512 (False, 549755813888, 40, 1180591621267167117311)
+budget 30 4096 (False, 4398046511104, 43, 9444732970137336938495)
+budget 30 1048576 (False, 1125899906842624, 51, 2417851640355158256254975)
+PASS independent assertions 185014 ; no GPU/fullproof/model-accuracy claim.

@@ -1,9 +1,10 @@
 //! [`ExpHelper`] and [`TwoPow`] — exp decomposition.
 //!
-//! Caller guarantees the input `x ≤ 0` (softmax subtracts row-max, sigmoid
-//! emits `x + SigmoidConst ≤ 0`). `ExpHelper` decomposes `x = k · (−ln2·SF)
-//! + r` with `k ∈ [0, 2^K_BITS)` and `|r| ≤ ln2/2 · SF`, emitting a sparse
-//! selection polynomial for the `k` values plus a dense `r`.
+//! `ExpHelper` decomposes `x = r - Ls*k` using exact public `Ls`. The
+//! non-saturating profile requires `x<=0`, `k<2^num_bits`, and the canonical
+//! remainder `0<=Ls/2-r<Ls`. DagBuilder::compile attaches real range roots
+//! even to standalone raw helpers; the Morpheus verifier validates that wiring.
+//! Normalization advice and causal independence are separate obligations.
 //!
 //! [`TwoPow`] looks up `2^(15 − k)` from the selection polynomial — the
 //! result is `2^x` once multiplied by the Taylor expansion of `exp(r)` (done
@@ -17,13 +18,29 @@ use crate::poly::{SelectionPolynomial, SparseMLPoly};
 use crate::sumcheck::SumcheckProof;
 use crate::transcript::Transcript;
 use crate::util::arith::{f_to_int, get_n, int_to_f, next_pow};
-use crate::{SF_FLOAT, SF_LOG};
+use crate::SF_LOG;
 
-/// Default decomposition width: `k ∈ [0, 2^K_BITS)`. K=4 covers `exp(x)`
-/// for `x ∈ [−15·ln2, 0]` at SF=15 — enough range for softmax/sigmoid
-/// bounds. The DagBuilder constructs [`ExpHelper`] with a builder-chosen
-/// `num_bits` (defaults to 4, can be widened by upstream callers).
-pub const K_BITS: usize = 4;
+/// Compact, non-saturating exp profile: eight bits also cover the existing
+/// -100 causal-mask sentinel. Inputs outside the declared table FAIL CLOSED.
+/// This does not repair the causal denominator or normalization advice.
+pub const K_BITS: usize = 8;
+
+pub fn exp_bits() -> usize {
+    let bits = match std::env::var("ZK4_EXP_BITS") {
+        Ok(s) => s.parse::<usize>().expect("ZK4_EXP_BITS must be an integer"),
+        Err(std::env::VarError::NotPresent) => K_BITS,
+        Err(std::env::VarError::NotUnicode(_)) => panic!("ZK4_EXP_BITS must be valid Unicode"),
+    };
+    assert!((1..=8).contains(&bits), "supported exp selector width is 1..=8");
+    bits
+}
+
+/// Exact public ln(2) quantization, indexed by activation scale (not Qe).
+/// These integers, and the operation order, define the numerical program.
+pub const EXP_LS: [i128; 31] = [1,1,3,6,11,22,44,89,177,355,710,1420,2839,5678,11357,22713,45426,90852,181704,363409,726817,1453635,2907270,5814540,11629080,23258160,46516320,93032640,186065279,372130559,744261118];
+pub fn exp_ln2(sf: usize) -> i128 {
+    *EXP_LS.get(sf).expect("exp activation scale must be 0..=30")
+}
 
 // ============================================================================
 // ExpHelper
@@ -48,7 +65,9 @@ impl BasicBlock for ExpHelper {
             x.shape.iter().map(|&s| next_pow(s as u32) as usize).collect();
         let n: usize = x_shape_padded.iter().product();
         let num_var = get_n(&x_shape_padded);
-        let ln2 = (2.0_f64.ln() * (*SF_FLOAT as f64)).round() as i128;
+        assert_eq!(x.sf, *SF_LOG, "exp input must use the registered activation scale");
+        assert!((1..=8).contains(&self.num_bits), "unsupported exp selector width");
+        let ln2 = exp_ln2(x.sf);
         let neg_ln2_f = int_to_f(-ln2);
         let table_size = 1usize << self.num_bits;
 
@@ -57,17 +76,14 @@ impl BasicBlock for ExpHelper {
         let data = x.data.as_ref().unwrap();
         for i in 0..n {
             let x_i = data.index(i);
-            let x_num = f_to_int(x_i) as f64;
-            let k = ((-x_num) / (ln2 as f64)).round();
-            // r = x − k · (−ln2 · SF) = x + k · ln2 · SF
-            let k_f = int_to_f(k as i128);
+            let x_num = f_to_int(x_i);
+            assert!(x_num <= 0, "exp profile requires nonpositive input");
+            let k = (-x_num + ln2 / 2) / ln2;
+            assert!(k < table_size as i128, "exp input outside registered selector domain");
+            // Unique integer decomposition, no floating rounding or index clamp.
+            let k_f = int_to_f(k);
             r_data[i] = x_i - k_f * neg_ln2_f;
-            let k_idx = k as i64;
-            let table_index = if k_idx >= 0 && (k_idx as usize) < table_size {
-                k_idx as usize
-            } else {
-                0
-            };
+            let table_index = k as usize;
             selection.push((i, table_index));
         }
 
@@ -80,14 +96,13 @@ impl BasicBlock for ExpHelper {
             data_type: x.data_type,
             sf: 0,
             role: Role::Auxiliary,
+            channel_shift: None,
         };
         vec![r, aux]
     }
 
     fn run_gpu(&self, inputs: &[&Witness]) -> Vec<Witness> {
-        // Same reasoning as ScaleDown: bandwidth-bound per-element, with
-        // a `f64::round` step that CUDA would have to mirror exactly.
-        // CPU is the documented default.
+        // Exact integer witness generation; CPU is the documented default.
         self.run(inputs)
     }
 
@@ -150,9 +165,8 @@ impl BasicBlock for TwoPow {
         let inp_num_vars = sparse.selection.input_num_vars;
         let mut y_data = vec![AlmostGoldilocksField(0); 1usize << inp_num_vars];
         for &(input_index, table_index) in &sparse.selection.selection {
-            // table[k] = 2^(15 − k) for k ∈ [0, 16).
-            assert!(table_index < 16, "TwoPow: table_index {} ≥ 16", table_index);
-            y_data[input_index] = AlmostGoldilocksField(1u64 << (15 - table_index));
+            // table[k] = 2^(15 − k) for k ∈ [0, 16), 0 beyond (wider ExpHelper tables).
+            y_data[input_index] = AlmostGoldilocksField(if table_index < 16 { 1u64 << (15 - table_index) } else { 0 });
         }
         let y = Witness::new(x.shape.clone(), y_data, DataType::Float, 15, Role::Output);
         vec![y]
@@ -224,7 +238,7 @@ mod tests {
     /// `x = -k · ln2 · SF` for `k ∈ {0, 1, 5, 15}` → selection table index = k.
     #[test]
     fn exphelper_recovers_negative_k() {
-        let ln2 = (2.0_f64.ln() * (*SF_FLOAT as f64)).round() as i128;
+        let ln2 = exp_ln2(*SF_LOG);
         let x = build_input(vec![4], vec![0, -ln2, -5 * ln2, -15 * ln2]);
         let h = ExpHelper::new(K_BITS);
         let out = h.run(&[&x]);
@@ -241,6 +255,21 @@ mod tests {
         assert_eq!(sel[&1], 1);
         assert_eq!(sel[&2], 5);
         assert_eq!(sel[&3], 15);
+    }
+
+    #[test]
+    fn exphelper_rejects_positive_and_out_of_domain_without_clamping() {
+        let l=exp_ln2(*SF_LOG); let h=ExpHelper::new(8);
+        let bound=256*l-l/2-1;
+        for v in [1,-bound-1] {
+            let x=build_input(vec![1],vec![v]);
+            assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.run(&[&x]))).is_err());
+        }
+        for v in [0,-bound,-l/2,-(l-l/2)] {
+            let x=build_input(vec![1],vec![v]); let out=h.run(&[&x]);
+            let r=crate::util::arith::f_to_int(out[0].data.as_ref().unwrap().index(0));
+            assert!((0..l).contains(&(l/2-r)));
+        }
     }
 
     #[test]

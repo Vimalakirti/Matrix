@@ -1,0 +1,1 @@
+{"status": "pass", "groups": 127930, "scales": "0..20", "private_buckets": 32, "scope": "integer constraints and bounds only"}

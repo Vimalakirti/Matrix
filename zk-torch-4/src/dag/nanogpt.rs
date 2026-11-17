@@ -27,10 +27,10 @@
 //!
 //! One DEVIATION, which the paper should state. nanoGPT's activation is the
 //! tanh approximation to GELU; `gpt2_mlp` here uses the sigmoid approximation
-//! `x * sigmoid(1.702x)`. The two differ by well under a percent over the range
-//! these activations take, and the prover cost is identical because both are
-//! one lookup-backed nonlinearity per element, but it is not bit-exact against
-//! EZKL's graph.
+//! `x * sigmoid(1.702x)`, now implemented by the registered finite two-logit
+//! normalization relation (two finite exp evaluations and exact integer
+//! denominator division). It is not bit-exact against EZKL's tanh graph;
+//! neither accuracy nor equal prover cost is established by this substitution.
 
 use crate::dag::gpt2::gpt2_block;
 use crate::dag::{DagBuilder, EdgeId, Role, Witness};

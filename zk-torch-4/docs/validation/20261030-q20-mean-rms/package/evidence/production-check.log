@@ -1,0 +1,10 @@
+   Compiling almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-mean-rms-q20/almost-goldilocks-cuda-rs)
+error: failed to run custom build command for `almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-mean-rms-q20/almost-goldilocks-cuda-rs)`
+
+Caused by:
+  process didn't exit successfully: `/workspace/shared/morpheus-mean-rms-target/debug/build/almost-goldilocks-cuda-8432e30e9eaf1f3f/build-script-build` (exit status: 101)
+  --- stderr
+
+  thread 'main' (608) panicked at /workspace/shared/morpheus-mean-rms-q20/almost-goldilocks-cuda-rs/build.rs:62:9:
+  CUDA toolkit not found at /usr/local/cuda/bin/nvcc
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

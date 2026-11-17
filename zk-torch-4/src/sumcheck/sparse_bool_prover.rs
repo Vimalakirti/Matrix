@@ -25,6 +25,21 @@ use crate::transcript::Transcript;
 use crate::util::arith::{ext2_add, ext2_field_eq, ext2_mul, ext2_sub};
 
 /// Sparse-boolean sumcheck prover (Ext2 variant).
+/// Positions as handed to the GPU path.
+#[derive(Clone, Copy)]
+enum PosRef<'a> {
+    Usize(&'a [Vec<usize>]),
+    U32(&'a [Vec<u32>]),
+}
+impl PosRef<'_> {
+    fn nnz(&self) -> usize {
+        match self {
+            PosRef::Usize(p) => p.iter().map(|v| v.len()).sum(),
+            PosRef::U32(p) => p.iter().map(|v| v.len()).sum(),
+        }
+    }
+}
+
 pub struct SparseBoolSumcheckProverExt2 {
     pub num_var: usize,
     pub current_round: usize,
@@ -85,28 +100,44 @@ impl SparseBoolSumcheckProverExt2 {
         // the verifier is untouched. Mirrors the same-point sparse backend
         // (`fold::same_point_sumcheck`). Gate: arity ≥ MIN and density below
         // 1/RATIO. `ZK4_SPARSE_BOOL=0` disables.
-        {
-            // Trigger when (a) arity is high enough that the dense `2^num_var`
-            // eq table is a real allocation (≥2^20 ≈ 32 MB/group, GBs by 26 —
-            // and groups run rayon-parallel, so the transient is multiplied),
-            // and (b) the group is genuinely sparse (`nnz·2 < 2^num_var`). The
-            // ratio gate is self-protecting: a range aux has `nnz = T·2^input_n`
-            // for T terms over a `2^(input_n+table_commit_log)` cube, so it only
-            // fails the gate when T approaches `2^table_commit_log` — i.e. when
-            // the support really is near-dense and the dense path is genuinely
-            // better. CNN range groups measure 2–8× sparse (many nodes per
-            // arity); the win is mostly from avoiding the multi-GB eq alloc.
-            let on = std::env::var("ZK4_SPARSE_BOOL").ok().as_deref() != Some("0");
-            let min_arity = std::env::var("ZK4_SPARSE_BOOL_MIN_ARITY").ok()
-                .and_then(|s| s.parse::<usize>().ok()).unwrap_or(20);
-            let ratio = std::env::var("ZK4_SPARSE_BOOL_RATIO").ok()
-                .and_then(|s| s.parse::<usize>().ok()).unwrap_or(2);
-            let nnz: usize = positions.iter().map(|p| p.len()).sum();
-            let dense_works = self.num_var < usize::BITS as usize;
-            if on && dense_works && self.num_var >= min_arity
-                && nnz.saturating_mul(ratio) < (1usize << self.num_var)
-            {
-                return self.prove_sparse_eq(weights, positions, eq_challenge, transcript);
+        // Trigger when (a) arity is high enough that the dense `2^num_var`
+        // eq table is a real allocation (≥2^20 ≈ 32 MB/group, GBs by 26 —
+        // and groups run rayon-parallel, so the transient is multiplied),
+        // and (b) the group is genuinely sparse (`nnz·2 < 2^num_var`). The
+        // ratio gate is self-protecting: a range aux has `nnz = T·2^input_n`
+        // for T terms over a `2^(input_n+table_commit_log)` cube, so it only
+        // fails the gate when T approaches `2^table_commit_log` — i.e. when
+        // the support really is near-dense and the dense path is genuinely
+        // better. CNN range groups measure 2–8× sparse (many nodes per
+        // arity); the win is mostly from avoiding the multi-GB eq alloc.
+        if self.sparse_gate(positions.iter().map(|p| p.len()).sum()) {
+            return self.prove_sparse_eq(weights, positions, eq_challenge, transcript);
+        }
+
+        // GPU dispatch FIRST. The CPU branch's term setup below copies every
+        // position into a Vec<(usize, Ext2)> and sorts each term (~425 ms for
+        // an arity-24 sub-group of 18.9M entries) and used to run before this
+        // check, so the GPU path paid it and never read the result.
+        // DENSE path timing. Note this, not `prove_sparse_eq`, is what runs on
+        // LLM shapes: the sparse gate needs `nnz·2 < 2^arity` and llama2's
+        // groups have nnz ~10x the cube (45M vs 2^22), so they all land here.
+        // Split into eq-build (O(2^arity), once) vs the round loop
+        // (O(nnz) per round, nnz shrinking) because those need different GPU
+        // work and only the larger one is worth porting.
+        // Device-resident path. Same pair walk, same degree-3 message, same
+        // fold; only the 4 Ext2 round messages cross PCIe, so the support data
+        // (7 GB at arity 24) never leaves the GPU. Falls back to the CPU branch
+        // below on any GPU error, which is why it returns Option.
+        // Default ON (ZK4_GPU_BOOL=0 opts out). Byte-identical round messages
+        // to the CPU branch (gpu_bool_matches_cpu_dense, run with =strict so a
+        // fallback cannot pass for the GPU), and any GPU error falls back to
+        // the CPU branch below. GPT-2 2L seq 128: bool phase 2.4 s -> 0.6 s
+        // once its eq table stays on the device and positions arrive in row
+        // order.
+        let gpu_mode = std::env::var("ZK4_GPU_BOOL").ok();
+        if gpu_mode.as_deref() != Some("0") {
+            if let Some(pf) = self.prove_on_gpu(weights, PosRef::Usize(positions), eq_challenge, transcript) {
+                return pf;
             }
         }
 
@@ -124,23 +155,6 @@ impl SparseBoolSumcheckProverExt2 {
                 (w, entries)
             })
             .collect();
-
-        // DENSE path timing. Note this, not `prove_sparse_eq`, is what runs on
-        // LLM shapes: the sparse gate needs `nnz·2 < 2^arity` and llama2's
-        // groups have nnz ~10x the cube (45M vs 2^22), so they all land here.
-        // Split into eq-build (O(2^arity), once) vs the round loop
-        // (O(nnz) per round, nnz shrinking) because those need different GPU
-        // work and only the larger one is worth porting.
-        // Device-resident path. Same pair walk, same degree-3 message, same
-        // fold; only the 4 Ext2 round messages cross PCIe, so the support data
-        // (7 GB at arity 24) never leaves the GPU. Falls back to the CPU branch
-        // below on any GPU error, which is why it returns Option.
-        let gpu_mode = std::env::var("ZK4_GPU_BOOL").ok();
-        if matches!(gpu_mode.as_deref(), Some("1") | Some("strict")) {
-            if let Some(pf) = self.prove_on_gpu(weights, positions, eq_challenge, transcript) {
-                return pf;
-            }
-        }
 
         let timing = std::env::var("ZK4_TIMING").ok().as_deref() == Some("1");
         let t_eq = std::time::Instant::now();
@@ -311,10 +325,45 @@ impl SparseBoolSumcheckProverExt2 {
     /// untouched) if the GPU path cannot run, so the caller falls through to
     /// the CPU branch. Any failure AFTER the first transcript append cannot be
     /// unwound here, so the transcript is snapshotted and restored.
+    /// The factored-eq CPU path's gate (see the comment in `prove`): arity at
+    /// least ZK4_SPARSE_BOOL_MIN_ARITY (20) and nnz * ratio < 2^arity.
+    fn sparse_gate(&self, nnz: usize) -> bool {
+        let on = std::env::var("ZK4_SPARSE_BOOL").ok().as_deref() != Some("0");
+        let min_arity = std::env::var("ZK4_SPARSE_BOOL_MIN_ARITY").ok()
+            .and_then(|s| s.parse::<usize>().ok()).unwrap_or(20);
+        let ratio = std::env::var("ZK4_SPARSE_BOOL_RATIO").ok()
+            .and_then(|s| s.parse::<usize>().ok()).unwrap_or(2);
+        let dense_works = self.num_var < usize::BITS as usize;
+        on && dense_works && self.num_var >= min_arity
+            && nnz.saturating_mul(ratio) < (1usize << self.num_var)
+    }
+
+    /// As [`prove`], for positions given as per-term `u32` lists ALREADY
+    /// sorted ascending (lookups.rs builds them that way). The GPU path
+    /// uploads them as-is; the CPU paths (sparse gate, GPU fallback) widen to
+    /// usize and run `prove`. Same dispatch order, so the same proof.
+    pub fn prove_u32(
+        &mut self,
+        weights: &[AlmostGoldilocksExt2],
+        positions: &[Vec<u32>],
+        eq_challenge: &[AlmostGoldilocksExt2],
+        transcript: &mut Transcript,
+    ) -> SumcheckProof {
+        let nnz: usize = positions.iter().map(|p| p.len()).sum();
+        if !self.sparse_gate(nnz) && std::env::var("ZK4_GPU_BOOL").ok().as_deref() != Some("0") {
+            if let Some(pf) = self.prove_on_gpu(weights, PosRef::U32(positions), eq_challenge, transcript) {
+                return pf;
+            }
+        }
+        let wide: Vec<Vec<usize>> = positions.iter()
+            .map(|p| p.iter().map(|&x| x as usize).collect()).collect();
+        self.prove(weights, &wide, eq_challenge, transcript)
+    }
+
     fn prove_on_gpu(
         &mut self,
         weights: &[AlmostGoldilocksExt2],
-        positions: &[Vec<usize>],
+        positions: PosRef<'_>,
         eq_challenge: &[AlmostGoldilocksExt2],
         transcript: &mut Transcript,
     ) -> Option<SumcheckProof> {
@@ -343,8 +392,10 @@ impl SparseBoolSumcheckProverExt2 {
         // Always the GPU DP here, regardless of ZK4_GPU_BOOL_EQ: this path is
         // about to upload eq to the device anyway, so building it on the host
         // would pay a 2^arity DP and then send the result across PCIe.
+        // Built and kept on the device: the previous host-side copy was
+        // downloaded only to be uploaded again (268 MB each way at arity 24).
         let t_eq0 = std::time::Instant::now();
-        let eq = match almost_goldilocks_cuda::eq_lagrange::ext2_eq_dp_all(eq_challenge) {
+        let d_eq = match almost_goldilocks_cuda::eq_lagrange::ext2_eq_dp_all_device_u64(eq_challenge) {
             Ok(v) => v,
             Err(e) => bail!("eq_dp", e),
         };
@@ -354,11 +405,17 @@ impl SparseBoolSumcheckProverExt2 {
         // BoolSumcheckGpu sorts each term's indices in place while building the
         // u32 array, so no pre-sorted deep copy is needed here.
         let t_eq = std::time::Instant::now();
-        let mut gpu = match BoolSumcheckGpu::new(weights, positions, &eq) {
+        let nv_setup = almost_goldilocks_cuda::nvtx("bool setup");
+        let built = match positions {
+            PosRef::Usize(p) => BoolSumcheckGpu::new_with_device_eq(weights, p, d_eq),
+            PosRef::U32(p) => BoolSumcheckGpu::from_sorted_u32(weights, p, d_eq),
+        };
+        let mut gpu = match built {
             Ok(g) => g,
             Err(e) => bail!("new", e),
         };
         let t_setup = t_eq.elapsed();
+        drop(nv_setup);
         let t_rounds0 = std::time::Instant::now();
         let mut round_messages = Vec::with_capacity(self.num_var);
         for _ in 0..self.num_var {
@@ -380,7 +437,7 @@ impl SparseBoolSumcheckProverExt2 {
             Err(e) => bail!("finish", e),
         };
         if std::env::var("ZK4_TIMING").ok().as_deref() == Some("1") {
-            let nnz: usize = positions.iter().map(|p| p.len()).sum();
+            let nnz: usize = positions.nnz();
             eprintln!("[bool_gpu] arity={} terms={} nnz={} eq_build={:?} setup={:?} rounds={:?} finish={:?}",
                       self.num_var, weights.len(), nnz, eq_el, t_setup, t_rounds, t_fin0.elapsed());
         }
@@ -868,8 +925,11 @@ mod gpu_bool_parity {
                 .collect();
 
             let run = |gpu: bool| {
+                // The GPU path is the default, so the CPU reference must opt
+                // out explicitly; removing the variable would make this a
+                // GPU-vs-GPU comparison that always passes.
                 if gpu { std::env::set_var("ZK4_GPU_BOOL", "strict"); }
-                else { std::env::remove_var("ZK4_GPU_BOOL"); }
+                else { std::env::set_var("ZK4_GPU_BOOL", "0"); }
                 let mut t = Transcript::new(b"parity");
                 let mut p = SparseBoolSumcheckProverExt2::new(arity, &mut t);
                 let pf = p.prove(&weights, &positions, &eq_ch, &mut t);

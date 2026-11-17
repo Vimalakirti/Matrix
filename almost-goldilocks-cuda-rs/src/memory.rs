@@ -9,6 +9,24 @@ use crate::error::{CudaError, Result};
 /// is how 3D-UNet at 128^3 produced a sticky illegal access with no bad index
 /// anywhere. Buffers do reach that size: c_out_pad 64 * s_full_pad 2^25 is
 /// exactly 2^31. Fail with a message naming the count instead.
+/// A host vector of `n` defaults for a device-to-host copy. Large ones are
+/// written by several threads first: the copy from the driver's staging
+/// buffer would otherwise fault every fresh page in serially.
+fn host_vec<T: Clone + Default + Send + Sync>(n: usize) -> Vec<T> {
+    let bytes = n * std::mem::size_of::<T>();
+    if bytes < (16 << 20) { return vec![T::default(); n]; }
+    let mut v: Vec<T> = Vec::with_capacity(n);
+    let spare = &mut v.spare_capacity_mut()[..n];
+    let per = n.div_ceil(16);
+    std::thread::scope(|sc| {
+        for c in spare.chunks_mut(per) {
+            sc.spawn(move || for x in c.iter_mut() { x.write(T::default()); });
+        }
+    });
+    unsafe { v.set_len(n); }
+    v
+}
+
 pub fn check_elem_count(n: usize, what: &str) -> Result<()> {
     if n > i32::MAX as usize {
         return Err(CudaError::InvalidArgument(format!(
@@ -28,6 +46,14 @@ pub struct DeviceBuffer<T> {
     _marker: PhantomData<T>,
 }
 
+
+/// MORPHEUS_TRACE_COPIES=<MB>: print a backtrace for host<->device copies at
+/// least that large (diagnostics only).
+pub fn trace_copy(what: &str, bytes: usize) {
+    static LIM: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    let lim = *LIM.get_or_init(|| std::env::var("MORPHEUS_TRACE_COPIES").ok().and_then(|s| s.parse::<usize>().ok()).map(|m| m << 20).unwrap_or(usize::MAX));
+    if bytes >= lim { eprintln!("[copy] {what} {} MB\n{}", bytes >> 20, std::backtrace::Backtrace::force_capture()); }
+}
 impl<T> std::fmt::Debug for DeviceBuffer<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeviceBuffer")
@@ -56,6 +82,7 @@ impl<T> DeviceBuffer<T> {
     }
 
     pub fn from_slice(data: &[T]) -> Result<Self> {
+        trace_copy("H2D from_slice", std::mem::size_of_val(data));
         let buffer = Self::new(data.len())?;
         if !data.is_empty() {
             let size = data.len() * std::mem::size_of::<T>();
@@ -75,9 +102,10 @@ impl<T> DeviceBuffer<T> {
 
     pub fn to_vec(&self) -> Result<Vec<T>>
     where
-        T: Clone + Default,
+        T: Clone + Default + Send + Sync,
     {
-        let mut result = vec![T::default(); self.len];
+        trace_copy("D2H to_vec", self.len * std::mem::size_of::<T>());
+        let mut result = host_vec::<T>(self.len);
         if !result.is_empty() {
             let size = self.len * std::mem::size_of::<T>();
             let ret = unsafe {
@@ -100,6 +128,7 @@ impl<T> DeviceBuffer<T> {
     pub fn as_mut_ptr(&mut self) -> *mut T { self.ptr }
 
     pub fn copy_from_slice(&mut self, data: &[T]) -> Result<()> {
+        trace_copy("H2D copy_from_slice", std::mem::size_of_val(data));
         if data.len() != self.len {
             return Err(CudaError::InvalidArgument(
                 "Slice length does not match buffer length".to_string(),
@@ -166,6 +195,7 @@ impl<T> DeviceBuffer<T> {
     /// between a multi-gigabyte host allocation and a `cudaMemset` plus a
     /// handful of small copies.
     pub fn copy_from_slice_at(&mut self, offset: usize, data: &[T]) -> Result<()> {
+        trace_copy("H2D copy_from_slice_at", std::mem::size_of_val(data));
         if data.is_empty() { return Ok(()); }
         if offset + data.len() > self.len {
             return Err(CudaError::InvalidArgument(
@@ -341,8 +371,9 @@ impl<T> DeviceBuffer<T> {
 
     pub fn read_slice(&self, offset: usize, len: usize) -> Result<Vec<T>>
     where
-        T: Clone + Default,
+        T: Clone + Default + Send + Sync,
     {
+        trace_copy("D2H read_slice", len * std::mem::size_of::<T>());
         if offset + len > self.len {
             return Err(CudaError::InvalidArgument(format!(
                 "read_slice out of bounds: offset={} len={} buf_len={}",
@@ -350,7 +381,7 @@ impl<T> DeviceBuffer<T> {
             )));
         }
         if len == 0 { return Ok(Vec::new()); }
-        let mut result = vec![T::default(); len];
+        let mut result = host_vec::<T>(len);
         let byte_size = len * std::mem::size_of::<T>();
         let ret = unsafe {
             ffi::cuda_memcpy_dtoh(
@@ -389,6 +420,20 @@ pub fn pool_trim(min_bytes_to_keep: usize) -> Result<()> {
 
 pub fn synchronize() -> Result<()> {
     let ret = unsafe { ffi::cuda_device_synchronize() };
+    if ret != 0 { return Err(CudaError::SyncFailed); }
+    Ok(())
+}
+
+/// Wait for the CALLING THREAD's GPU work only (its per-thread default
+/// stream; the library is built with --default-stream per-thread). The
+/// wrappers in this crate use it after their own launches: `synchronize()`
+/// waits for every thread's work on the device, so with several prover
+/// threads sharing a GPU each wrapper call waited for all of them.
+/// AGL_DEVICE_SYNC=1 makes this a device-wide sync again. Callers that need
+/// other threads' work finished (e.g. before clearing shared pools) must keep
+/// using `synchronize()`.
+pub fn sync_mine() -> Result<()> {
+    let ret = unsafe { ffi::cuda_sync_mine() };
     if ret != 0 { return Err(CudaError::SyncFailed); }
     Ok(())
 }
@@ -461,4 +506,16 @@ pub unsafe fn memcpy_htod_async(
     let ret = ffi::cuda_memcpy_htod_async(dst, src, size, stream.as_ptr());
     if ret != 0 { return Err(CudaError::MemcpyFailed(crate::cuda_error_string(ret))); }
     Ok(())
+}
+
+/// Scoped NVTX range for nsys timelines: `let _r = nvtx("phase");`. A no-op
+/// unless a profiler is attached; the name is copied, so a temporary works.
+pub struct NvtxRange;
+pub fn nvtx(name: &str) -> NvtxRange {
+    let c = std::ffi::CString::new(name).unwrap_or_default();
+    unsafe { ffi::agl_nvtx_push(c.as_ptr()) };
+    NvtxRange
+}
+impl Drop for NvtxRange {
+    fn drop(&mut self) { unsafe { ffi::agl_nvtx_pop() } }
 }

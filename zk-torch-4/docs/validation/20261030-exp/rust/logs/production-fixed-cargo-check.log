@@ -1,0 +1,17 @@
+   Compiling serde_derive v1.0.228
+    Checking ppv-lite86 v0.2.21
+   Compiling almost-goldilocks-cuda v0.1.0 (<validation>/production-fixed/almost-goldilocks-cuda-rs)
+    Checking regex v1.12.3
+   Compiling thiserror-impl v1.0.69
+    Checking num_cpus v1.17.0
+    Checking once_cell v1.21.4
+error: failed to run custom build command for `almost-goldilocks-cuda v0.1.0 (<validation>/production-fixed/almost-goldilocks-cuda-rs)`
+
+Caused by:
+  process didn't exit successfully: `<validation>/production/zk-torch-4/target/debug/build/almost-goldilocks-cuda-2e9c4e7cf41e0a7c/build-script-build` (exit status: 101)
+  --- stderr
+
+  thread 'main' (133) panicked at <validation>/production-fixed/almost-goldilocks-cuda-rs/build.rs:62:9:
+  CUDA toolkit not found at /usr/local/cuda/bin/nvcc
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...

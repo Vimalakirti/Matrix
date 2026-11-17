@@ -14,6 +14,8 @@ pub fn gpt2_layer_norm(
     move |g, x| {
         assert!(x.len() == 1, "This custom LayerNorm layer expects 1 input");
         let x = x[0];
+        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
+        let x=g.mean_input(x,*shape.last().unwrap());
         let x_sum = g.einsum("bsi->bs".to_string(), vec![x], false)[0];
         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
         let n = x_shape[x_shape.len() - 1];
@@ -21,40 +23,7 @@ pub fn gpt2_layer_norm(
         let seq = x_shape[1];
         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
 
-        let n_param: usize = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(n as u64)],
-            DataType::Float,
-            0,
-            Role::Constant,
-        ));
-        let mean_tolerance = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField((n / 2) as u64)],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let x_mean_mul_n =
-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
-
-        // `x_sum` is [1, seq] but `x_mean_mul_n` is [1, seq, 1]. Subtracting them
-        // directly broadcasts to a [1, seq, seq] OUTER PRODUCT whose entry (i, j)
-        // is `x_sum[j] - n*x_mean[i]`, a difference between two DIFFERENT rows'
-        // sums. Only the diagonal is the intended rounding remainder; off-diagonal
-        // entries are unbounded in both signs and break the NonNegative check as
-        // soon as row energies differ. A power-of-two padding tail guarantees they
-        // differ, since a pad row has zero energy while real rows do not - which
-        // is why non-power-of-two sequence lengths (BERT-Large 384, Whisper
-        // large-v3 1500/448) failed while power-of-two ones (GPT-2 1024) happened
-        // to stay in range. Reshape first so the sub stays element-wise per row.
-        // Same fix as dag/bert.rs and dag/whisper.rs::whisper_layer_norm.
-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
-        g.add_nonneg_node(positive_1);
-        g.add_nonneg_node(positive_2);
+        // div_const emits exact deterministic rounding roots.
 
         let x_minus_mean = g.sub(x, x_mean)[0];
         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
@@ -156,18 +125,11 @@ pub fn gpt2_attention(
         )[0];
 
         // Causal mask + normalized softmax
-        let scores = if seq_len > 1 {
-            g.causal_mask(scores, seq_len)
-        } else {
-            scores
-        };
-        let softmax_c = g.softmax_const(scores)[0];
-        let scores = g.add(scores, softmax_c)[0];
-        let scores = g.exp(scores)[0];
+        let scores = g.causal_softmax(scores, seq_len);
 
         let out =
             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
-        let out = g.change_shape(out, vec![1, seq_len, num_heads, head_dim]);
+        let out = g.merge_heads(out, seq_len, num_heads, head_dim);
         let out = g.reshape(out, vec![1, seq_len, hidden_dim])[0];
 
         let out =

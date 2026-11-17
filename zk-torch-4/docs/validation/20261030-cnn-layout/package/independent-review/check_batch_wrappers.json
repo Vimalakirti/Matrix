@@ -1,0 +1,28 @@
+{
+  "wrapper_geometry_cases": 144,
+  "batch": [
+    1,
+    3,
+    5
+  ],
+  "channels": [
+    1,
+    3,
+    5
+  ],
+  "pool_kernels_strides": [
+    [
+      2,
+      2
+    ],
+    [
+      3,
+      1
+    ]
+  ],
+  "poison": [
+    1099511627776,
+    -1099511627776
+  ],
+  "claim": "Independent layout/honest-forward integer reference, not cryptographic maxpool achievability"
+}

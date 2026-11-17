@@ -1,0 +1,12 @@
+[
+  {
+    "path": "cnn_layout_tests.rs",
+    "original_sha256": "1ebd32e2a08241913318f704bc4dfa2fea5d04820ee1ff6eb9108d19a43bd123",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "cnn_finite_activation_tests.rs",
+    "original_sha256": "ab432aca9e3aaed53cf0c4530100df18baadb3e17e4e0fa2f8ac42e9060eac87",
+    "body_identity_except_test_visibility": true
+  }
+]

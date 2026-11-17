@@ -43,6 +43,9 @@ impl BasicBlock for NonNegative {
         let n: usize = x_shape_padded.iter().product();
         let num_var = get_n(&x_shape_padded);
         let table_size = 1usize << self.table_size_log;
+        if crate::dag::lean_aux() {
+            return vec![Witness { shape: x.shape.clone(), data: None, poly_type: PolyType::Sparse, data_type: x.data_type, sf: 0, role: Role::Auxiliary, channel_shift: None }];
+        }
 
         let mut selection = Vec::with_capacity(n);
         let data = x.data.as_ref().expect("NonNegative: input has no data");
@@ -87,6 +90,7 @@ impl BasicBlock for NonNegative {
             data_type: x.data_type,
             sf: 0,
             role: Role::Auxiliary,
+            channel_shift: None,
         };
         vec![aux]
     }

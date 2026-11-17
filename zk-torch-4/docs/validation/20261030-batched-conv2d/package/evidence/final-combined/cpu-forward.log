@@ -1,0 +1,10 @@
+PASS actual CPU Conv2D/FlattenKernel forward semantics: 32 cases
+PASS actual normal/PP reduction-table helpers: 8 cases and alpha=0,1,nonbase
+
+thread 'main' (483) panicked at src/morpheus/piop/cv.rs:170:5:
+FlattenKernel tap scatter must be in bounds and injective
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (483) panicked at src/morpheus/piop/cv.rs:168:14:
+FlattenKernel tap index overflow
+PASS actual kernel source fixtures, collision/overflow rejection; not PIOP/PCS/CUDA

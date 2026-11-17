@@ -1,0 +1,440 @@
+{
+  "status": "all three predetermined prover and separate public-only verifier suites PASS",
+  "source_manifest_sha256": "e9bdfbd4e471a7aa87ba94ef84767568098aad02157d1ecac48e44d6b652c431",
+  "binary_sha256": "7821d88aff1ed7f2063d2484a7ebbf6491dadf39365b6f632fb572b6b777bef4",
+  "hardware": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cpus_visible": 9,
+    "mem_total_kib": 10206484,
+    "kernel": "6.18.55"
+  },
+  "threads": 4,
+  "rlimit_as_bytes": 3221225472,
+  "model_sha256": "7620a762dc49e1bd1ea08b9ff0c0193e0826fd590a337829083bc4064db352d9",
+  "dataset_index": 1329,
+  "class": 1,
+  "heldout": {
+    "count": 450,
+    "float_correct": 435,
+    "integer_correct": 435,
+    "prediction_disagreements": 0,
+    "actual_rust_logit_vectors_matching_integer_reference": 450
+  },
+  "runs": [
+    {
+      "run": "run-1",
+      "status": "prover and separate public-only verifier allnegatives PASS",
+      "attempt_zero_based": 1,
+      "candidate_count": 2,
+      "proof_bytes": 130885407,
+      "prover_api_seconds": 341.631757602,
+      "single_valid_verify_api_seconds": 62.117788613,
+      "model_registration_seconds": 7.719750518,
+      "input_registration_seconds": 7.278162241,
+      "prover_whole_harness_seconds": 357.3026020526886,
+      "verifier_with_negatives_whole_harness_seconds": 114.31338334083557,
+      "prover_maxrss_kib": 770860,
+      "verifier_maxrss_kib": 573616,
+      "files": [
+        {
+          "name": "public-registry.bin",
+          "bytes": 1388048,
+          "sha256": "04620f66aef4c0cbbbf309341cbfd07693037ade607165b16227723dc18cb641"
+        },
+        {
+          "name": "request-0.bin",
+          "bytes": 130885407,
+          "sha256": "71f1702c6ead7012a014020ad433923eb660cf933458c9e86d3740c2a4ff1599"
+        }
+      ]
+    },
+    {
+      "run": "run-2",
+      "status": "prover and separate public-only verifier allnegatives PASS",
+      "attempt_zero_based": 2,
+      "candidate_count": 3,
+      "proof_bytes": 130885407,
+      "prover_api_seconds": 477.653902644,
+      "single_valid_verify_api_seconds": 59.417594346,
+      "model_registration_seconds": 8.114802726,
+      "input_registration_seconds": 8.055567522,
+      "prover_whole_harness_seconds": 494.591415643692,
+      "verifier_with_negatives_whole_harness_seconds": 108.11047196388245,
+      "prover_maxrss_kib": 779448,
+      "verifier_maxrss_kib": 573600,
+      "files": [
+        {
+          "name": "public-registry.bin",
+          "bytes": 1388048,
+          "sha256": "813543c1f084101d5138d7c733a0feb8df09b3827154d31d2c24a6f2882960e2"
+        },
+        {
+          "name": "request-0.bin",
+          "bytes": 130885407,
+          "sha256": "3b21529ce0e00b7dc969119e173f542a50082ce596b0191c3ee6ac3e3b4ccd45"
+        }
+      ]
+    },
+    {
+      "run": "run-3",
+      "status": "prover and separate public-only verifier allnegatives PASS",
+      "attempt_zero_based": 0,
+      "candidate_count": 1,
+      "proof_bytes": 130885407,
+      "prover_api_seconds": 214.384247456,
+      "single_valid_verify_api_seconds": 60.735599724,
+      "model_registration_seconds": 7.45378389,
+      "input_registration_seconds": 7.794086149,
+      "prover_whole_harness_seconds": 230.3941032886505,
+      "verifier_with_negatives_whole_harness_seconds": 109.05701756477356,
+      "prover_maxrss_kib": 769100,
+      "verifier_maxrss_kib": 573424,
+      "files": [
+        {
+          "name": "public-registry.bin",
+          "bytes": 1388048,
+          "sha256": "1f0445718abe6315979f2f660b0510980e76f8e78f1e27abd4c1d9a8d7051394"
+        },
+        {
+          "name": "request-0.bin",
+          "bytes": 130885407,
+          "sha256": "cfc92bc927f42ce02bace13e7c1e2d1fa7ce45ba6c37b4c4c53fe6afe7088aaa"
+        }
+      ]
+    }
+  ],
+  "stage_statistics": {
+    "prove": {
+      "fixture_read": {
+        "median_seconds": 0.233780709,
+        "min_seconds": 0.22819908,
+        "max_seconds": 0.24340395,
+        "all_seconds": [
+          0.24340395,
+          0.233780709,
+          0.22819908
+        ]
+      },
+      "dag_and_initial_witness_build": {
+        "median_seconds": 0.000239011,
+        "min_seconds": 0.00023829,
+        "max_seconds": 0.000243127,
+        "all_seconds": [
+          0.000239011,
+          0.000243127,
+          0.00023829
+        ]
+      },
+      "all_450_validation": {
+        "median_seconds": 0.16444367,
+        "min_seconds": 0.128343369,
+        "max_seconds": 0.238580332,
+        "all_seconds": [
+          0.128343369,
+          0.238580332,
+          0.16444367
+        ]
+      },
+      "single_case_witness_existing_dag": {
+        "median_seconds": 0.000333885,
+        "min_seconds": 0.000327456,
+        "max_seconds": 0.000382768,
+        "all_seconds": [
+          0.000327456,
+          0.000382768,
+          0.000333885
+        ]
+      },
+      "options_entropy_and_mask_budget": {
+        "median_seconds": 9.6095e-05,
+        "min_seconds": 8.8524e-05,
+        "max_seconds": 0.000166451,
+        "all_seconds": [
+          9.6095e-05,
+          8.8524e-05,
+          0.000166451
+        ]
+      },
+      "graph_cache_layout_prepare": {
+        "median_seconds": 0.00085951,
+        "min_seconds": 0.000836344,
+        "max_seconds": 0.001781401,
+        "all_seconds": [
+          0.00085951,
+          0.001781401,
+          0.000836344
+        ]
+      },
+      "model_registration": {
+        "median_seconds": 7.719750518,
+        "min_seconds": 7.45378389,
+        "max_seconds": 8.114802726,
+        "all_seconds": [
+          7.719750518,
+          8.114802726,
+          7.45378389
+        ]
+      },
+      "input_registration": {
+        "median_seconds": 7.794086149,
+        "min_seconds": 7.278162241,
+        "max_seconds": 8.055567522,
+        "all_seconds": [
+          7.278162241,
+          8.055567522,
+          7.794086149
+        ]
+      },
+      "public_registry_prepare_encode": {
+        "median_seconds": 0.000365192,
+        "min_seconds": 0.000325982,
+        "max_seconds": 0.000407726,
+        "all_seconds": [
+          0.000365192,
+          0.000325982,
+          0.000407726
+        ]
+      },
+      "public_registry_write": {
+        "median_seconds": 0.000258341,
+        "min_seconds": 0.000245852,
+        "max_seconds": 0.000307906,
+        "all_seconds": [
+          0.000258341,
+          0.000245852,
+          0.000307906
+        ]
+      },
+      "prove_api_including_source_pack_commit_and_link_selfcheck": {
+        "median_seconds": 341.631757602,
+        "min_seconds": 214.384247456,
+        "max_seconds": 477.653902644,
+        "all_seconds": [
+          341.631757602,
+          477.653902644,
+          214.384247456
+        ]
+      },
+      "proof_encode": {
+        "median_seconds": 0.256631918,
+        "min_seconds": 0.24630024,
+        "max_seconds": 0.317322509,
+        "all_seconds": [
+          0.256631918,
+          0.24630024,
+          0.317322509
+        ]
+      },
+      "proof_write": {
+        "median_seconds": 0.018571164,
+        "min_seconds": 0.01704221,
+        "max_seconds": 0.021144744,
+        "all_seconds": [
+          0.01704221,
+          0.018571164,
+          0.021144744
+        ]
+      }
+    },
+    "verify": {
+      "public_registry_read_reconstruction_admission": {
+        "median_seconds": 0.0044935,
+        "min_seconds": 0.004179456,
+        "max_seconds": 0.00468506,
+        "all_seconds": [
+          0.0044935,
+          0.00468506,
+          0.004179456
+        ]
+      },
+      "proof_read": {
+        "median_seconds": 0.05870141,
+        "min_seconds": 0.049420017,
+        "max_seconds": 0.064168093,
+        "all_seconds": [
+          0.049420017,
+          0.064168093,
+          0.05870141
+        ]
+      },
+      "proof_decode": {
+        "median_seconds": 0.296255276,
+        "min_seconds": 0.289041947,
+        "max_seconds": 0.300148245,
+        "all_seconds": [
+          0.300148245,
+          0.296255276,
+          0.289041947
+        ]
+      },
+      "proof_canonical_roundtrip": {
+        "median_seconds": 0.283996463,
+        "min_seconds": 0.281577452,
+        "max_seconds": 0.342771166,
+        "all_seconds": [
+          0.342771166,
+          0.283996463,
+          0.281577452
+        ]
+      },
+      "single_valid_verify_api": {
+        "median_seconds": 60.735599724,
+        "min_seconds": 59.417594346,
+        "max_seconds": 62.117788613,
+        "all_seconds": [
+          62.117788613,
+          59.417594346,
+          60.735599724
+        ]
+      },
+      "valid_verify_auth": {
+        "median_seconds": 55.566462779,
+        "min_seconds": 54.40739029,
+        "max_seconds": 56.728447013,
+        "all_seconds": [
+          56.728447013,
+          54.40739029,
+          55.566462779
+        ]
+      },
+      "valid_verify_link": {
+        "median_seconds": 0.375874083,
+        "min_seconds": 0.34323909,
+        "max_seconds": 0.386675165,
+        "all_seconds": [
+          0.375874083,
+          0.34323909,
+          0.386675165
+        ]
+      },
+      "valid_verify_piop": {
+        "median_seconds": 4.766399545,
+        "min_seconds": 4.652370247,
+        "max_seconds": 4.988159156,
+        "all_seconds": [
+          4.988159156,
+          4.652370247,
+          4.766399545
+        ]
+      },
+      "all_proof_negative_controls": {
+        "median_seconds": 48.016018392,
+        "min_seconds": 47.66330944,
+        "max_seconds": 51.472783409,
+        "all_seconds": [
+          51.472783409,
+          48.016018392,
+          47.66330944
+        ]
+      }
+    }
+  },
+  "wire_breakdowns": [
+    {
+      "bytes": 130885407,
+      "semantic_magic": "MRPHSv4\u0000",
+      "profile": "morpheus-ternary-shake256-v2",
+      "piop_messages": 300,
+      "sources": 3,
+      "link_rounds": 28,
+      "attempt": 1,
+      "tau": 2,
+      "parts_bytes": {
+        "transport_header_profile_salt": 112,
+        "piop_messages": 19204,
+        "source_commitments": 1573072,
+        "link_round_messages": 9204,
+        "link_commitments_endpoints": 2113832,
+        "auth_presence_attempt_first_messages": 3162547,
+        "response_W_with_length": 38835204,
+        "response_L_with_length": 25460740,
+        "response_O_with_length": 59711492
+      },
+      "response_payload_bytes": {
+        "W": 38835200,
+        "L": 25460736,
+        "O": 59711488
+      },
+      "response_payload_total": 124007424,
+      "parts_sum": 130885407
+    },
+    {
+      "bytes": 130885407,
+      "semantic_magic": "MRPHSv4\u0000",
+      "profile": "morpheus-ternary-shake256-v2",
+      "piop_messages": 300,
+      "sources": 3,
+      "link_rounds": 28,
+      "attempt": 2,
+      "tau": 2,
+      "parts_bytes": {
+        "transport_header_profile_salt": 112,
+        "piop_messages": 19204,
+        "source_commitments": 1573072,
+        "link_round_messages": 9204,
+        "link_commitments_endpoints": 2113832,
+        "auth_presence_attempt_first_messages": 3162547,
+        "response_W_with_length": 38835204,
+        "response_L_with_length": 25460740,
+        "response_O_with_length": 59711492
+      },
+      "response_payload_bytes": {
+        "W": 38835200,
+        "L": 25460736,
+        "O": 59711488
+      },
+      "response_payload_total": 124007424,
+      "parts_sum": 130885407
+    },
+    {
+      "bytes": 130885407,
+      "semantic_magic": "MRPHSv4\u0000",
+      "profile": "morpheus-ternary-shake256-v2",
+      "piop_messages": 300,
+      "sources": 3,
+      "link_rounds": 28,
+      "attempt": 0,
+      "tau": 2,
+      "parts_bytes": {
+        "transport_header_profile_salt": 112,
+        "piop_messages": 19204,
+        "source_commitments": 1573072,
+        "link_round_messages": 9204,
+        "link_commitments_endpoints": 2113832,
+        "auth_presence_attempt_first_messages": 3162547,
+        "response_W_with_length": 38835204,
+        "response_L_with_length": 25460740,
+        "response_O_with_length": 59711492
+      },
+      "response_payload_bytes": {
+        "W": 38835200,
+        "L": 25460736,
+        "O": 59711488
+      },
+      "response_payload_total": 124007424,
+      "parts_sum": 130885407
+    }
+  ],
+  "notes": [
+    "All three predetermined trials retained; no replacements, timing subtraction, or fastest-trial selection. Pilot and deterministic mini validation are separate, not pooled.",
+    "Controlled four-thread processes on a shared cloud host, not dedicated cores or a verified quiescent machine. Nine logical CPUs visible.",
+    "Known paper build/check overlap during run-1 verification; paper compile/render overlap during run-2 proving. Other reported paper builds fell between these processes. Exact filesystem metadata windows are in BACKGROUND_OVERLAP.json, not CPU-time measurements. Run-3 has no known coordinated project overlap, but systemwide quiescence was not verified.",
+    "Selected-row forward is on an already constructed DAG after all 450 validation cases (warm code/data), not complete importer/witness construction.",
+    "Prove API includes source packing, commitments, PIOP/link/auth and embedded link selfcheck; excludes registration, forward witness, serialization and writes.",
+    "Single valid verify API excludes registry reconstruction, proof I/O/decode/canonical roundtrip and all negative controls. Nested auth/link/PIOP measurements do not exhaust the full API.",
+    "RSS is whole-process peak, not per-stage. Writes are not fsync durability. Stage sums omit small setup/logging residuals.",
+    "Fresh OS coins per selected trial, original parameters and 512-attempt cap. Attempts are zero-indexed; candidate count is attempt+1.",
+    "Local execution and scoped implementation reviews do not prove hardness, entropy quality, QROM reductions, unconditional 100-bit security, or five independent whole-paper acceptances."
+  ],
+  "private_coins": {
+    "seed_bits": 512,
+    "source": "OS entropy, fresh per run",
+    "seed_exported": false,
+    "public_key_seed_bits": 256
+  },
+  "domain_correction": {
+    "relu_preconstraint_21_bit_slack_zero_product_upper_bound": 4398042316801,
+    "formula": "(2^21 - 1)^2 < q",
+    "scope": "Corrected universal preconstraint bound; old frozen certificate is not silently rewritten."
+  }
+}

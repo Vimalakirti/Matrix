@@ -1,0 +1,769 @@
+diff --git a/zk-torch-4/docs/morpheus_instance_norm_profile.md b/zk-torch-4/docs/morpheus_instance_norm_profile.md
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/docs/morpheus_instance_norm_profile.md
+@@ -0,0 +1,145 @@
++# Exact bounded InstanceNorm3D (new finite numerical program)
++
++This repairs the named `instancenorm3d` path used by 3D U-Net. It does **not**
++rename the model or certify the old helper's outputs. The old packed scale/offset
++helper had empty proof logic: proving only `y=scale*x+offset` left statistics and
++both affine parameters unrelated to the output. The new path contains no such
++helper. It emits ordinary arithmetic, canonical rescale lookups, exact constant
++divisions and the already-guarded Q0..Q20 reciprocal. Raw legacy helper nodes
++are rejected by compilation, PIOP Graph registration, and statement encoding.
++
++## Public program, epsilon and order
++
++Let Q=2^s, 0<=s<=20, K=2^28-1, and n=D*H*W in [1,2^24]. This includes SF16,
++Q20, and spatial counts for 64³, 128³ and 256³. Supporting a count algebraically
++is **not** an executed full-volume model, proof, memory or timing result.
++The graph, logical dimensions, masks, bounds, integer epsilon and operation
++order are immutable registered program data, not prover-selected constants.
++`gamma[C]` and `beta[C]` remain model parameters, with real proved consumers.
++
++`RD(a,d)=floor((a+floor(d/2))/d)` for d>=1: nearest integer, exact half ties toward
++positive infinity, also for negative a. Per logical channel:
++
++    mu = RD(sum_i x_i, n)
++    d_i = x_i-mu
++    z_i = RD(d_i*d_i, Q)
++    v = RD(sum_i z_i, n)
++    m = v+e
++    r = nearest_nonnegative_integer(sqrt(Q^3/m)), ties upward, m=0 -> r=0
++    a = RD(gamma*r, Q)
++    t = RD(a*mu, Q)
++    o = beta-t
++    y_i = RD(a*x_i, Q)+o
++
++This deliberately specifies per-element square rounding BEFORE the variance
++mean. It is not `RD(sum d_i²,nQ)`, not a real-valued floating population variance,
++and not the separately rounded centered-output program `RD(a*d_i,Q)+beta`.
++Constant channels yield exactly beta, including the e=0 branch. Nonconstant
++low-amplitude channels whose statistic rounds to zero also yield beta.
++
++The explicit API `instancenorm3d_units(...,e)` accepts integer0<=e<=K. The retained
++`instancenorm3d(...,eps:f64)` converts the exact nonnegative finite IEEE-754 value
++`eps` to `e=round_ties_up(eps*Q)` using its mantissa/exponent bits and integer
++arithmetic. No f64 multiplication, sqrt or ambient rounding mode defines the
++relation. Negative/nonfinite/out-of-domain inputs reject; positive epsilon
++may round to zero, **without** being silently replaced by one. For binary f64
++`1e-5`, e is0 atSF10,1 atSF16 and10 atSF20. The registered semantic epsilon is
++exactly e/Q. Distinct f64 arguments that quantize to the same e intentionally
++select the same program. This is not a claim to preserve exact real epsilon.
++
++## Domain and no-wrap argument
++
++Use public G=2^24-1 and
++
++    X = floor(sqrt((K-e)*Q))/2, rounded down again to an integer
++    R = the independent global reciprocal bound from rms_bounds(s)
++    A = ceil(G*R/Q)
++    T = ceil(A*X/Q).
++
++Logical inputs satisfy |x|<=X; logical gamma and beta satisfy |parameter|<=G.
++The graph proves |mu|<=X, |d|<=2X, 0<=z,v<=K-e, 0<=m<=K, |a|<=A, |t|<=T,
++|o|<=G+T, |RD(a*x,Q)|<=T and |y|<=G+2T. These are actual two-sided lookup
++roots, not observed-witness maxima or clipping instructions. Out-of-domain
++values reject. Full-domain input magnitude reaches just under8 real units at
++Q20 and32 atSF16 for small e; the fixed G permits gain/bias just under16 real
++units atQ20 and256 atSF16. These are finite profile restrictions, not a claim
++that every trained checkpoint or activation satisfies them.
++
++The field modulus is p=18446744069414584289. A two-sided interval[l,h] has
++h-l<2^62; the two range representatives have total<2^63<p, uniquely lifting
++the field value. Independently proved input bounds give |sum x|<2^47,
++d²<=4X²<2^48, and sum z<2^52 for n<=2^24. Each is below p/2 and the division
++input bound B=2^54-1. The integer reciprocal is the existing private32-bucket
++construction, with no circular inference from its desired final bracket;
++see `morpheus_mean_rms_profile.md` for its exact strict midpoint/zero rules.
++
++For every rescale, raw product P and quotient bound Y are independent. Its
++selector satisfies rho in[0,Q-1] and the field equation
++
++    raw-Q*quotient+floor(Q/2)-rho = 0.
++
++The WHOLE integer residual has magnitude at most P+QY+2Q. Code checks this
++for squares, gamma*r, a*mu and a*x; the largest affine raw-product bound is
++144115162440270832<2^57, with full residual<2^59<p. The independent maximum
++T over s0..20 is274844336130<2^38. Offset/output sums and their interval widths
++also remain far below p. Thus modular aliases cannot masquerade as rounded
++integer products. Honest rounding always lies within these bounds, including
++signed half ties. The final interval does not serve as a circular product bound.
++
++### Shared constant-divisor extension
++
++Only the generic DivConst divisor cap changes from2^20 to2^24; transformer
++mean/RMS row caps and their local-output lemma remain unchanged. DivConst still
++proves |a|<=B, |y|<=floor(B/c)+1 and rho=a-c*y+floor(c/2) in[0,c-1]. For all
++1<=c<=2^24, c*|y|<=B+c and the full residual envelope
++B+c*(floor(B/c)+1)+floor(c/2)+(c-1)<2^56<p. All new spatial means therefore
++reuse a genuinely exact single division; they are not approximated by a
++sequence of smaller means. Scalar high-divisor tests do not allocate volumes.
++
++## Storage, parameters, source completeness and roots
++
++CNNs store `[C,D,H,W]` row-major, while Einsum/Add/mask use column-major axes.
++The builder reinterprets metadata as `[W,H,D,C]` without moving buffer elements,
++then restores `[C,D,H,W]` at output. Logical spatial AND channel padding is
++masked before summation, after centering, and at final output. Gamma/beta and
++the reciprocal statistic have their own logical channel masks. Poisoned pads
++cannot affect statistics; output padding is exactly zero. This also avoids the
++old affine operation's disagreement with CNN channel layout.
++
++Gamma/beta now flow through ordinary multiplications/subtractions and range
++roots, so `prune_unclaimed` cannot discard them as advice-only sources. Parameter
++identity is still authenticated by the existing model commitment/registered
++statement machinery; a different parameter is a different model, not a permitted
++prover choice inside a fixed model proof. Epsilon/masks/bounds are `program_literals`,
++not mutable model weights. The graph is independently pinned as the intended
++program, as elsewhere; this does not identify arbitrary arithmetic DAGs as U-Net.
++
++No new dense advice primitive is introduced. Existing committed sources include
++request x, mean/variance DivConst outputs, reciprocal and its quarter-division/
++zero-flag/private-bucket advice. The affine ScaleDown quotients are derived
++(not newly committed dense advice). Public `req_planes_log=5` (32 signed ternary
++planes) suffices for the full declared logical numerical domain. Raw input
++padding, although semantically ignored, must still fit its declared source
++encoding. Model/public source widths follow the existing registration rules.
++Default16 planes supports only the corresponding smaller source intersection;
++no width is inferred from secret values or silently enlarged. Wide range roots
++use existing partial-width sparse chunks; no dense enormous lookup is allocated.
++
++## Evidence boundary and changed outputs
++
++CPU tests execute real Rust graph operations and directly evaluate emitted
++range/rescale predicates. They cover row-major non-square/non-power-of-two
++shapes, poisoned padding, constant/zero channels, extremal domains, signed ties,
++parameter dependence, invalid-domain rejection, and changed mean/variance/
++reciprocal/affine quotients. PIOP replay tests with legal malicious selectors
++are separately authored and typechecked; without real native linkage they are
++**not executed cryptographic verifier receipts**. No CUDA/GPU success is stubbed.
++
++This finite program changes real arithmetic and, for some layouts, previously
++incorrect channel application. Example atSF10, e0, channel x=[0,1], gamma=Q,
++beta0: mu1, each centered square rounds0, so m0 and the new output is[0,0];
++this is not the old f64 normalizer. Same-checkpoint/input corpus comparisons,
++per-node errors, logits/argmax/task accuracy, whole-model source/range/mask census,
++full authenticated proofs, GPU/runtime/memory and historical benchmark transfer
++remain unestablished. No accuracy or old-performance claim follows from these
++local tests or the exact finite arithmetic proof.
+diff --git a/zk-torch-4/docs/morpheus_mean_rms_profile.md b/zk-torch-4/docs/morpheus_mean_rms_profile.md
+--- a/zk-torch-4/docs/morpheus_mean_rms_profile.md
++++ b/zk-torch-4/docs/morpheus_mean_rms_profile.md
+@@ -62,7 +62,7 @@
+ 2(2^k-1)<2^63<p, hence equals h-l, proving the interval non-circularly.
+ All constants use `program_literals`, not mutable `Role::Constant` weights.
+ 
+-Division: 1<=c<=2^20, |a|<=B=2^54-1, |y|<=floor(B/c)+1.
++Division: 1<=c<=2^24 (extended by the InstanceNorm increment), |a|<=B=2^54-1, |y|<=floor(B/c)+1.
+ Mean inputs: |x|<=2^30-1 and reduction count<=2^20; padded coordinates are
+ masked before summation. Hence every sum has magnitude<2^50<p/2. Checked
+ axis-count multiplication rejects overflow and duplicate ReduceMean axes.
+diff --git a/zk-torch-4/src/basicblock/instancenorm.rs b/zk-torch-4/src/basicblock/instancenorm.rs
+--- a/zk-torch-4/src/basicblock/instancenorm.rs
++++ b/zk-torch-4/src/basicblock/instancenorm.rs
+@@ -2,8 +2,10 @@
+ //! instance normalization.
+ //!
+ //! Output is a packed `[2, C]` witness: row 0 = scale, row 1 = offset.
+-//! Soundness comes from the downstream `Y = scale · X + offset` decomposition
+-//! the DAG builder wires (Einsum + Add, both fully proven).
++//! This legacy helper does NOT prove its statistics or affine parameters.
++//! Raw nodes are rejected by `DagBuilder::compile`. The supported named
++//! InstanceNorm3D builder now emits the exact finite arithmetic graph in
++//! `dag::instancenorm`; no model path relies on this unchecked legacy advice.
+ 
+ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+ 
+diff --git a/zk-torch-4/src/dag/builder.rs b/zk-torch-4/src/dag/builder.rs
+--- a/zk-torch-4/src/dag/builder.rs
++++ b/zk-torch-4/src/dag/builder.rs
+@@ -158,7 +158,7 @@
+         let sf=self.init_values[a].as_ref().unwrap().sf;
+         // Exact integer division on a public bounded domain. The registered
+         // DAG includes these roots; advice alone is never the specification.
+-        assert!((1..=(1 << 20)).contains(&c), "unsupported divisor");
++        assert!((1..=(1 << 24)).contains(&c), "unsupported divisor");
+         const B: i128 = (1i128 << 54) - 1;
+         self.integer_interval(a, -B, B);
+         self.integer_interval(y, -((B / c as i128) + 1), (B / c as i128) + 1);
+@@ -1810,53 +1810,6 @@
+             DataType::Uint, 0, Role::Output,
+         )));
+         outs[0]
+-    }
+-
+-    /// InstanceNorm3D: X[C,D,H,W], gamma[C], beta[C] → Y[C,D,H,W].
+-    /// Decomposed: InstanceNormHelper (advice) → packed[2,C] (scale+offset),
+-    /// then Y = Einsum("c,cdhw->cdhw", scale, X) + offset (proven).
+-    pub fn instancenorm3d(&mut self, x: EdgeId, gamma: EdgeId, beta: EdgeId, eps: f64) -> EdgeId {
+-        let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+-        let channels = x_shape[0];
+-        let depth = x_shape[1];
+-        let height = x_shape[2];
+-        let width = x_shape[3];
+-        let sf = self.init_values[x].as_ref().unwrap().sf;
+-        let data_type = self.init_values[x].as_ref().unwrap().data_type;
+-
+-        // 1. InstanceNormHelper(X, gamma, beta) → packed[2, C] (advice, single output)
+-        //    Group 0 = scale, Group 1 = offset
+-        let norm = BasicBlockType::InstanceNorm3D(InstanceNormHelper {
+-            channels, depth, height, width, eps,
+-        });
+-        let helper_outs = self.add_gkr_node(vec![x, gamma, beta], norm);
+-        let packed = helper_outs[0];
+-        self.init_values.push(Some(Witness::new_wo_data(
+-            vec![2, channels], data_type, sf, Role::Output,
+-        )));
+-
+-        // 2. Unpack via ChannelSlice: packed[2, C] → scale_1c[1, C] → scale[C]
+-        let scale_1c = self.channel_slice(packed, 0, 1);
+-        let scale = self.change_shape(scale_1c, vec![channels]);
+-
+-        // 3. Unpack via ChannelSlice: packed[2, C] → offset_1c[1, C] → offset[C]
+-        let offset_1c = self.channel_slice(packed, 1, 1);
+-        let offset = self.change_shape(offset_1c, vec![channels]);
+-
+-        // 4. z = Einsum("a,abcd->abcd", scale, X) — proven multiply
+-        let z = self.einsum("a,abcd->abcd".to_string(), vec![scale, x], true)[0];
+-
+-        // 5. Y = Add(z, offset_4d) — proven broadcast add
+-        //    offset has shape [C], but broadcast_shape right-aligns to [1,1,1,C].
+-        //    We need left-alignment [C,1,1,1] so channel dim broadcasts correctly.
+-        let offset_4d = self.change_shape(offset, vec![channels, 1, 1, 1]);
+-        let y = self.add(z, offset_4d)[0];
+-
+-        // 6. Mask padding channels if non-power-of-2 channel count.
+-        //    Add broadcasting may introduce non-zero values in padding region.
+-        let y = self.mask_channels(y, 4);
+-
+-        y
+     }
+ 
+     /// Mask non-power-of-2 channel dimensions by multiplying with a binary mask.
+@@ -1997,6 +1950,7 @@
+         while cursor<self.nodes.len() {
+             let node=self.nodes[cursor].clone();cursor+=1;
+             match node.kind {
++                BasicBlockType::InstanceNorm3D(_)=>panic!("unconstrained legacy InstanceNorm advice is unsupported; use instancenorm3d"),
+                 BasicBlockType::DivConst(b)=>self.division_guards(node.inputs[0],node.outputs[0],usize::try_from(b.divisor).expect("divisor too large")),
+                 BasicBlockType::RMSReciprocal(b)=>{
+                     assert_eq!(b.dim,0,"legacy unconstrained RMS advice is unsupported; use the exact mean gate");
+diff --git a/zk-torch-4/src/dag/instancenorm.rs b/zk-torch-4/src/dag/instancenorm.rs
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/src/dag/instancenorm.rs
+@@ -0,0 +1,131 @@
++//! Exact bounded InstanceNorm3D, preserving the quantized affine layout.
++//! See docs/morpheus_instance_norm_profile.md for domains, lifting, and the
++//! deliberate difference from the old unchecked floating statistics helper.
++use super::{DagBuilder, EdgeId};
++use crate::basicblock::llama::{floor_sqrt, rms_bounds, RMS_MEAN_MAX};
++
++/// Exactly round the nonnegative IEEE-754 input times 2^sf, ties upward.
++/// No floating multiplication, ambient rounding mode, or minimum-one epsilon.
++/// A positive epsilon may quantize to zero; that selects the documented zero
++/// statistic extension rather than silently changing the requested epsilon.
++pub fn epsilon_units(eps: f64, sf: usize) -> i128 {
++    assert!(sf <= 20, "InstanceNorm supports activation scales 0..20");
++    assert!(eps.is_finite() && eps >= 0.0, "InstanceNorm epsilon must be finite and nonnegative");
++    let bits = eps.to_bits();
++    let exponent = ((bits >> 52) & 2047) as i32;
++    let fraction = bits & ((1u64 << 52) - 1);
++    let mantissa = if exponent == 0 { fraction } else { fraction | (1u64 << 52) } as i128;
++    let power = if exponent == 0 { -1074 } else { exponent - 1023 - 52 } + sf as i32;
++    let units = if mantissa == 0 { 0 } else if power >= 0 {
++        // Reject before shifting: checked_shl only checks shift width, not
++        // significant bits lost off the top of a signed machine integer.
++        assert!(power <= 27 && mantissa <= (RMS_MEAN_MAX >> power), "epsilon outside public statistic domain");
++        mantissa << power
++    } else {
++        let shift = (-power) as usize;
++        if shift >= 55 { 0 } else { (mantissa + (1i128 << (shift - 1))) >> shift }
++    };
++    assert!((0..=RMS_MEAN_MAX).contains(&units), "epsilon outside public statistic domain");
++    units
++}
++
++/// Public bounds; none is inferred from observed witness values.
++#[derive(Clone, Copy, Debug)]
++pub struct InstanceNormBounds {
++    pub input: i128,
++    pub parameter: i128,
++    pub scale: i128,
++    pub scaled_input: i128,
++}
++
++pub fn instance_norm_bounds(sf: usize, epsilon: i128) -> InstanceNormBounds {
++    let (rmax, _, _) = rms_bounds(sf);
++    assert!((0..=RMS_MEAN_MAX).contains(&epsilon), "epsilon outside public statistic domain");
++    let q = 1i128 << sf;
++    let input = floor_sqrt((RMS_MEAN_MAX - epsilon) * q) / 2;
++    let parameter = (1i128 << 24) - 1;
++    let scale = (parameter * rmax + q - 1) / q;
++    let scaled_input = (scale * input + q - 1) / q;
++    // Each ScaleDown identity has independent bounds on the raw product,
++    // quotient, and selector. The entire integer residual is < p, not only
++    // the honest product. These conservative limits cover every s in 0..20.
++    assert!(4*input*input + q*(RMS_MEAN_MAX-epsilon) + 2*q < (1i128 << 50));
++    assert!(parameter * rmax + q * scale + 2*q < (1i128 << 57));
++    assert!(scale * input + q * scaled_input + 2*q < (1i128 << 59));
++    assert!(2 * (parameter + 2 * scaled_input) < (1i128 << 62));
++    InstanceNormBounds { input, parameter, scale, scaled_input }
++}
++
++impl DagBuilder {
++    /// X[C,D,H,W], gamma[C], beta[C] -> Y[C,D,H,W], CNN row-major.
++    /// eps is rounded EXACTLY from its binary f64 value into activation units.
++    /// For explicit integer epsilon selection use `instancenorm3d_units`.
++    pub fn instancenorm3d(&mut self, x: EdgeId, gamma: EdgeId, beta: EdgeId, eps: f64) -> EdgeId {
++        let sf = self.init_values[x].as_ref().unwrap().sf;
++        self.instancenorm3d_units(x, gamma, beta, epsilon_units(eps, sf))
++    }
++
++    /// Exact affine profile: mu=RD(sum x,n), z_i=RD((x_i-mu)^2,Q),
++    /// v=RD(sum z,n), r=RN(sqrt(Q^3/(v+epsilon))) (zero ->0),
++    /// a=RD(gamma*r,Q), o=beta-RD(a*mu,Q), y=RD(a*x,Q)+o.
++    /// All arithmetic uses logical coordinates; output padding is zero.
++    pub fn instancenorm3d_units(&mut self, x: EdgeId, gamma: EdgeId, beta: EdgeId, epsilon: i128) -> EdgeId {
++        let shape = self.init_values[x].as_ref().unwrap().shape.clone();
++        assert_eq!(shape.len(), 4, "InstanceNorm requires [C,D,H,W]");
++        assert!(shape.iter().all(|&d| d > 0), "InstanceNorm dimensions must be positive");
++        let sf = self.init_values[x].as_ref().unwrap().sf;
++        let channels = shape[0];
++        let count = shape[1..].iter().try_fold(1usize, |n, &d| n.checked_mul(d)).expect("InstanceNorm spatial size overflow");
++        assert!((1..=(1 << 24)).contains(&count), "InstanceNorm spatial count outside 1..2^24");
++        for e in [gamma, beta] {
++            let w = self.init_values[e].as_ref().unwrap();
++            assert_eq!(w.shape, vec![channels], "InstanceNorm affine parameter shape mismatch");
++            assert_eq!(w.sf, sf, "InstanceNorm affine parameter scale mismatch");
++        }
++        let b = instance_norm_bounds(sf, epsilon);
++        // Einsum/Add/mask use column-major dimensions. Reverse only the shape
++        // metadata so their indexing agrees with CNN row-major storage; this
++        // is NOT a transpose. C remains the slowest-varying dimension.
++        let view = vec![shape[3], shape[2], shape[1], channels];
++        let xv = self.change_shape(x, view.clone());
++        let xv = self.mask(xv, view.clone());
++        self.integer_interval(xv, -b.input, b.input);
++        let gamma = self.mask(gamma, vec![channels]);
++        let beta = self.mask(beta, vec![channels]);
++        self.integer_interval(gamma, -b.parameter, b.parameter);
++        self.integer_interval(beta, -b.parameter, b.parameter);
++
++        let sum = self.einsum("whdc->c".into(), vec![xv], false)[0];
++        let mean = self.div_const(sum, count)[0];
++        self.integer_interval(mean, -b.input, b.input);
++        let mean4 = self.change_shape(mean, vec![1, 1, 1, channels]);
++        let centered = self.sub(xv, mean4)[0];
++        let centered = self.mask(centered, view.clone());
++        self.integer_interval(centered, -2 * b.input, 2 * b.input);
++        let sq = self.einsum("whdc,whdc->whdc".into(), vec![centered, centered], true)[0];
++        self.integer_interval(sq, 0, RMS_MEAN_MAX - epsilon);
++        let square_sum = self.einsum("whdc->c".into(), vec![sq], false)[0];
++        let variance = self.div_const(square_sum, count)[0];
++        self.integer_interval(variance, 0, RMS_MEAN_MAX - epsilon);
++        let eps = self.integer_literal(vec![channels], epsilon, sf);
++        let statistic = self.add(variance, eps)[0];
++        let statistic = self.mask(statistic, vec![channels]);
++        let reciprocal = self.rms_reciprocal_from_mean(statistic);
++
++        // These consumers bind gamma/beta to the actual proved affine map;
++        // neither is pruned as an advice-only input or detached model weight.
++        let scale = self.einsum("c,c->c".into(), vec![gamma, reciprocal], true)[0];
++        self.integer_interval(scale, -b.scale, b.scale);
++        let scaled_mean = self.einsum("c,c->c".into(), vec![scale, mean], true)[0];
++        self.integer_interval(scaled_mean, -b.scaled_input, b.scaled_input);
++        let offset = self.sub(beta, scaled_mean)[0];
++        self.integer_interval(offset, -b.parameter - b.scaled_input, b.parameter + b.scaled_input);
++        let scaled = self.einsum("whdc,c->whdc".into(), vec![xv, scale], true)[0];
++        self.integer_interval(scaled, -b.scaled_input, b.scaled_input);
++        let offset4 = self.change_shape(offset, vec![1, 1, 1, channels]);
++        let y = self.add(scaled, offset4)[0];
++        self.integer_interval(y, -b.parameter - 2*b.scaled_input, b.parameter + 2*b.scaled_input);
++        let y = self.mask(y, view);
++        self.change_shape(y, shape)
++    }
++}
+diff --git a/zk-torch-4/src/dag/instancenorm_tests.rs b/zk-torch-4/src/dag/instancenorm_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/src/dag/instancenorm_tests.rs
+@@ -0,0 +1,226 @@
++//! CPU graph/range-predicate tests, NOT cryptographic verification receipts.
++use super::*;
++use crate::basicblock::{BasicBlock, BasicBlockType, InstanceNormHelper};
++use crate::basicblock::llama::{floor_sqrt, RMS_MEAN_MAX};
++use crate::util::arith::{f_to_int, int_to_f};
++use super::instancenorm::{epsilon_units, instance_norm_bounds};
++
++fn source(b: &mut DagBuilder, shape: Vec<usize>, vals: Vec<i128>, sf: usize, role: Role) -> EdgeId {
++    let w = Witness::new(shape, vals.into_iter().map(int_to_f).collect(), DataType::Float, sf, role);
++    if role == Role::Constant { b.param(w) } else { b.committed_input(w) }
++}
++fn forward(d: &Dag, w: &mut [Vec<Witness>], mutation: Option<(EdgeId,i128)>) -> bool {
++    let mut valid = true;
++    for &n in &d.topo {
++        let nd = &d.nodes[n];
++        if let BasicBlockType::NonNegative(b) = &nd.kind {
++            for v in w[nd.inputs[0]][0].data.as_ref().unwrap().evaluations_ref() {
++                let x = f_to_int(*v); valid &= x >= 0 && x < (1i128 << b.table_size_log);
++            }
++        }
++        let ins = nd.inputs.iter().map(|&e| &w[e][0]).collect::<Vec<_>>();
++        let outs = nd.kind.run(&ins);
++        for (&e, mut v) in nd.outputs.iter().zip(outs) {
++            if let Some((target,delta)) = mutation { if target == e {
++                let values = v.data.as_ref().unwrap().evaluations_ref().iter().map(|x| int_to_f(f_to_int(*x)+delta)).collect();
++                v = Witness::new(v.shape, values, v.data_type, v.sf, v.role);
++            }}
++            w[e] = vec![v];
++        }
++        // Check the actual local rounded-rescale relation too, rather than
++        // mistaking successful witness generation for constraint satisfaction.
++        if let BasicBlockType::ScaleDown(b) = &nd.kind {
++            let a = &w[nd.inputs[0]][0]; let y = &w[nd.outputs[0]][0];
++            let q = 1i128 << (a.sf-b.output_sf);
++            for (x,y) in a.data.as_ref().unwrap().evaluations_ref().iter().zip(y.data.as_ref().unwrap().evaluations_ref()) {
++                let rho = f_to_int(*x)-q*f_to_int(*y)+q/2;
++                valid &= 0 <= rho && rho < q;
++            }
++        }
++    }
++    valid
++}
++fn rd(a: i128, d: i128) -> i128 { (a+d/2).div_euclid(d) }
++fn reciprocal(m: i128, sf: usize) -> i128 {
++    if m == 0 { return 0; }
++    let c = 1i128 << (3*sf); let r = floor_sqrt(c/m);
++    if 4*c >= m*(2*r+1)*(2*r+1) {r+1} else {r}
++}
++fn reference(x: &[i128], gamma: i128, beta: i128, sf: usize, e: i128) -> Vec<i128> {
++    let q = 1i128 << sf; let n = x.len() as i128;
++    let mean = rd(x.iter().sum(),n);
++    let variance = rd(x.iter().map(|x| rd((x-mean)*(x-mean),q)).sum(),n);
++    let a = rd(gamma*reciprocal(variance+e,sf),q);
++    let offset = beta-rd(a*mean,q);
++    x.iter().map(|x| rd(a*x,q)+offset).collect()
++}
++
++#[test]
++fn instance_norm_exact_epsilon_conversion_and_public_bounds() {
++    for sf in 0..=20 {
++        let half = 0.5f64/(1u64 << sf) as f64;
++        assert_eq!(epsilon_units(half,sf),1);
++        assert_eq!(epsilon_units(f64::from_bits(half.to_bits()-1),sf),0);
++        assert_eq!(epsilon_units(f64::from_bits(half.to_bits()+1),sf),1);
++        assert_eq!(epsilon_units(0.0,sf),0);
++        assert_eq!(epsilon_units(-0.0,sf),0);
++        assert_eq!(epsilon_units(f64::from_bits(1),sf),0);
++        assert_eq!(epsilon_units((RMS_MEAN_MAX as f64)/(1u64 << sf) as f64,sf),RMS_MEAN_MAX);
++        for e in [0,1,RMS_MEAN_MAX] { let _ = instance_norm_bounds(sf,e); }
++    }
++    assert_eq!(epsilon_units(1e-5,10),0);
++    assert_eq!(epsilon_units(1e-5,16),1);
++    assert_eq!(epsilon_units(1e-5,20),10);
++    for e in [-1.0, f64::NAN, f64::INFINITY, f64::MAX] {
++        assert!(std::panic::catch_unwind(||epsilon_units(e,20)).is_err());
++    }
++}
++
++#[test]
++fn instance_norm_row_major_layout_padding_and_parameter_dependencies() {
++    let sf = *crate::SF_LOG; if sf>20 {return;}
++    let q = 1i128 << sf;
++    for epsilon in [0,1,epsilon_units(1e-5,sf)] {
++        let shape=vec![3usize,3,2,5];let cp=4;let dp=4;let hp=2;let wp=8;
++        let mut values=vec![777777;cp*dp*hp*wp];let mut rows=vec![Vec::new();3];
++        for c in 0..3 {for d in 0..3 {for h in 0..2 {for x in 0..5 {
++            let v=if c==0 {q} else if c==1 {(x as i128-2)*q} else {((d+h+x)%3) as i128-q/2};
++            values[x+wp*(h+hp*(d+dp*c))]=v;rows[c].push(v);
++        }}}}
++        let mut b=DagBuilder::new();let x=source(&mut b,shape.clone(),values,sf,Role::Input);
++        let gain=source(&mut b,vec![3],vec![q,2*q,-q,999999],sf,Role::Constant);
++        let bias=source(&mut b,vec![3],vec![1,-2,3,888888],sf,Role::Constant);
++        let y=b.instancenorm3d_units(x,gain,bias,epsilon);
++        let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++        assert!(!d.nodes.iter().any(|n|matches!(n.kind,BasicBlockType::InstanceNorm3D(_))));
++        let expected:Vec<_>=(0..3).map(|c|reference(&rows[c],[q,2*q,-q][c],[1,-2,3][c],sf,epsilon)).collect();
++        let got=w[y][0].data.as_ref().unwrap().evaluations_ref();
++        for c in 0..cp {let mut at=0;for dd in 0..dp {for h in 0..hp {for xx in 0..wp {
++            let logical=c<3&&dd<3&&h<2&&xx<5;
++            let v=if logical {let z=expected[c][at];at+=1;z}else{0};
++            assert_eq!(f_to_int(got[xx+wp*(h+hp*(dd+dp*c))]),v,"sf={sf} e={epsilon} c={c} d={dd} h={h} w={xx}");
++        }}}}
++        let mut graph=crate::morpheus::piop::Graph::new(&d,&w,crate::morpheus::piop::Config{tcl:4,slots_log:12,req_planes_log:5});
++        graph.prune_unclaimed();
++        for (e,committed) in graph.committed.iter().enumerate() {
++            if *committed && !graph.public.contains_key(&e) {
++                for v in w[e][0].data.as_ref().unwrap().evaluations_ref() {
++                    assert!(f_to_int(*v).abs() <= (1i128<<32)-1, "private source needs more than32 planes: edge={e}");
++                }
++            }
++        }
++        assert!(graph.committed[gain] && graph.committed[bias]);
++        assert!(d.consumers[gain].iter().any(|&n|matches!(d.nodes[n].kind,BasicBlockType::Einsum(_))));
++        assert!(d.consumers[bias].iter().any(|&n|matches!(d.nodes[n].kind,BasicBlockType::Einsum(_))));
++    }
++}
++
++#[test]
++fn instance_norm_domain_extremes_constant_channels_and_zero_epsilon() {
++    let sf = *crate::SF_LOG; if sf>20 {return;}
++    for epsilon in [0,1,RMS_MEAN_MAX] {
++        let bounds=instance_norm_bounds(sf,epsilon);let xbound=bounds.input;let gain=bounds.parameter;
++        for values in [vec![xbound,xbound],vec![-xbound,xbound],vec![0,0]] {
++            let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,2],values.clone(),sf,Role::Input);
++            let g=source(&mut b,vec![1],vec![gain],sf,Role::Constant);
++            let beta=source(&mut b,vec![1],vec![-gain],sf,Role::Constant);
++            let y=b.instancenorm3d_units(x,g,beta,epsilon);let (d,mut w)=b.compile();
++            assert!(forward(&d,&mut w,None),"sf={sf} e={epsilon}");
++            let got=w[y][0].data.as_ref().unwrap().evaluations_ref().iter().map(|x|f_to_int(*x)).collect::<Vec<_>>();
++            assert_eq!(got,reference(&values,gain,-gain,sf,epsilon));
++            if values[0]==values[1] {assert_eq!(got,vec![-gain,-gain]);}
++        }
++    }
++}
++
++#[test]
++fn instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints() {
++    let sf = *crate::SF_LOG; if sf>20 {return;}let q=1i128<<sf;
++    let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,2],vec![-q,q],sf,Role::Input);
++    let g=source(&mut b,vec![1],vec![q],sf,Role::Constant);let beta=source(&mut b,vec![1],vec![3],sf,Role::Constant);
++    b.instancenorm3d_units(x,g,beta,1);let (d,w)=b.compile();assert!(forward(&d,&mut w.clone(),None));
++    let means=d.nodes.iter().filter(|n|matches!(n.kind,BasicBlockType::DivConst(_))).take(2).map(|n|n.outputs[0]).collect::<Vec<_>>();
++    let r=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::RMSReciprocal(_))).unwrap().outputs[0];
++    for e in means.into_iter().chain(std::iter::once(r)) {
++        for delta in [-1,1] {assert!(!forward(&d,&mut w.clone(),Some((e,delta))),"edge={e} delta={delta}");}
++    }
++    // SF0 has no ScaleDown (unit divisor); its ScaleUp relation is exact.
++    for n in &d.nodes {if matches!(n.kind,BasicBlockType::ScaleDown(_)) {
++        for delta in [-1,1] {assert!(!forward(&d,&mut w.clone(),Some((n.outputs[0],delta))));}
++    }}
++}
++
++#[test]
++fn instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles() {
++    let rejected=std::panic::catch_unwind(|| {
++        let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,1],vec![0],10,Role::Input);
++        let g=source(&mut b,vec![1],vec![1],10,Role::Constant);let beta=source(&mut b,vec![1],vec![0],10,Role::Constant);
++        b.add_gkr_node(vec![x,g,beta],BasicBlockType::InstanceNorm3D(InstanceNormHelper{channels:1,depth:1,height:1,width:1,eps:1e-5}));
++        b.init_values.push(Some(Witness::new_wo_data(vec![2,1],DataType::Float,10,Role::Output)));b.compile();
++    });assert!(rejected.is_err());
++    for (sf,e) in [(21,0),(20,-1),(20,RMS_MEAN_MAX+1)] {
++        assert!(std::panic::catch_unwind(||instance_norm_bounds(sf,e)).is_err());
++    }
++    for bad in 0..3 {
++        assert!(std::panic::catch_unwind(|| {
++            let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,1],vec![0],10,Role::Input);
++            let gain=source(&mut b,if bad==0 {vec![2]} else {vec![1]},if bad==0 {vec![1,1]}else{vec![1]},if bad==1 {11}else{10},Role::Constant);
++            let beta=source(&mut b,vec![1],vec![0],10,Role::Constant);
++            b.instancenorm3d_units(x,gain,beta,if bad==2 {-1}else{0});
++        }).is_err());
++    }
++}
++
++#[test]
++fn instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used() {
++    let sf=*crate::SF_LOG;if sf>20 {return;}let q=1i128<<sf;
++    let bounds=instance_norm_bounds(sf,1);
++    for bad in 0..3 {
++        let mut b=DagBuilder::new();
++        let input=if bad==0 {bounds.input+1}else{q};
++        let x=source(&mut b,vec![1,1,1,2],vec![input,input],sf,Role::Input);
++        let g=source(&mut b,vec![1],vec![if bad==1 {bounds.parameter+1}else{q}],sf,Role::Constant);
++        let beta=source(&mut b,vec![1],vec![if bad==2 {bounds.parameter+1}else{0}],sf,Role::Constant);
++        b.instancenorm3d_units(x,g,beta,1);let (d,mut w)=b.compile();
++        assert!(!forward(&d,&mut w,None),"accepted out-of-domain case{bad}");
++    }
++    let mut results=Vec::new();
++    for (gain,bias) in [(q,0),(2*q,0),(q,1)] {
++        let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,2],vec![-q,q],sf,Role::Input);
++        let g=source(&mut b,vec![1],vec![gain],sf,Role::Constant);let beta=source(&mut b,vec![1],vec![bias],sf,Role::Constant);
++        let y=b.instancenorm3d_units(x,g,beta,0);let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++        results.push(w[y][0].data.as_ref().unwrap().evaluations_ref().iter().map(|x|f_to_int(*x)).collect::<Vec<_>>());
++    }
++    assert_ne!(results[0],results[1]);assert_ne!(results[0],results[2]);
++}
++
++#[test]
++fn instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards() {
++    // Boundary arithmetic only: this does NOT allocate/run128³ or256³ models.
++    let bound=(1i128<<54)-1;
++    for c in [1usize<<20,(1<<20)+1,1<<21,1<<24] {
++        for a in [-bound,-(c as i128)/2,-1,0,1,c as i128/2,bound] {
++            let mut b=DagBuilder::new();let x=source(&mut b,vec![1],vec![a],0,Role::Input);
++            let y=b.div_const(x,c)[0];let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++            assert_eq!(f_to_int(w[y][0].data.as_ref().unwrap().index(0)),rd(a,c as i128));
++            for delta in [-1,1] {assert!(!forward(&d,&mut w.clone(),Some((y,delta))));}
++            let ymax=bound/c as i128+1;
++            assert!(bound+c as i128*ymax+c as i128/2+((c-1) as i128) < (1i128<<56));
++        }
++    }
++    assert!(std::panic::catch_unwind(|| {
++        let mut b=DagBuilder::new();let x=source(&mut b,vec![1],vec![0],0,Role::Input);
++        b.div_const(x,(1<<24)+1);b.compile();
++    }).is_err());
++}
++
++#[test]
++fn instance_norm_manual_legacy_dag_is_rejected_at_registration() {
++    let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,1],vec![0],10,Role::Input);
++    let g=source(&mut b,vec![1],vec![1],10,Role::Constant);let beta=source(&mut b,vec![1],vec![0],10,Role::Constant);
++    b.instancenorm3d_units(x,g,beta,1);let (mut d,w)=b.compile();
++    d.nodes[0].kind=BasicBlockType::InstanceNorm3D(InstanceNormHelper{channels:1,depth:1,height:1,width:1,eps:1e-5});
++    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
++        crate::morpheus::piop::Graph::new(&d,&w,crate::morpheus::piop::Config::default());
++    })).is_err());
++}
+diff --git a/zk-torch-4/src/dag/mod.rs b/zk-torch-4/src/dag/mod.rs
+--- a/zk-torch-4/src/dag/mod.rs
++++ b/zk-torch-4/src/dag/mod.rs
+@@ -11,6 +11,7 @@
+ pub mod gpt2;
+ pub mod gptj;
+ pub mod lenet;
++pub mod instancenorm;
+ pub mod llama;
+ pub mod lookups;
+ pub mod nanogpt;
+@@ -1296,3 +1297,6 @@
+ 
+ #[cfg(test)]
+ mod normalization_tests;
++
++#[cfg(test)]
++mod instancenorm_tests;
+diff --git a/zk-torch-4/src/morpheus/piop/exp_tests.rs b/zk-torch-4/src/morpheus/piop/exp_tests.rs
+--- a/zk-torch-4/src/morpheus/piop/exp_tests.rs
++++ b/zk-torch-4/src/morpheus/piop/exp_tests.rs
+@@ -284,3 +284,77 @@
+         assert_eq!(max,(1u128<<bits)-1);
+     }
+ }
++
++/// Actual PIOP replay authored for InstanceNorm. Native CUDA linkage is still
++/// required by this crate; a typecheck/CPU predicate test is NOT its execution.
++#[test]
++fn instance_norm_piop_defines_statistics_affine_parameters_and_epsilon() {
++    let sf=10;let mut b=DagBuilder::new();
++    let x=b.committed_input(Witness::new(vec![1,1,1,2],vec![int_to_f(-1024),int_to_f(1024)],DataType::Float,sf,Role::Input));
++    let gamma=b.param(Witness::new(vec![1],vec![int_to_f(1024)],DataType::Float,sf,Role::Constant));
++    let beta=b.param(Witness::new(vec![1],vec![int_to_f(3)],DataType::Float,sf,Role::Constant));
++    let out=b.instancenorm3d_units(x,gamma,beta,1);let (d,mut w)=b.compile();
++    let run=|w:&mut Vec<Vec<Witness>>,mutation:Option<usize>| {
++        for &n in &d.topo {
++            let nd=&d.nodes[n];let ins=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();
++            let outs=nd.kind.run(&ins);
++            for (&e,mut v) in nd.outputs.iter().zip(outs) {
++                if mutation==Some(e) {
++                    let values=v.data.as_ref().unwrap().evaluations_ref().iter().map(|x|int_to_f(crate::util::arith::f_to_int(*x)+1)).collect();
++                    v=Witness::new(v.shape,values,v.data_type,v.sf,v.role);
++                }
++                w[e]=vec![v];
++            }
++        }
++    };
++    run(&mut w,None);
++    let mut g=Graph::new(&d,&w,Config{tcl:4,slots_log:12,req_planes_log:5});
++    g.prune_unclaimed();assert!(g.committed[gamma]&&g.committed[beta]);
++    let honest=||ProverData::new(&g,&w,vec![K8::ZERO;1<<12]);
++    assert!(replay(&g,&honest()));
++    for edge in [gamma,beta] {
++        let mut pd=honest();let old=pd.vals[edge].as_ref().unwrap()[0];
++        pd.vals[edge]=Some(Arc::new(vec![old-1]));
++        assert!(!replay(&g,&pd),"detached affine parameter edge={edge}");
++    }
++    let mutations=d.nodes.iter().filter(|n|matches!(n.kind,BasicBlockType::DivConst(_) | BasicBlockType::RMSReciprocal(_) | BasicBlockType::ScaleDown(_)))
++        .map(|n|n.outputs[0]).collect::<Vec<_>>();
++    for target in mutations {
++        let mut changed=w.clone();run(&mut changed,Some(target));
++        let mut pd=honest();
++        for e in 0..d.num_edges() {if changed[e][0].poly_type==PolyType::Dense && changed[e][0].data.is_some() {
++            pd.vals[e]=Some(witness_vals(&changed[e][0]));
++        }}
++        let iv=|e:usize,i:usize| {let x=pd.vals[e].as_ref().unwrap()[i];if x>Q/2 {x as i128-Q as i128}else{x as i128}};
++        let mut selectors=HashMap::new();
++        for (&node,&bits) in &g.lookups {
++            let nd=&d.nodes[node];let size=1usize<<g.nvars[nd.inputs[0]];let q=1i128<<bits;
++            let values=(0..size).map(|i| {
++                let v=match &nd.kind {
++                    BasicBlockType::NonNegative(_)=>iv(nd.inputs[0],i),
++                    BasicBlockType::ScaleDown(_)=>iv(nd.inputs[0],i)-q*iv(nd.outputs[0],i)+q/2,
++                    BasicBlockType::ScaleUp(_)=>q*iv(nd.inputs[0],i)-iv(nd.outputs[0],i)+q/2,
++                    _=>panic!("unexpected InstanceNorm lookup"),
++                };
++                // Legal selectors supplied even when the defining root is
++                // false; rejection must occur in verifier equations, not in
++                // the honest ProverData constructor's range assertion.
++                if 0<=v&&v<q {v as u64}else{0}
++            }).collect();selectors.insert(node,values);
++        }
++        pd.sel=selectors;
++        let mut attack_graph=Graph::new(&d,&w,Config{tcl:4,slots_log:12,req_planes_log:5});
++        attack_graph.prune_unclaimed();
++        attack_graph.outputs=vec![(out,pd.vals[out].as_ref().unwrap().clone())];
++        assert!(!replay(&attack_graph,&pd),"mutated normalization source edge={target}");
++    }
++    let mut pd=honest();
++    // Locate the actual epsilon literal, not an unrelated unit/range bound.
++    let recip=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::RMSReciprocal(_))).unwrap();
++    let mask=&d.nodes[d.producers[recip.inputs[0]].unwrap()];
++    let add=&d.nodes[d.producers[mask.inputs[0]].unwrap()];
++    assert!(matches!(add.kind,BasicBlockType::Add(_)));
++    let e=add.inputs[1];let values=&d.program_literals[&e];assert_eq!(values[0],1);
++    pd.vals[e]=Some(Arc::new(vec![values[0]+1]));
++    assert!(!replay(&g,&pd));
++}
+diff --git a/zk-torch-4/src/morpheus/piop/mod.rs b/zk-torch-4/src/morpheus/piop/mod.rs
+--- a/zk-torch-4/src/morpheus/piop/mod.rs
++++ b/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -137,6 +137,8 @@
+ 
+ impl<'a> Graph<'a> {
+     pub fn new(dag: &'a Dag, wit: &[Vec<Witness>], cfg: Config) -> Self {
++        assert!(!dag.nodes.iter().any(|n| matches!(n.kind,BasicBlockType::InstanceNorm3D(_))),
++            "unconstrained legacy InstanceNorm advice cannot be registered");
+         let protocol_conv_pp = cv::conv_pp();
+         let ne = dag.num_edges();
+         let shapes: Vec<Vec<usize>> = (0..ne).map(|e| wit[e][0].shape.clone()).collect();
+@@ -248,8 +250,9 @@
+     }
+ 
+     /// Stop committing tensors the PIOP never claims: non-public edges whose
+-    /// every consumer is an advice node (e.g. InstanceNorm γ/β feeding only
+-    /// the statistics advice). Call after `public` is set.
++    /// every consumer is an advice node. The supported InstanceNorm builder
++    /// binds γ/β through arithmetic consumers, so they are not pruned.
++    /// Call after `public` is set.
+     pub fn prune_unclaimed(&mut self) {
+         for e in 0..self.dag.num_edges() {
+             if !self.committed[e] || self.public.contains_key(&e) { continue; }
+diff --git a/zk-torch-4/src/morpheus/statement.rs b/zk-torch-4/src/morpheus/statement.rs
+--- a/zk-torch-4/src/morpheus/statement.rs
++++ b/zk-torch-4/src/morpheus/statement.rs
+@@ -62,7 +62,7 @@
+         },
+         GatherFromGrid(b) => { w.u(18); w.us(b.n_points)?; w.us(b.channels)?; w.us(b.grid_h)?; w.us(b.grid_w)?; },
+         GeneralMaxPoolHelper(b) => { w.u(19); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.kernel_h)?; w.us(b.kernel_w)?; w.us(b.stride_h)?; w.us(b.stride_w)?; },
+-        InstanceNorm3D(b) => { w.u(20); w.us(b.channels)?; w.us(b.depth)?; w.us(b.height)?; w.us(b.width)?; if !b.eps.is_finite() { return Err("nonfinite InstanceNorm3D.eps".into()); } w.u(b.eps.to_bits()); },
++        InstanceNorm3D(_) => return Err("unconstrained legacy InstanceNorm advice is unsupported".into()),
+         MaxPoolHelper(b) => { w.u(21); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.pool_h)?; w.us(b.pool_w)?; },
+         NonNegative(b) => { w.u(22); w.us(b.table_size_log)?; },
+         Permute(b) => { w.u(23); w.pairs(&b.ranges)?; },
+@@ -338,9 +338,11 @@
+         assert!(words(&g,&Profile::toy(),&KeySeed([1;8]),11,false,4).is_err());
+     }
+     #[test]
+-    fn reject_nonfinite_public_parameter() {
++    fn reject_legacy_instancenorm_public_parameter() {
+         use crate::basicblock::InstanceNorm3D;
+         let k=BasicBlockType::InstanceNorm3D(InstanceNorm3D { channels:1,depth:1,height:1,width:1,eps:f64::NAN });
+         assert!(operator(&k).is_err());
+-    }
+-}
++        let finite=BasicBlockType::InstanceNorm3D(InstanceNorm3D { channels:1,depth:1,height:1,width:1,eps:1e-5 });
++        assert!(operator(&finite).is_err());
++    }
++}

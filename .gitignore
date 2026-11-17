@@ -1,0 +1,25 @@
+# Rust build artifacts
+**/target/
+
+# Ablation study
+zk-torch-3-ablation/
+
+# External reference repos / vendored research checkouts
+research/
+
+# Large model weights (>100 MB, GitHub rejects)
+*.onnx
+
+# Compiled CUDA test binaries
+cuda/basefold_test
+cuda_almost_goldilocks/almost_field_test
+cuda_almost_goldilocks/almost_extension_test
+cuda_almost_goldilocks/almost_eq_lagrange_test
+cuda_almost_goldilocks/almost_partial_eval_test
+cuda_almost_goldilocks/almost_sumcheck_test
+cuda_almost_goldilocks/almost_fused_test
+cuda_almost_goldilocks/ajtai_test
+cuda_almost_goldilocks/*.o
+
+# Local Claude tooling
+**/.claude/

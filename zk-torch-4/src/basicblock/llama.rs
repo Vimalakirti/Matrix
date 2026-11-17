@@ -1,6 +1,7 @@
 //! LLM-specific advice ops: [`RMSReciprocal`], [`DivConst`], [`SoftmaxConst`],
-//! [`SigmoidConst`]. All produce auxiliary values whose soundness is enforced
-//! by surrounding DAG operations (Einsum identities, ProductZeroCheck, etc.).
+//! [`SigmoidConst`]. Legacy log advice is retained only for compatibility tests;
+//! compiled/registered graphs reject it. Exact normalization instead uses
+//! normalization.rs hints with mandatory defining DAG constraints.
 
 use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 
@@ -9,6 +10,83 @@ use crate::dag::{Claim, Role, Witness};
 use crate::sumcheck::SumcheckProof;
 use crate::transcript::Transcript;
 use crate::util::arith::{f_to_int, get_n, int_to_f};
+
+/// Public scalar normalization domain; larger scales require linked limbs.
+pub const RMS_MEAN_MAX: i128 = (1i128 << 28) - 1;
+
+pub fn floor_sqrt(n: i128) -> i128 {
+    assert!(n >= 0);
+    let (mut lo, mut hi) = (0i128, 1i128 << 63);
+    while lo + 1 < hi {
+        let mid = lo + (hi-lo)/2;
+        if mid <= n / mid { lo=mid; } else { hi=mid; }
+    }
+    lo
+}
+
+/// Fixed private bucket layout: zero, 28 positive dyadic intervals, and
+/// three forbidden padding positions. Every proof uses all 32 positions.
+pub fn rms_bucket_bounds(sf: usize) -> Vec<(i128,i128,i128,i128)> {
+    assert!(sf<=20,"exact scalar RMS supports activation scales 0..20; larger scales need wider arithmetic");
+    let c=1i128 << (3*sf);
+    let mut buckets=vec![(0,0,0,0)];
+    for j in 0..28 {
+        let lo=1i128<<j;let hi=(1i128<<(j+1))-1;
+        let r=floor_sqrt(c/lo)+1;
+        let u=floor_sqrt(c*hi)+1+(hi+1)/2;
+        buckets.push((lo,hi,r,u));
+    }
+    buckets.resize(32,(-1,-1,0,0));
+    buckets
+}
+
+/// Public independent bounds; the second-product bound is conditional on
+/// the separately proved one-hot bucket, not on the desired final bracket.
+pub fn rms_bounds(sf: usize) -> (i128,i128,i128) {
+    let buckets=rms_bucket_bounds(sf);
+    let r=buckets.iter().map(|b|b.2).max().unwrap();
+    let u=buckets.iter().map(|b|b.3).max().unwrap();
+    let c=1i128 << (3*sf);
+    let d=buckets.iter().filter(|b|b.0>=0).map(|b|b.2*b.3+b.3+b.1/4).max().unwrap().max(c+u+1);
+    assert!(RMS_MEAN_MAX*r < (1i128<<59) && d < (1i128<<61));
+    (r,u,d)
+}
+
+/// Private fixed-shape one-hot advice. Its relation is defined by compile-time
+/// bitness, row-sum and selected-interval roots, never by this honest hint.
+#[derive(Clone,Debug)]
+pub struct RMSBucket;
+impl BasicBlock for RMSBucket {
+    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
+        assert_eq!(inputs.len(),1);let x=inputs[0];assert_eq!(x.shape.len(),1);
+        let len=x.shape[0];assert!(len.is_power_of_two());
+        let mut values=vec![int_to_f(0);len*32];
+        for (i,&v) in x.data.as_ref().unwrap().evaluations_ref().iter().enumerate() {
+            let m=f_to_int(v);assert!((0..=RMS_MEAN_MAX).contains(&m));
+            let bucket=if m==0 {0} else {128-(m as u128).leading_zeros() as usize};
+            values[i+len*bucket]=int_to_f(1);
+        }
+        vec![Witness::new(vec![len,32],values,crate::dag::DataType::Bool,0,Role::Auxiliary)]
+    }
+    fn run_gpu(&self,inputs:&[&Witness])->Vec<Witness> {self.run(inputs)}
+    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>) {(vec![],vec![])}
+    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool {true}
+}
+
+/// Nearest nonnegative integer sqrt(Qs^3/m), midpoint ties upward.
+/// The zero-statistic extension is exactly r=0, with epsilon exactly zero.
+pub fn rounded_rms_reciprocal(m: i128, sf: usize) -> i128 {
+    let (bound,_,_)=rms_bounds(sf);
+    assert!((0..=RMS_MEAN_MAX).contains(&m), "RMS mean outside public domain");
+    if m==0 { return 0; }
+    let k=4i128 << (3*sf);
+    let (mut lo,mut hi)=(0,bound+1);
+    while lo+1<hi {
+        let mid=lo+(hi-lo)/2;
+        if m*(2*mid-1)*(2*mid-1)<=k {lo=mid;} else {hi=mid;}
+    }
+    lo
+}
 
 // ============================================================================
 // RMSReciprocal: 1 / RMS(x) computed per (b, s, ..., :) row.
@@ -42,6 +120,12 @@ impl BasicBlock for RMSReciprocal {
         // `d_pad`); otherwise the reciprocity check `x_mean·r² ≈ 1`
         // is wrong by a factor of `d_pad / self.dim`, which trips the
         // NonNegative tolerance gate.
+        if self.dim == 0 {
+            let res: Vec<AlmostGoldilocksField> = evals.iter().map(|&v|
+                int_to_f(rounded_rms_reciprocal(f_to_int(v), input.sf))
+            ).collect();
+            return vec![Witness::new(input.shape.clone(), res, input.data_type, input.sf, Role::Auxiliary)];
+        }
         let n = self.dim as f64;
         let mut result = Vec::with_capacity(num_groups);
         for g in 0..num_groups {
@@ -99,12 +183,14 @@ impl BasicBlock for DivConst {
         assert_eq!(inputs.len(), 1, "DivConst expects 1 input");
         let input = inputs[0];
         let evals = input.data.as_ref().unwrap().evaluations_ref();
-        let c = self.divisor as f64;
+        assert!(self.divisor > 0, "division by zero");
+        let c = self.divisor as i128;
         let result: Vec<AlmostGoldilocksField> = evals
             .iter()
             .map(|&v| {
-                let x_int = f_to_int(v) as f64;
-                let y_int = (x_int / c).round() as i128;
+                let x_int = f_to_int(v);
+                // Euclidean rounding, including negative exact half ties.
+                let y_int = (x_int + c / 2).div_euclid(c);
                 int_to_f(y_int)
             })
             .collect();
@@ -283,12 +369,12 @@ mod tests {
 
     #[test]
     fn div_const_rounds_to_nearest() {
-        // sf = 0; divide [10, 7, 3, 4] by 2 → [5, 4, 2, 2] (banker / round-half-away-from-zero).
+        // sf = 0; divide [10, 7, 3, 4] by 2 → [5, 4, 2, 2] (ties toward positive infinity).
         let x = make_witness(vec![4], vec![10, 7, 3, 4], 0);
         let d = DivConst { divisor: 2 };
         let out = d.run(&[&x]);
         let evals = out[0].data.as_ref().unwrap().evaluations_ref();
-        // f64::round is half-away-from-zero.
+        // Positive half ties round upward; negative halves do too.
         assert_eq!(f_to_int(evals[0]), 5);
         assert_eq!(f_to_int(evals[1]), 4); // 7/2 = 3.5 → 4
         assert_eq!(f_to_int(evals[2]), 2); // 3/2 = 1.5 → 2

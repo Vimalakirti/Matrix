@@ -14,6 +14,8 @@ pub fn gptj_layer_norm(
     move |g, x| {
         assert!(x.len() == 1, "This custom LayerNorm layer expects 1 input");
         let x = x[0];
+        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
+        let x=g.mean_input(x,*shape.last().unwrap());
         let x_sum = g.einsum("bsi->bs".to_string(), vec![x], false)[0];
         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
         let n = x_shape[x_shape.len() - 1];
@@ -21,30 +23,7 @@ pub fn gptj_layer_norm(
         let x_mean = g.div_const(x_sum, n)[0];
         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
 
-        let n_param: usize = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(n as u64)],
-            DataType::Float,
-            0,
-            Role::Constant,
-        ));
-        let mean_tolerance = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField((n / 2) as u64)],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let x_mean_mul_n =
-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
-
-        // x_sum reshape so the sub stays element-wise per row, not outer-product.
-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
-        g.add_nonneg_node(positive_1);
-        g.add_nonneg_node(positive_2);
+        // div_const emits exact deterministic rounding roots.
 
         let x_minus_mean = g.sub(x, x_mean)[0];
         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
@@ -62,11 +41,25 @@ pub fn gptj_mlp(
     b_1_e: EdgeId,
     b_2_e: EdgeId,
 ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+    gptj_mlp_ext(w_1_e, w_2_e, b_1_e, b_2_e, false)
+}
+
+/// [`gptj_mlp`]; `gelu_mul` computes GELU(h) ~ h * sigmoid(1.702 h) as GPT-2
+/// does (the default graph feeds sigmoid(1.702 h) alone to fc_out, one
+/// elementwise product less; pretrained checkpoints need the product).
+pub fn gptj_mlp_ext(
+    w_1_e: EdgeId,
+    w_2_e: EdgeId,
+    b_1_e: EdgeId,
+    b_2_e: EdgeId,
+    gelu_mul: bool,
+) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
     move |g, x| {
         assert!(x.len() == 1, "This custom MLP layer expects 1 input");
         let x = x[0];
         let h_1 = g.einsum("bsi,ij->bsj".to_string(), vec![x, w_1_e], true)[0];
         let h_1 = g.add(h_1, b_1_e)[0];
+        let h_1_x = h_1;
 
         // compute Gelu
         let shape = g.init_values[h_1].as_ref().unwrap().shape.clone();
@@ -87,6 +80,7 @@ pub fn gptj_mlp(
         let constant = g.param(constant);
         let h_1 = g.einsum("bsi,bsi->bsi".to_string(), vec![h_1, constant], true)[0];
         let h_1 = g.sigmoid(h_1)[0];
+        let h_1 = if gelu_mul { g.einsum("bsi,bsi->bsi".to_string(), vec![h_1_x, h_1], true)[0] } else { h_1 };
 
         let h_2 = g.einsum("bsi,ij->bsj".to_string(), vec![h_1, w_2_e], true)[0];
         let h_2 = g.add(h_2, b_2_e)[0];
@@ -144,18 +138,11 @@ pub fn gptj_attention(
             vec![scores, d_sqrt_recip],
             true,
         )[0];
-        let scores = if seq_len > 1 {
-            g.causal_mask(scores, seq_len)
-        } else {
-            scores
-        };
-        let softmax_c = g.softmax_const(scores)[0];
-        let scores = g.add(scores, softmax_c)[0];
-        let scores = g.exp(scores)[0];
+        let scores = g.causal_softmax(scores, seq_len);
 
         let out =
             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
-        let out = g.change_shape(out, vec![1, seq_len, num_heads, head_dim]);
+        let out = g.merge_heads(out, seq_len, num_heads, head_dim);
         let out = g.reshape(out, vec![1, seq_len, num_heads * head_dim])[0];
 
         let out =
@@ -181,6 +168,30 @@ pub fn gptj_block(
     cos_param: EdgeId,
     sin_param: EdgeId,
 ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+    gptj_block_ext(attn_norm_w, attn_q_w, attn_k_w, attn_v_w, attn_o_w, attn_norm_b, proj_1_w, proj_2_w,
+        proj_1_b, proj_2_b, num_heads, head_dim, seq_len, cos_param, sin_param, false)
+}
+
+/// [`gptj_block`] with the MLP's `gelu_mul` choice (see [`gptj_mlp_ext`]).
+#[allow(clippy::too_many_arguments)]
+pub fn gptj_block_ext(
+    attn_norm_w: Witness,
+    attn_q_w: Witness,
+    attn_k_w: Witness,
+    attn_v_w: Witness,
+    attn_o_w: Witness,
+    attn_norm_b: Witness,
+    proj_1_w: Witness,
+    proj_2_w: Witness,
+    proj_1_b: Witness,
+    proj_2_b: Witness,
+    num_heads: usize,
+    head_dim: usize,
+    seq_len: usize,
+    cos_param: EdgeId,
+    sin_param: EdgeId,
+    gelu_mul: bool,
+) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
     move |g, x| {
         assert!(x.len() == 1, "This custom Block layer expects 1 input");
         let x = x[0];
@@ -204,7 +215,7 @@ pub fn gptj_block(
         let mlp_inp = vec![attn_norm_out[0]];
         let mlp_out = g.pipe(
             &mlp_inp,
-            gptj_mlp(proj_1_w, proj_2_w, proj_1_b, proj_2_b),
+            gptj_mlp_ext(proj_1_w, proj_2_w, proj_1_b, proj_2_b, gelu_mul),
         );
         let combine_attn_mlp = g.add(attn_out[0], mlp_out[0])[0];
 
@@ -324,25 +335,54 @@ pub fn gpt_j_6b_hidden(
     head_dim: usize,
     seq_len: usize,
 ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+    gpt_j_6b_hidden_ext(attn_norm_w_vec, attn_q_w_vec, attn_k_w_vec, attn_v_w_vec, attn_o_w_vec, attn_norm_b_vec,
+        proj_1_w_vec, proj_2_w_vec, proj_1_b_vec, proj_2_b_vec, layer_norm_w, layer_norm_b, num_heads, head_dim, seq_len, None, false)
+}
+
+/// [`gpt_j_6b_hidden`] with explicit RoPE tables (`None`: the default ones,
+/// full-width rotation with the Llama-3 frequency scaling) and the MLP's
+/// `gelu_mul` choice. Pretrained GPT-J: partial rotary tables
+/// (`llama::rope_mats_plain(.., rot = 64)`) and `gelu_mul = true`.
+#[allow(clippy::too_many_arguments)]
+pub fn gpt_j_6b_hidden_ext(
+    attn_norm_w_vec: Vec<Witness>,
+    attn_q_w_vec: Vec<Witness>,
+    attn_k_w_vec: Vec<Witness>,
+    attn_v_w_vec: Vec<Witness>,
+    attn_o_w_vec: Vec<Witness>,
+    attn_norm_b_vec: Vec<Witness>,
+    proj_1_w_vec: Vec<Witness>,
+    proj_2_w_vec: Vec<Witness>,
+    proj_1_b_vec: Vec<Witness>,
+    proj_2_b_vec: Vec<Witness>,
+    layer_norm_w: Witness,
+    layer_norm_b: Witness,
+    num_heads: usize,
+    head_dim: usize,
+    seq_len: usize,
+    rope: Option<(Vec<AlmostGoldilocksField>, Vec<AlmostGoldilocksField>)>,
+    gelu_mul: bool,
+) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
     move |g, x| {
         assert!(x.len() == 1, "gpt_j_6b_hidden expects 1 input");
         let mut x = x[0];
         let theta = 10000.0;
+        let (cos_data, sin_data) = rope.unwrap_or_else(|| (rope_cos_mat_llama3(head_dim, seq_len, theta), rope_sin_mat_llama3(head_dim, seq_len, theta)));
         let cos_param = g.param(Witness::new(
-            vec![seq_len, head_dim], rope_cos_mat_llama3(head_dim, seq_len, theta),
+            vec![seq_len, head_dim], cos_data,
             DataType::Float, *SF_LOG, Role::Constant));
         let sin_param = g.param(Witness::new(
-            vec![seq_len, head_dim], rope_sin_mat_llama3(head_dim, seq_len, theta),
+            vec![seq_len, head_dim], sin_data,
             DataType::Float, *SF_LOG, Role::Constant));
         let num_layers = attn_norm_w_vec.len();
         for i in 0..num_layers {
-            let block = g.pipe(&[x], gptj_block(
+            let block = g.pipe(&[x], gptj_block_ext(
                 attn_norm_w_vec[i].clone(), attn_q_w_vec[i].clone(),
                 attn_k_w_vec[i].clone(), attn_v_w_vec[i].clone(),
                 attn_o_w_vec[i].clone(), attn_norm_b_vec[i].clone(),
                 proj_1_w_vec[i].clone(), proj_2_w_vec[i].clone(),
                 proj_1_b_vec[i].clone(), proj_2_b_vec[i].clone(),
-                num_heads, head_dim, seq_len, cos_param, sin_param));
+                num_heads, head_dim, seq_len, cos_param, sin_param, gelu_mul));
             x = block[0];
             if i < num_layers - 1 { g.layer_boundaries.push(x); }
         }

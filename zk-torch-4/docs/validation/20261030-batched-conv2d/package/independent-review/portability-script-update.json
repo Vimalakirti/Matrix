@@ -1,0 +1,11 @@
+{
+  "scope": "Filesystem input parameterization only; assertions and findings unchanged",
+  "previous_sha256": {
+    "check_wrapper_integration.py": "fde8081ed9907bf700e815c9edc7f697cfede87ff5eff30da7e32c686233500a",
+    "check_joint_overlay.py": "18978dc1c39d034db4052c3c572c9334112ffea7efbe7276d0b44b2b157ad8d8"
+  },
+  "current_sha256": {
+    "check_wrapper_integration.py": "e47e895d31d71b7e8925739a5f6387f38c920d0af25562e09ccefecb63e7bedd",
+    "check_joint_overlay.py": "c7c20cebf2aeb49335482c4382fe6fbca140ea57be2476fb4483220a3702fb51"
+  }
+}

@@ -1,0 +1,401 @@
+--- original/almost-goldilocks-cuda-rs/build.rs
++++ adapted/almost-goldilocks-cuda-rs/build.rs
+@@ -57,68 +57,7 @@
+     // Headers live in the sibling cuda_almost_goldilocks/ directory.
+     let cuda_dir = manifest_dir.join("../cuda_almost_goldilocks");
+ 
+-    let (nvcc, cuda_lib_path) = find_cuda_paths();
+-    if !std::path::Path::new(&nvcc).exists() {
+-        panic!("CUDA toolkit not found at {}", nvcc);
+-    }
+-
+-    let output_lib = out_dir.join("libalmost_goldilocks_cuda_wrapper.a");
+-    let obj_file = out_dir.join("wrapper.o");
+-    let compute_cap = env::var("CUDA_COMPUTE").unwrap_or_else(|_| "80".to_string());
+-    // SASS for the target plus PTX: ptxas then runs at build time, so resource
+-    // errors (e.g. > 48 KB static shared memory) fail the build instead of
+-    // surfacing as a JIT launch failure at run time.
+-    let gencode = format!(
+-        "-gencode=arch=compute_{},code=[sm_{},compute_{}]",
+-        compute_cap, compute_cap, compute_cap
+-    );
+-
+-    eprintln!("[build.rs] nvcc: {}", nvcc);
+-    eprintln!("[build.rs] compute capability: {}", compute_cap);
+-    eprintln!("[build.rs] header include path: {}", cuda_dir.display());
+-
+-    let status = Command::new(&nvcc)
+-        .args([
+-            "-O3",
+-            &gencode,
+-            "-std=c++17",
+-            "--default-stream",
+-            "per-thread",
+-            "-Xcompiler",
+-            "-fPIC",
+-            "-c",
+-            cuda_wrapper.to_str().unwrap(),
+-            "-o",
+-            obj_file.to_str().unwrap(),
+-            &format!("-I{}", cuda_dir.to_str().unwrap()),
+-        ])
+-        .status()
+-        .expect("Failed to execute nvcc");
+-    if !status.success() {
+-        panic!("Failed to compile CUDA wrapper");
+-    }
+-
+-    let status = Command::new("ar")
+-        .args([
+-            "rcs",
+-            output_lib.to_str().unwrap(),
+-            obj_file.to_str().unwrap(),
+-        ])
+-        .status()
+-        .expect("Failed to execute ar");
+-    if !status.success() {
+-        panic!("Failed to create static library");
+-    }
+-
+-    println!("cargo:rustc-link-search=native={}", out_dir.display());
+-    println!("cargo:rustc-link-lib=static=almost_goldilocks_cuda_wrapper");
+-    println!("cargo:rustc-link-search=native={}", cuda_lib_path);
+-    println!("cargo:rustc-link-lib=static=cudart_static");
+-    println!("cargo:rustc-link-lib=stdc++");
+-    println!("cargo:rustc-link-lib=dl");
+-    println!("cargo:rustc-link-lib=rt");
+-    println!("cargo:rustc-link-lib=pthread");
+-
++    // VALIDATION ONLY: CUDA compilation and linker directives omitted.
+     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE");
+     println!("cargo:rerun-if-changed=cuda/wrapper.cu");
+     // Track EVERY header wrapper.cu can include, not a hand-kept list: the
+--- original/almost-goldilocks-cuda-rs/src/ffi.rs
++++ adapted/almost-goldilocks-cuda-rs/src/ffi.rs
+@@ -7,7 +7,7 @@
+ 
+ use std::os::raw::{c_int, c_void};
+ 
+-#[link(name = "almost_goldilocks_cuda_wrapper", kind = "static")]
++// VALIDATION ONLY: no native library supplied; any reachable FFI must fail linking.
+ extern "C" {
+     // -------------------- init / memory --------------------
+     pub fn almost_goldilocks_cuda_init() -> c_int;
+--- original/zk-torch-4/src/basicblock/exp.rs
++++ adapted/zk-torch-4/src/basicblock/exp.rs
+@@ -197,8 +197,8 @@
+     }
+ }
+ 
+-#[cfg(test)]
+-mod tests {
++// VALIDATION ONLY: expose original CPU test bodies.
++pub mod tests {
+     use super::*;
+ 
+     fn agl(v: u64) -> AlmostGoldilocksField {
+@@ -210,8 +210,7 @@
+         Witness::new(shape, evals, DataType::Int, *SF_LOG, Role::Input)
+     }
+ 
+-    #[test]
+-    fn exphelper_emits_dense_r_and_sparse_k() {
++    pub fn exphelper_emits_dense_r_and_sparse_k() {
+         // x = 0 at every row → k = 0, r = 0.
+         let x = build_input(vec![4], vec![0, 0, 0, 0]);
+         let h = ExpHelper::new(K_BITS);
+@@ -235,8 +234,7 @@
+     }
+ 
+     /// `x = -k · ln2 · SF` for `k ∈ {0, 1, 5, 15}` → selection table index = k.
+-    #[test]
+-    fn exphelper_recovers_negative_k() {
++    pub fn exphelper_recovers_negative_k() {
+         let ln2 = exp_ln2(*SF_LOG);
+         let x = build_input(vec![4], vec![0, -ln2, -5 * ln2, -15 * ln2]);
+         let h = ExpHelper::new(K_BITS);
+@@ -256,8 +254,7 @@
+         assert_eq!(sel[&3], 15);
+     }
+ 
+-    #[test]
+-    fn exphelper_rejects_positive_and_out_of_domain_without_clamping() {
++    pub fn exphelper_rejects_positive_and_out_of_domain_without_clamping() {
+         let l=exp_ln2(*SF_LOG); let h=ExpHelper::new(8);
+         let bound=256*l-l/2-1;
+         for v in [1,-bound-1] {
+@@ -271,8 +268,7 @@
+         }
+     }
+ 
+-    #[test]
+-    fn exphelper_prove_passes_through() {
++    pub fn exphelper_prove_passes_through() {
+         let x = build_input(vec![4], vec![0, 0, 0, 0]);
+         let h = ExpHelper::new(K_BITS);
+         let out = h.run(&[&x]);
+@@ -288,8 +284,7 @@
+         assert_eq!(claims[0].eval, direct);
+     }
+ 
+-    #[test]
+-    fn twopow_looks_up_15_minus_k() {
++    pub fn twopow_looks_up_15_minus_k() {
+         // Build a selection polynomial with (i, k) = (0, 0), (1, 1), (2, 5), (3, 15).
+         let sel = SelectionPolynomial::new(
+             2,
+@@ -313,8 +308,7 @@
+         assert_eq!(evals[3].reduce().0, 1 << 0);
+     }
+ 
+-    #[test]
+-    fn twopow_prove_returns_empty() {
++    pub fn twopow_prove_returns_empty() {
+         // The dag-level prove_two_pow handles this; the block itself is a no-op.
+         let sel = SelectionPolynomial::new(2, K_BITS, vec![(0, 0)]).to_sparse();
+         let w = Witness {
+--- original/zk-torch-4/src/bin/cpu_basicblock_exp.rs
++++ adapted/zk-torch-4/src/bin/cpu_basicblock_exp.rs
+@@ -0,0 +1,20 @@
++fn main() {
++    println!("RUN exphelper_emits_dense_r_and_sparse_k");
++    zk_torch_4::basicblock::exp::tests::exphelper_emits_dense_r_and_sparse_k();
++    println!("PASS exphelper_emits_dense_r_and_sparse_k");
++    println!("RUN exphelper_recovers_negative_k");
++    zk_torch_4::basicblock::exp::tests::exphelper_recovers_negative_k();
++    println!("PASS exphelper_recovers_negative_k");
++    println!("RUN exphelper_rejects_positive_and_out_of_domain_without_clamping");
++    zk_torch_4::basicblock::exp::tests::exphelper_rejects_positive_and_out_of_domain_without_clamping();
++    println!("PASS exphelper_rejects_positive_and_out_of_domain_without_clamping");
++    println!("RUN exphelper_prove_passes_through");
++    zk_torch_4::basicblock::exp::tests::exphelper_prove_passes_through();
++    println!("PASS exphelper_prove_passes_through");
++    println!("RUN twopow_looks_up_15_minus_k");
++    zk_torch_4::basicblock::exp::tests::twopow_looks_up_15_minus_k();
++    println!("PASS twopow_looks_up_15_minus_k");
++    println!("RUN twopow_prove_returns_empty");
++    zk_torch_4::basicblock::exp::tests::twopow_prove_returns_empty();
++    println!("PASS twopow_prove_returns_empty");
++}
+--- original/zk-torch-4/src/bin/cpu_graph_exp.rs
++++ adapted/zk-torch-4/src/bin/cpu_graph_exp.rs
+@@ -0,0 +1,26 @@
++fn main() {
++    println!("RUN exp_zero_is_one_at_output_scale_cpu_forward");
++    zk_torch_4::dag::builder::tests::exp_zero_is_one_at_output_scale_cpu_forward();
++    println!("PASS exp_zero_is_one_at_output_scale_cpu_forward");
++    println!("RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero");
++    zk_torch_4::dag::builder::tests::exp_logical_values_ignore_padding_and_padded_outputs_are_zero();
++    println!("PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero");
++    println!("RUN eager_request_arithmetic_is_not_a_model_parameter");
++    zk_torch_4::dag::builder::tests::eager_request_arithmetic_is_not_a_model_parameter();
++    println!("PASS eager_request_arithmetic_is_not_a_model_parameter");
++    println!("RUN eager_model_only_arithmetic_remains_trusted_precomputation");
++    zk_torch_4::dag::builder::tests::eager_model_only_arithmetic_remains_trusted_precomputation();
++    println!("PASS eager_model_only_arithmetic_remains_trusted_precomputation");
++    println!("RUN test_dag_builder_simple_add");
++    zk_torch_4::dag::builder::tests::test_dag_builder_simple_add();
++    println!("PASS test_dag_builder_simple_add");
++    println!("RUN test_dag_builder_compile");
++    zk_torch_4::dag::builder::tests::test_dag_builder_compile();
++    println!("PASS test_dag_builder_compile");
++    println!("RUN test_dag_builder_chain");
++    zk_torch_4::dag::builder::tests::test_dag_builder_chain();
++    println!("PASS test_dag_builder_chain");
++    println!("RUN test_dag_builder_pipe");
++    zk_torch_4::dag::builder::tests::test_dag_builder_pipe();
++    println!("PASS test_dag_builder_pipe");
++}
+--- original/zk-torch-4/src/bin/cpu_instance_norm.rs
++++ adapted/zk-torch-4/src/bin/cpu_instance_norm.rs
+@@ -0,0 +1,10 @@
++fn main(){
++println!("RUN instance_norm_exact_epsilon_conversion_and_public_bounds");zk_torch_4::dag::instancenorm_tests::instance_norm_exact_epsilon_conversion_and_public_bounds();println!("PASS instance_norm_exact_epsilon_conversion_and_public_bounds");
++println!("RUN instance_norm_row_major_layout_padding_and_parameter_dependencies");zk_torch_4::dag::instancenorm_tests::instance_norm_row_major_layout_padding_and_parameter_dependencies();println!("PASS instance_norm_row_major_layout_padding_and_parameter_dependencies");
++println!("RUN instance_norm_domain_extremes_constant_channels_and_zero_epsilon");zk_torch_4::dag::instancenorm_tests::instance_norm_domain_extremes_constant_channels_and_zero_epsilon();println!("PASS instance_norm_domain_extremes_constant_channels_and_zero_epsilon");
++println!("RUN instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints");zk_torch_4::dag::instancenorm_tests::instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints();println!("PASS instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints");
++println!("RUN instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles");zk_torch_4::dag::instancenorm_tests::instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles();println!("PASS instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles");
++println!("RUN instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used");zk_torch_4::dag::instancenorm_tests::instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used();println!("PASS instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used");
++println!("RUN instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards");zk_torch_4::dag::instancenorm_tests::instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards();println!("PASS instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards");
++println!("RUN instance_norm_manual_legacy_dag_is_rejected_at_registration");zk_torch_4::dag::instancenorm_tests::instance_norm_manual_legacy_dag_is_rejected_at_registration();println!("PASS instance_norm_manual_legacy_dag_is_rejected_at_registration");
++}
+--- original/zk-torch-4/src/dag/builder.rs
++++ adapted/zk-torch-4/src/dag/builder.rs
+@@ -2124,12 +2124,11 @@
+     }
+ }
+ 
+-#[cfg(test)]
+-mod tests {
++// VALIDATION ONLY: expose original CPU graph test bodies.
++pub mod tests {
+     use super::*;
+ 
+-    #[test]
+-    fn exp_zero_is_one_at_output_scale_cpu_forward() {
++    pub fn exp_zero_is_one_at_output_scale_cpu_forward() {
+         // Execute the actual graph's CPU operators directly, avoiding the
+         // benchmark run hook and any GPU backend environment override.
+         let mut g = DagBuilder::new();
+@@ -2154,8 +2153,7 @@
+             .all(|v| *v == AlmostGoldilocksField(1u64 << *SF_LOG)));
+     }
+ 
+-    #[test]
+-    fn exp_logical_values_ignore_padding_and_padded_outputs_are_zero() {
++    pub fn exp_logical_values_ignore_padding_and_padded_outputs_are_zero() {
+         let evaluate = |shape: Vec<usize>, values: Vec<i128>| {
+             let mut b=DagBuilder::new();
+             let x=b.committed_input(Witness::new(shape,values.into_iter().map(int_to_f).collect(),DataType::Float,*SF_LOG,Role::Input));
+@@ -2183,8 +2181,7 @@
+         }}
+     }
+ 
+-    #[test]
+-    fn eager_request_arithmetic_is_not_a_model_parameter() {
++    pub fn eager_request_arithmetic_is_not_a_model_parameter() {
+         for v in [3,19] {
+             let mut b=DagBuilder::new();
+             let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(v)],DataType::Int,0,Role::Input));
+@@ -2199,8 +2196,7 @@
+         }
+     }
+ 
+-    #[test]
+-    fn eager_model_only_arithmetic_remains_trusted_precomputation() {
++    pub fn eager_model_only_arithmetic_remains_trusted_precomputation() {
+         let mut b=DagBuilder::new();
+         let a=b.param(Witness::new(vec![1],vec![int_to_f(3)],DataType::Int,0,Role::Constant));
+         let c=b.param(Witness::new(vec![1],vec![int_to_f(7)],DataType::Int,0,Role::Constant));
+@@ -2211,8 +2207,7 @@
+         // this is not a proof of their relationship to separate weight leaves.
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_simple_add() {
++    pub fn test_dag_builder_simple_add() {
+         // Build: input_a + input_b → output
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+@@ -2224,8 +2219,7 @@
+         assert_eq!(out.len(), 1);
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_compile() {
++    pub fn test_dag_builder_compile() {
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+         let b = g.input(vec![4], DataType::Uint);
+@@ -2239,8 +2233,7 @@
+         assert!(!witnesses.is_empty());
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_chain() {
++    pub fn test_dag_builder_chain() {
+         // input → add(input, param) → einsum
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+@@ -2259,8 +2252,7 @@
+         assert_eq!(dag.topo.len(), 2); // add + einsum
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_pipe() {
++    pub fn test_dag_builder_pipe() {
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+ 
+--- original/zk-torch-4/src/dag/instancenorm_tests.rs
++++ adapted/zk-torch-4/src/dag/instancenorm_tests.rs
+@@ -55,8 +55,7 @@
+     x.iter().map(|x| rd(a*x,q)+offset).collect()
+ }
+ 
+-#[test]
+-fn instance_norm_exact_epsilon_conversion_and_public_bounds() {
++pub fn instance_norm_exact_epsilon_conversion_and_public_bounds() {
+     for sf in 0..=20 {
+         let half = 0.5f64/(1u64 << sf) as f64;
+         assert_eq!(epsilon_units(half,sf),1);
+@@ -76,8 +75,7 @@
+     }
+ }
+ 
+-#[test]
+-fn instance_norm_row_major_layout_padding_and_parameter_dependencies() {
++pub fn instance_norm_row_major_layout_padding_and_parameter_dependencies() {
+     let sf = *crate::SF_LOG; if sf>20 {return;}
+     let q = 1i128 << sf;
+     for epsilon in [0,1,epsilon_units(1e-5,sf)] {
+@@ -115,8 +113,7 @@
+     }
+ }
+ 
+-#[test]
+-fn instance_norm_domain_extremes_constant_channels_and_zero_epsilon() {
++pub fn instance_norm_domain_extremes_constant_channels_and_zero_epsilon() {
+     let sf = *crate::SF_LOG; if sf>20 {return;}
+     for epsilon in [0,1,RMS_MEAN_MAX] {
+         let bounds=instance_norm_bounds(sf,epsilon);let xbound=bounds.input;let gain=bounds.parameter;
+@@ -133,8 +130,7 @@
+     }
+ }
+ 
+-#[test]
+-fn instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints() {
++pub fn instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints() {
+     let sf = *crate::SF_LOG; if sf>20 {return;}let q=1i128<<sf;
+     let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,2],vec![-q,q],sf,Role::Input);
+     let g=source(&mut b,vec![1],vec![q],sf,Role::Constant);let beta=source(&mut b,vec![1],vec![3],sf,Role::Constant);
+@@ -150,8 +146,7 @@
+     }}
+ }
+ 
+-#[test]
+-fn instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles() {
++pub fn instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles() {
+     let rejected=std::panic::catch_unwind(|| {
+         let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,1],vec![0],10,Role::Input);
+         let g=source(&mut b,vec![1],vec![1],10,Role::Constant);let beta=source(&mut b,vec![1],vec![0],10,Role::Constant);
+@@ -171,8 +166,7 @@
+     }
+ }
+ 
+-#[test]
+-fn instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used() {
++pub fn instance_norm_out_of_domain_rejects_without_clipping_and_gains_are_used() {
+     let sf=*crate::SF_LOG;if sf>20 {return;}let q=1i128<<sf;
+     let bounds=instance_norm_bounds(sf,1);
+     for bad in 0..3 {
+@@ -194,8 +188,7 @@
+     assert_ne!(results[0],results[1]);assert_ne!(results[0],results[2]);
+ }
+ 
+-#[test]
+-fn instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards() {
++pub fn instance_norm_large_spatial_divisors_have_exact_bounded_scalar_guards() {
+     // Boundary arithmetic only: this does NOT allocate/run128³ or256³ models.
+     let bound=(1i128<<54)-1;
+     for c in [1usize<<20,(1<<20)+1,1<<21,1<<24] {
+@@ -214,8 +207,7 @@
+     }).is_err());
+ }
+ 
+-#[test]
+-fn instance_norm_manual_legacy_dag_is_rejected_at_registration() {
++pub fn instance_norm_manual_legacy_dag_is_rejected_at_registration() {
+     let mut b=DagBuilder::new();let x=source(&mut b,vec![1,1,1,1],vec![0],10,Role::Input);
+     let g=source(&mut b,vec![1],vec![1],10,Role::Constant);let beta=source(&mut b,vec![1],vec![0],10,Role::Constant);
+     b.instancenorm3d_units(x,g,beta,1);let (mut d,w)=b.compile();
+--- original/zk-torch-4/src/dag/mod.rs
++++ adapted/zk-torch-4/src/dag/mod.rs
+@@ -1298,5 +1298,5 @@
+ #[cfg(test)]
+ mod normalization_tests;
+ 
+-#[cfg(test)]
+-mod instancenorm_tests;
++// VALIDATION ONLY: original bodies exposed.
++pub mod instancenorm_tests;

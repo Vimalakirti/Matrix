@@ -1,0 +1,14 @@
+[
+  {
+    "path": "zk-torch-4/src/basicblock/exp.rs",
+    "original_sha256": "5c1f27169e6447298689e27ee1cc9d342814f61c32457f398d1bc878e59904d3",
+    "adapted_sha256": "300d9dbf3a3023d1d5524345c204117b8cdf2cca7255883a32b24874088f66e2",
+    "only_change": "cfg/test visibility; all complete test bodies identical"
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "original_sha256": "a6542fd8a85ee5f2f7e9179a73d22b2c04ce29db15103fb6ba627c9b70198e0e",
+    "adapted_sha256": "2957721fe72437163a70f252926e945b8e34d3a192a54c495a81673b84a5ef2a",
+    "only_change": "cfg/test visibility; all complete test bodies identical"
+  }
+]

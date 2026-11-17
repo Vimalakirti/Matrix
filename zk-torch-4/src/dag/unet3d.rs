@@ -258,7 +258,8 @@ pub fn unet3d(
             h = rescale_conv3d(g, h, w_e);
 
             if let Some(bias_e) = out_bias_e {
-                h = g.add(h, bias_e)[0];
+                let c = g.init_values[w_e].as_ref().unwrap().shape[0];
+                h = g.add_channel_bias_row_major(h, bias_e, c, 3);
             }
         }
 

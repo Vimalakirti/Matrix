@@ -1,0 +1,50 @@
+[
+  {
+    "path": "zk-torch-4/src/bin/bench_streaming_resnet.rs",
+    "sha256": "7260563804c8c545b86238a93253a11bd4cf18a74243ae515f0985275d6896d3"
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "sha256": "b7c2e26e5e5dae4221b029b6cc0fc9936cf7c994851a3f79a6ffb83d3461f775"
+  },
+  {
+    "path": "zk-torch-4/src/dag/cnn_layout_tests.rs",
+    "sha256": "a0bdeb782beff15a39643d039030f49c464b0509b44c0862672cdfa83ad06703"
+  },
+  {
+    "path": "zk-torch-4/src/dag/lenet.rs",
+    "sha256": "b87cdd1b376344b43d9d11437d127ecaaba5635093bcc78eb5f47b1faf8f2599"
+  },
+  {
+    "path": "zk-torch-4/src/dag/mod.rs",
+    "sha256": "8243c3cfc2732e0cacf709d61eafaec2d3771d63b45bfd0297be9ddc40256a25"
+  },
+  {
+    "path": "zk-torch-4/src/dag/pointpillar.rs",
+    "sha256": "1c849598476c80c0a1d6f77f375f83c08e8f7cdf39558a924cd03728620e9701"
+  },
+  {
+    "path": "zk-torch-4/src/dag/resnet.rs",
+    "sha256": "0d970191a4aea16eed5fe137779e93e87b586ebd0ddaec5118cf09250ca49123"
+  },
+  {
+    "path": "zk-torch-4/src/dag/unet3d.rs",
+    "sha256": "598933d59ba308d858f16c7d1f4daf56650043c29fccfa4728c15004e9af451e"
+  },
+  {
+    "path": "zk-torch-4/src/dag/vgg.rs",
+    "sha256": "a37dbb6f38cd2d6edfef2077ae9969ea67acc3d3765415677c6590ed37e70bc3"
+  },
+  {
+    "path": "zk-torch-4/src/dag/yolo.rs",
+    "sha256": "5d83213ec32cc2190bc1e3fdc1edc2c87f1a1757ee57796c8f8a76e48ddf7d69"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/cnn_layout_tests.rs",
+    "sha256": "add80c91f88e9139690be43bf1a2c5aed9de7bcee4ca41232eb2c5b30d3e6770"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "sha256": "121a4f38c8426f1f12ac93af324964ba920cf04a95550ba134fa6699dd1c301e"
+  }
+]

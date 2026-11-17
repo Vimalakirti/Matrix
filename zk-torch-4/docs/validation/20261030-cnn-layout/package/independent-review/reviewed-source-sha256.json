@@ -1,0 +1,16 @@
+{
+  "zk-torch-4/src/dag/builder.rs": "b7c2e26e5e5dae4221b029b6cc0fc9936cf7c994851a3f79a6ffb83d3461f775",
+  "zk-torch-4/src/dag/lenet.rs": "83d21bcff33b0e7e759a88b12f88866b73607ec45f56983e621b660fec901bfc",
+  "zk-torch-4/src/dag/resnet.rs": "fa0b0f764d9b14630d657fa34f7a698b2ff3e2b277624afe67f1d41798187f82",
+  "zk-torch-4/src/dag/yolo.rs": "5d83213ec32cc2190bc1e3fdc1edc2c87f1a1757ee57796c8f8a76e48ddf7d69",
+  "zk-torch-4/src/dag/pointpillar.rs": "1c849598476c80c0a1d6f77f375f83c08e8f7cdf39558a924cd03728620e9701",
+  "zk-torch-4/src/dag/unet3d.rs": "598933d59ba308d858f16c7d1f4daf56650043c29fccfa4728c15004e9af451e",
+  "zk-torch-4/src/dag/vgg.rs": "a37dbb6f38cd2d6edfef2077ae9969ea67acc3d3765415677c6590ed37e70bc3",
+  "zk-torch-4/src/bin/bench_streaming_resnet.rs": "7260563804c8c545b86238a93253a11bd4cf18a74243ae515f0985275d6896d3",
+  "zk-torch-4/src/morpheus/piop/mod.rs": "121a4f38c8426f1f12ac93af324964ba920cf04a95550ba134fa6699dd1c301e",
+  "zk-torch-4/src/morpheus/piop/cv.rs": "37f19727c21a89adc7ef0cc8cf2b1ef1647bec3d3af7d900a54bc398cebf9fa3",
+  "zk-torch-4/src/morpheus/statement.rs": "673d0c99154ce8843d3a1680df0d06eabf773f6b211909256e146ff5af375e9d",
+  "zk-torch-4/src/basicblock/einsum.rs": "97dbc150788ae5c2aaccbccfce6b6e971b4c837b17b54464e9b910618f792539",
+  "zk-torch-4/src/basicblock/add.rs": "cae277109e35ecd3e3026ecc122503a8a7c2dc18052b19adf966a11b5f52a4b7",
+  "zk-torch-4/src/basicblock/shape.rs": "ae977b38d098a226c6c20c80af2c44131b8ff34aed7a9fb394ab20698945fa9a"
+}

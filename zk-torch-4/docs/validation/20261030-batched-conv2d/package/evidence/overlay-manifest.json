@@ -1,0 +1,17 @@
+[
+  {
+    "path": "zk-torch-4/src/morpheus/piop/cv.rs",
+    "base_sha256": "37f19727c21a89adc7ef0cc8cf2b1ef1647bec3d3af7d900a54bc398cebf9fa3",
+    "final_sha256": "87c3f5a38dc5c4a060315afac643fd37452ef529bc00365c7e3cbbf440d7fba0"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "base_sha256": "183bec06507ce8cd5154545d492ea18fe5abe3a5643fe848b50a1b3409b20f66",
+    "final_sha256": "d866cf4f5c4b22e61cb9414229ab47fea38994489f1ca15b0ada03ce8d6712b2"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/cv_batch_tests.rs",
+    "base_sha256": null,
+    "final_sha256": "daefe8151998f676033fe6c50b2aa7681ea89ab34bf9482fa477452ded0c7f4c"
+  }
+]

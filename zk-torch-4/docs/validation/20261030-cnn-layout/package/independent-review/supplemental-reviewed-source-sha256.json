@@ -1,0 +1,8 @@
+{
+  "zk-torch-4/src/dag/builder.rs": "fbbef8e4666c78cd5413c298fe16a9aec1081a5eb8ed26935d780750275b3c84",
+  "zk-torch-4/src/dag/cnn_layout_tests.rs": "1f96cf6b5df53437e292ec2499d54c84824cdbf70903e81b261bde67b522e3fb",
+  "zk-torch-4/src/basicblock/maxpool.rs": "639f3588accad0082614a8143d84b0a0bf7243236709672979fb4b624de1c616",
+  "zk-torch-4/src/basicblock/pad.rs": "575af092820ee1e814d3265d2909f6e014f60016bce88bc9ed5aeca9e36964fc",
+  "zk-torch-4/src/morpheus/piop/cv.rs": "37f19727c21a89adc7ef0cc8cf2b1ef1647bec3d3af7d900a54bc398cebf9fa3",
+  "zk-torch-4/src/morpheus/piop/mod.rs": "121a4f38c8426f1f12ac93af324964ba920cf04a95550ba134fa6699dd1c301e"
+}

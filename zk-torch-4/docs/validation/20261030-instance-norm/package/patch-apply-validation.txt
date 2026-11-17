@@ -1,0 +1,7 @@
+git apply --check /workspace/shared/morpheus-instance-norm-evidence/instance-norm.patch
+exit=0
+git apply /workspace/shared/morpheus-instance-norm-evidence/instance-norm.patch
+exit=0
+PASS all 446 source hashes after fresh patch application
+PASS all 10 independently reviewed delta hashes
+Whitespace diff-check: no diagnostics (no-index exit1)

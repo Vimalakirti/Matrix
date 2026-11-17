@@ -1,0 +1,62 @@
+[
+  {
+    "path": "almost-goldilocks-cuda-rs/build.rs",
+    "original_sha256": "af24b07a422dc98afb1dee9f61f21d88e7fd5c7eaf2710a330e542e599690a80",
+    "adapted_sha256": "bd6501a1ae3bde81b99f2cb5e32f2264da217cbce73f0ac5fc0c5f2759c4ae6a"
+  },
+  {
+    "path": "almost-goldilocks-cuda-rs/src/ffi.rs",
+    "original_sha256": "3977014957f9ee72a53276dd0b6994ec14f3159d794e68a40a0e704e0d472bc9",
+    "adapted_sha256": "80fc8a6b9d15701d91a90675c29684b11a50ca0fcb6e8efaabaeaab6183d3053"
+  },
+  {
+    "path": "zk-torch-4/src/basicblock/exp.rs",
+    "original_sha256": "5c1f27169e6447298689e27ee1cc9d342814f61c32457f398d1bc878e59904d3",
+    "adapted_sha256": "300d9dbf3a3023d1d5524345c204117b8cdf2cca7255883a32b24874088f66e2"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_basicblock_exp.rs",
+    "original_sha256": null,
+    "adapted_sha256": "9579ee9f33a5b6eed8bc597432f85e44ea9d9e969585c4febbf321678f053a48"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_graph_exp.rs",
+    "original_sha256": null,
+    "adapted_sha256": "b913dc112d85e43434788b76df2df5003c436c38a330f57ee28284babea0f82c"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_normalization.rs",
+    "original_sha256": null,
+    "adapted_sha256": "6a662f37340fcfe025993ceae304f21bf32e783416f7f54ee1144cd99f15d9d4"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_partial_chunks.rs",
+    "original_sha256": null,
+    "adapted_sha256": "526ec87b2e9e9ba020619b23c192255ba055590f1a85d966ec095f5d39196c98"
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "original_sha256": "d269a963fde7fce65d0d1e6ab84b5c7cbfcad24ec2c435a56a7ce2023f8f359c",
+    "adapted_sha256": "a5d2e2e0f4e793120e62340d8168409fe7d1858285f9d69312b3743d7e362347"
+  },
+  {
+    "path": "zk-torch-4/src/dag/mod.rs",
+    "original_sha256": "111ce4c4040f02bdfe187a4ceaf4a99cbae30643b8b9aba601fb5c1d5d71c04e",
+    "adapted_sha256": "0afc7b63efa7f36024e999d4f87bcf056a712ac585ed28eb6da17e0471074763"
+  },
+  {
+    "path": "zk-torch-4/src/dag/normalization_tests.rs",
+    "original_sha256": "d910a44c98def1520d5daf9febeecf72f615124f08f2e503c26ab45d66fb2505",
+    "adapted_sha256": "80388ef03858ddda404f5b4a6dc59e826af7c026270386dcedf2552a6fffaf06"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "original_sha256": "c91df21bab83a2b9373050cd85e37ea24fa9c46155ff12aa8005f8b078a91e83",
+    "adapted_sha256": "5800d66a9a9aa637c1e4423eaa3e09d2c00d871d8c4a238f4b513613cb7caf8f"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "original_sha256": "e9a68cac6850dd564ce3f20d8b3e9dd1fbb9c2ce0ac8f7353c9371faccc15df4",
+    "adapted_sha256": "0139c643eaa447d7e087c0cf216ba6ec840f009ab0efe7f50acc07961e815d41"
+  }
+]

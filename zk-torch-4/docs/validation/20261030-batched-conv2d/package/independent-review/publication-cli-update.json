@@ -1,0 +1,13 @@
+{
+  "scope": "CLI filesystem defaults removed; explicit inputs required; every assertion and finding retained",
+  "scripts": {
+    "check_wrapper_integration.py": {
+      "previous_sha256": "e47e895d31d71b7e8925739a5f6387f38c920d0af25562e09ccefecb63e7bedd",
+      "current_sha256": "4a17fba3925d3e06e5ebb38f237c66e25f44ec664c01af62ac4e6648caabe698"
+    },
+    "check_joint_overlay.py": {
+      "previous_sha256": "c7c20cebf2aeb49335482c4382fe6fbca140ea57be2476fb4483220a3702fb51",
+      "current_sha256": "739afb74ed4fff58c0de0d25e3c5761e5e180ec031e9bbb2ae187121c80197ac"
+    }
+  }
+}

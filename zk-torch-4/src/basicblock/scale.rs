@@ -14,7 +14,7 @@ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 
 use crate::basicblock::BasicBlock;
 use crate::dag::{Claim, PolyType, Role, Witness};
-use crate::poly::SelectionPolynomial;
+use crate::poly::{MLPoly, SelectionPolynomial};
 use crate::sumcheck::SumcheckProof;
 use crate::transcript::Transcript;
 use crate::util::arith::{f_to_int, get_n, int_to_f, next_pow};
@@ -103,7 +103,7 @@ impl BasicBlock for ScaleDown {
             selection.push((i, table_index));
         }
 
-        let aux_poly = SelectionPolynomial::new(num_var, rescale_sf, selection).to_sparse_dag();
+        let aux_poly = (!crate::dag::lean_aux()).then(|| SelectionPolynomial::new(num_var, rescale_sf, selection).to_sparse_dag());
         let y = Witness::new(
             x.shape.clone(),
             y_data,
@@ -113,11 +113,12 @@ impl BasicBlock for ScaleDown {
         );
         let aux = Witness {
             shape: x.shape.clone(),
-            data: Some(Box::new(aux_poly)),
+            data: aux_poly.map(|a| Box::new(a) as Box<dyn MLPoly>),
             poly_type: PolyType::Sparse,
             data_type: x.data_type,
             sf: 0,
             role: Role::Auxiliary,
+            channel_shift: None,
         };
         vec![y, aux]
     }
@@ -218,7 +219,7 @@ impl BasicBlock for ScaleUp {
             selection.push((i, table_index));
         }
 
-        let aux_poly = SelectionPolynomial::new(num_var, rescale_sf, selection).to_sparse_dag();
+        let aux_poly = (!crate::dag::lean_aux()).then(|| SelectionPolynomial::new(num_var, rescale_sf, selection).to_sparse_dag());
         let y = Witness::new(
             x.shape.clone(),
             y_data,
@@ -228,11 +229,12 @@ impl BasicBlock for ScaleUp {
         );
         let aux = Witness {
             shape: x.shape.clone(),
-            data: Some(Box::new(aux_poly)),
+            data: aux_poly.map(|a| Box::new(a) as Box<dyn MLPoly>),
             poly_type: PolyType::Sparse,
             data_type: x.data_type,
             sf: 0,
             role: Role::Auxiliary,
+            channel_shift: None,
         };
         vec![y, aux]
     }

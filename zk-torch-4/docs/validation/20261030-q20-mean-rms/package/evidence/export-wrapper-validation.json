@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "scope": "portable export wrappers/integrity only; no new proof/GPU/full-model claim",
+  "long_test_rerun": "not required: fresh CPU adaptation hashes and immutable bodies are identical to the already reexecuted cpu4 runner",
+  "results": [
+    {
+      "check": "all exported Python sources parse",
+      "result": "PASS"
+    },
+    {
+      "check": "portable reconstruction with additive evidence",
+      "exit_code": 0
+    },
+    {
+      "check": "all32 published exp evidence files retained byte-for-byte",
+      "result": "PASS (local published evidence snapshot; publication agent separately verified remote identities)"
+    },
+    {
+      "check": "portable CPU harness preparation",
+      "exit_code": 0
+    },
+    {
+      "check": "fresh CPU adaptation manifest identical to validated cpu4 (12 files)",
+      "result": "PASS"
+    },
+    {
+      "check": "portable adaptation recorder",
+      "exit_code": 0
+    },
+    {
+      "check": "recorded 12 adaptation hashes and nine immutable test-body receipt match frozen receipts",
+      "result": "PASS"
+    },
+    {
+      "check": "portable manifest regeneration",
+      "exit_code": 0
+    },
+    {
+      "check": "regenerated delta/full443 manifests and patch byte-identical",
+      "result": "PASS"
+    },
+    {
+      "check": "all exported Markdown prose free of private workspace paths",
+      "result": "PASS"
+    },
+    {
+      "check": "all original top-level/recovery terminal logs preserved byte-for-byte",
+      "logs": 25,
+      "result": "PASS"
+    }
+  ]
+}

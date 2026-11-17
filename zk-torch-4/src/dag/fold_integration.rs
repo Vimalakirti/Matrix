@@ -524,7 +524,8 @@ impl Dag {
         }
 
         let t_fold_tree = std::time::Instant::now();
-        let fold_tree = prove_fold_tree(leaves, key.seed, transcript);
+        let fold_tree = { let _nv = almost_goldilocks_cuda::nvtx("fold_tree");
+            prove_fold_tree(leaves, key.seed, transcript) };
         let fold_tree_elapsed = t_fold_tree.elapsed();
         if trace_mem { eprintln!("    [prove mem] after fold_tree:  {} MiB", mem()); }
 

@@ -1,0 +1,32 @@
+[
+  {
+    "path": "zk-torch-4/src/basicblock/exp.rs",
+    "original_sha256": "5c1f27169e6447298689e27ee1cc9d342814f61c32457f398d1bc878e59904d3",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "original_sha256": "ae679a998ec811c80d4070758ce178d946878b73f35f3cb4f3949fc000103845",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "zk-torch-4/src/dag/normalization_tests.rs",
+    "original_sha256": "d910a44c98def1520d5daf9febeecf72f615124f08f2e503c26ab45d66fb2505",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm_tests.rs",
+    "original_sha256": "10de5a1d49760b518f5b6e6c17c71acdd167fe17c17466a2b13819901d5c82b0",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "zk-torch-4/src/dag/softmax_tests.rs",
+    "original_sha256": "dac56f7535ac4757fde7ae4805ffd647c3e6f9738e459fed0d7a04280e88cf2e",
+    "body_identity_except_test_visibility": true
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "original_sha256": "49ebb945549970c3bc8a4f1089305499fbfe0da6f5752763dbcc9b1f52faf264",
+    "body_identity_except_test_visibility": true
+  }
+]

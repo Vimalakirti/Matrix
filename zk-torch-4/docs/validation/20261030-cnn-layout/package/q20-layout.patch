@@ -1,0 +1,1270 @@
+--- a/zk-torch-4/docs/morpheus_cnn_layout_profile.md
++++ b/zk-torch-4/docs/morpheus_cnn_layout_profile.md
+@@ -0,0 +1,134 @@
++# CNN logical layout repair (not a full-model/proof acceptance)
++
++This increment changes the registered computation. Old accuracy, timings,
++source counts and proofs do not validate the corrected graph. The frozen Q20
++base is `/workspace/shared/morpheus-mean-rms-q20`; selected finite sigmoid is a
++separate prerequisite for the YOLO SiLU integration test.
++
++## Exact layouts and public maps
++
++CNN raw storage is row-major, last axis fastest, each axis padded to a power of
++two. Einsum/Add interpret the first axis as fastest. Reversing shape metadata
++with a same-arity ChangeShape therefore reinterprets the SAME polynomial without
++transposing data. Shape changes, masks and gathers are registered graph nodes,
++not private preprocessing. No shape or map depends on a tensor value.
++
++A raw ChangeShape [16,5,5] -> [400] truncates 1024 physical entries to512; it does
++not remove internal 8x8 spatial padding. `flatten_row_major` instead sets
++N=product(logical dimensions), P=nextpow2(N). For each reversed axis a of logical
++extent d_a and logical stride s_a, its immutable public factor is
++
++    M_a(i,j) = [i<N] [j = floor(i/s_a) mod d_a].
++
++The staged binary contractions `abc,za->zbc`, `zbc,zb->zc`, `zc,zc->z` select
++exactly the row-major logical input for every i<N, and give zero for i>=N.
++Each stage removes one original axis. Axes missing from an operand are free-once,
++so the existing PIOP's point maps and legacy Einsum partial evaluation agree.
++The first-axis-fastest interpretation is used consistently by the CPU operator
++and the registered PIOP; no new unauthenticated mapping or CPU-only proof path
++exists. All-power-of-two shapes use a same-arity view.
++
++For LeNet the map shapes are [400,5], [400,5], [400,16], with padded row lengths
++4096,4096,8192. These contain1200 one bits across16384 field slots. The three
++sumcheck cubes have3,12,13 variables (rather than a four-factor19-variable cube).
++Intermediate padded lengths are65536,8192,512; they are derived, not committed
++advice. Numerical flatten is selection only and introduces no arithmetic wrap.
++
++## Classifiers, biases and explicit batches
++
++LeNet FC weights are explicitly COLUMN-MAJOR [out,in] = [120,400],[84,120],[10,84],
++with weight(o,i) at o+nextpow2(out)*i. This does not claim raw ONNX row-major byte
++compatibility; an importer must encode those bytes. The compact vector is masked
++before every contraction and after each bias addition, so poisoned output/weight/
++bias padding cannot enter the following120/84-wide contraction.
++
++ResNet GAP reverses CNN axes before spatial mean. Its classifier retains public
++logical B and validates logical features/B before viewing the result as [C,B].
++Input/output masks exclude feature, class and B padding. Vector bias [classes]
++is explicitly viewed as [classes,1] for batched Add. Both explicit [B,C,H,W]
++and the documented folded representation are supported at the head; a folded
++[Bp*Cp,H,W] tensor cannot reveal a previously discarded logical B.
++
++`add_channel_bias_row_major` repairs the older direct Add([C,H,W],[C,1,1])
++which put channel bias in low spatial bits. It uses [W,H,(D),C,B] views, accepts
++[C], [C,1,..], full single-image row-major bias, or a full tensor bias matching x,
++and applies an authenticated logical output mask. Call sites repaired: all
++ResNet convolutions, LeNet, VGG, YOLO, PointPillar convolution helpers, and the
++UNet3D final convolution. PointPillar's separate column-major VFE linear bias is
++not changed. These call-site repairs do not certify the whole named networks.
++
++Explicit [B,C,H,W] now survives pad/maxpool through registered mask/fold/restore
++nodes. Padding is masked BEFORE advice/range predicates and again at the output;
++the latter is necessary because honest zero-padding alone does not bind advice.
++The three Conv2D builders derive B from axis0 (not B*C/Cp) and retain explicit
++output shape with a real ChangeShape wrapper, leaving original Conv outputs,
++self-claims and auxiliary edges intact. The streaming ResNet driver now declares
++[B,3,H,W] rather than erasing B into Bp*4. Conv2D batch PIOP extension remains a
++separate increment; this file does not claim that it was executed.
++
++YOLO's two SiLU call sites use `silu_row_major`: reverse shape -> generic SiLU
++-> restore shape. The finite sigmoid's input/output masks then address the true
++CNN logical coordinates. Other sigmoid call sites are transformer column-major
++paths and are unchanged. The Q20 base's legacy SigmoidConst is not repaired by
++this wrapper alone; use the separate selected finite-normalization increment.
++
++## Public does not mean zero commitment cost
++
++Graph::new marks literal leaves committed. `tensor_specs` declares their width
++from already-public values, and Walk also binds those values to the registered
++program. Each 0/1 map/mask therefore occupies ONE raw bit-source coordinate per
++padded field slot (even if its Witness data type is Float). The16384 flatten slots
++are16384 committed PUBLIC bit coordinates, not free memory or a private model.
++
++Relative to Q20's original single-image LeNet, the new binary maps add16384 bit
++coordinates, convolution-bias masks add8192+4096, and six FC input/output masks
++add512+128+128+128+128+16=1040: total29712 additional public bit coordinates.
++No historical performance/source census may be reused unchanged.
++
++The executable census prints every literal edge, shape, padded row length,
++plane count, bit-typed flag and raw-coordinate count. With genuine CPU forwards
++(all-zero representative weights/inputs only), public literals alone are:
++
++| Representative graph | Literal leaves | Field slots | Raw coordinates | Public-only packed sources |
++|---|---:|---:|---:|---:|
++| Full LeNet-5 graph |33|91152|1642512|1|
++| ResNet GAP/FC head B3,C2048,7x7,O1000 |13|1650688|36392960|1|
++
++The ternary profile's source payload capacity is131497984 coordinates, source
++cap262144, energy cap2^38. These public subsets fit one source and are below the
++energy cap by capacity. THIS IS NOT a complete workload parameter-compatibility
++or lifetime-cap certificate: model/request/advice digits, selector chunks,
++graph/carry banks, partition duplication, all CNN body masks, grouped packing,
++proof lifetime and rejection accounting still need the complete census. For
++example a B3 ResNet stem [64,112,112] bias mask alone adds4*64*128*128=4194304
++public bit coordinates. Public masks can materially change costs.
++
++## Numerical/test bounds and validation limits
++
++CPU layout regressions run the original production operator bodies, comparing
++independently indexed logical references and checking emitted local range/PZC
++predicates. They are not cryptographic acceptance/rejection. Exact signed nearest
++rounding uses floor((a+floor(d/2))/d), ties toward positive infinity.
++
++At SF0..20 the LeNet classifier test has initial |x|<=11Q, two nonzero weights
++per output in {-Q,+Q}, and |bias|<=2Q. Successive logical magnitudes are <=24Q,
++50Q,102Q; the largest raw dot-product bound is100Q^2<p/2. ResNet head test inputs
++have |x|<=37Q+1 and at most5 unit-Q weights, giving <=185Q^2+5Q<p/2. Means stay
++inside the existing2^30-1 mean-input domain. These are TEST bounds, not new
++certificates for every FC rescale or arbitrary model weights.
++
++Padding poison ±2^40/±2^60 tests algebraic mask independence, not admission into
++an unchanged32-plane request encoding. Those magnitudes need an explicitly
++public64-plane request profile if included in an authenticated source. No private
++payload-derived width or shape has been introduced. The PIOP mutation tests use
++an explicit64-plane configuration; they are authored and typechecked, but CUDA
++linkage prevents execution in this environment.
++
++Important remaining blockers: MaxPoolHelper/GeneralMaxPoolHelper's existing
++constraints prove dominance only, not that the output is attained in the window.
++An all-zero logical window with claimed maximum1 satisfies those old inequalities.
++The output masks here repair padding only, NOT that logical-max proof defect.
++A separate selected-element/product-zero repair is required. Batch Conv2D PIOP,
++full authenticated PCS proofs, GPU execution, calibrated model accuracy, FC integer
++soundness outside the stated local tests, other model lowerings (including VGG's
++own flatten/batch heads), and complete source/mask/lifetime census remain open.
+--- a/zk-torch-4/src/bin/bench_streaming_resnet.rs
++++ b/zk-torch-4/src/bin/bench_streaming_resnet.rs
+@@ -105,12 +105,13 @@
+     let fc_bias = gen_fc_bias(num_classes, batch_size);
+ 
+     let mut g = DagBuilder::new();
+-    // ONE folded input [b_pad*4, H, W] (RGB pads to 4 channels) rather than
++    // ONE explicit [B,3,H,W] input retains logical B (including nonpowers
++    // of two); its raw padded buffer is still [b_pad*4,H,W]. Rather than
+     // `batch` separate inputs: the batch is bound inside conv, so the graph
+     // stays the size of a single image.
+     let xs: Vec<EdgeId> = if batch_size > 1 {
+         vec![g.input(
+-            vec![batch_size.next_power_of_two() * 4, input_size, input_size],
++            vec![batch_size, 3, input_size, input_size],
+             DataType::Uint,
+         )]
+     } else {
+@@ -162,16 +163,14 @@
+             if batch_size > 1 {
+                 let lead = batch_size.next_power_of_two() * 4;
+                 let mut d = rand_field_vec(lead * sp * sp);
+-                // Channel 3 of every image is PADDING (RGB -> 4) and must be
+-                // zero. Unbatched, ZeroPad sanitized it because it knew
+-                // channels == 3; folded, nothing downstream can tell padding
+-                // from data, and conv would fold over 3 channels while the
+-                // opening integrates over 4.
++                // Keep this historical host sanitization, but correctness
++                // no longer depends on it: the registered model masks the
++                // explicit B/C/spatial padding before folding the tensor.
+                 for b in 0..batch_size.next_power_of_two() {
+                     let base = (b * 4 + 3) * sp * sp;
+                     for v in &mut d[base..base + sp * sp] { *v = AlmostGoldilocksField(0); }
+                 }
+-                (x, Witness::new(vec![lead, input_size, input_size], d,
++                (x, Witness::new(vec![batch_size, 3, input_size, input_size], d,
+                                  DataType::Uint, *SF_LOG, Role::Input))
+             } else {
+                 (x, Witness::new(vec![3, input_size, input_size],
+--- a/zk-torch-4/src/dag/builder.rs
++++ b/zk-torch-4/src/dag/builder.rs
+@@ -209,6 +209,54 @@
+             Role::Output,
+         )));
+         outs[0]
++    }
++
++    /// Compact the logical entries of a row-major tensor into a vector.
++    /// `change_shape` only reinterprets/truncates padded storage and is NOT a
++    /// logical flatten. Each public factor selects one mixed-radix coordinate;
++    /// their product selects exactly one logical input, and none for output
++    /// padding. All maps are immutable program literals, authenticated by the
++    /// existing Einsum reduction (no private preprocessing or advice).
++    pub fn flatten_row_major(&mut self, a: EdgeId) -> EdgeId {
++        let shape = self.init_values[a].as_ref().unwrap().shape.clone();
++        assert!(!shape.is_empty() && shape.len() <= 16 && shape.iter().all(|&d| d > 0),
++            "logical flatten requires 1..16 nonzero axes");
++        let count = shape.iter().try_fold(1usize, |n, &d| n.checked_mul(d))
++            .expect("logical flatten size overflow");
++        if shape.iter().all(|d| d.is_power_of_two()) {
++            return self.change_shape(a, vec![count]);
++        }
++        let out_pad = count.checked_next_power_of_two().expect("logical flatten padding overflow");
++        let reversed: Vec<_> = shape.iter().rev().copied().collect();
++        // Reversing shape metadata makes the same raw row-major buffer a
++        // column-major Einsum operand. No data transpose is performed.
++        let mut view = self.change_shape(a, reversed.clone());
++        let mut input_term = letters(reversed.len());
++        let mut stride = 1usize;
++        for (axis, &dim) in reversed.iter().enumerate() {
++            let size = out_pad.checked_mul(dim.checked_next_power_of_two().unwrap())
++                .expect("logical flatten map size overflow");
++            let mut values = vec![AlmostGoldilocksField(0); size];
++            for i in 0..count {
++                let coordinate = (i / stride) % dim;
++                values[i + out_pad * coordinate] = AlmostGoldilocksField(1);
++            }
++            let map = self.public_literal(Witness::new(vec![count, dim], values,
++                DataType::Bool, 0, Role::Input));
++            let axis_char = (b'a' + axis as u8) as char;
++            let remaining = ((axis+1)..reversed.len())
++                .map(|j| (b'a'+j as u8) as char).collect::<String>();
++            let output_term = format!("z{remaining}");
++            // One binary gather per axis avoids expanding all public factors
++            // over the full joint sumcheck cube. Intermediate tensors are
++            // derived, not committed advice. Missing axes are free-once and
++            // are partially evaluated before the binary Einsum sumcheck.
++            view = self.einsum(format!("{input_term},z{axis_char}->{output_term}"),
++                vec![view, map], false)[0];
++            input_term = output_term;
++            stride = stride.checked_mul(dim).unwrap();
++        }
++        view
+     }
+ 
+     pub fn reshape(&mut self, a: EdgeId, shape: Vec<usize>) -> Vec<EdgeId> {
+@@ -662,12 +710,79 @@
+         vec![channels, h, w]
+     }
+ 
++    /// Add a channel bias to a row-major CNN tensor. Generic Add broadcasts
++    /// column-major axes, so applying [C,1,1] directly to [C,H,W] incorrectly
++    /// varies the bias over low spatial bits. The same raw buffers are viewed
++    /// as [W,H,(D),C,B] here; no data-dependent transpose or private map exists.
++    /// Accepts [C], [C,1,..], a full single-image row-major bias, or a full
++    /// tensor bias matching x. Explicit batch padding is retained and masked.
++    pub fn add_channel_bias_row_major(
++        &mut self, x: EdgeId, bias: EdgeId, channels: usize, spatial_axes: usize,
++    ) -> EdgeId {
++        assert!((1..=3).contains(&spatial_axes) && channels > 0);
++        let shape = self.init_values[x].as_ref().unwrap().shape.clone();
++        let bs = self.init_values[bias].as_ref().unwrap().shape.clone();
++        assert!(shape.len() == spatial_axes + 1 || shape.len() == spatial_axes + 2);
++        assert!(shape.iter().all(|&d| d > 0));
++        let cp = channels.next_power_of_two();
++        let batch = if shape.len() == spatial_axes + 2 {
++            assert_eq!(shape[1], channels); shape[0]
++        } else if shape[0] == channels { 1 } else {
++            assert_eq!(shape[0] % cp, 0, "invalid folded CNN channel extent");
++            shape[0] / cp
++        };
++        let spatial = shape[shape.len()-spatial_axes..].to_vec();
++        let mut view_shape = spatial.iter().rev().copied().collect::<Vec<_>>();
++        view_shape.extend([channels, batch]);
++        let view = self.change_shape(x, view_shape.clone());
++        let mut vector_shape = vec![channels]; vector_shape.extend(vec![1; spatial_axes]);
++        let mut image_shape = vec![channels]; image_shape.extend(spatial);
++        let bias_view = if bs == shape {
++            self.change_shape(bias, view_shape.clone())
++        } else if bs == vec![channels] || bs == vector_shape {
++            let mut target = vec![1; spatial_axes]; target.extend([channels, 1]);
++            self.change_shape(bias, target)
++        } else if bs == image_shape {
++            let mut target = view_shape.clone(); *target.last_mut().unwrap() = 1;
++            self.change_shape(bias, target)
++        } else {
++            panic!("unsupported row-major CNN bias {:?} for input {:?} and C={channels}", bs, shape)
++        };
++        let sum = self.add(view, bias_view)[0];
++        let masked = self.mask(sum, view_shape);
++        self.change_shape(masked, shape)
++    }
++
++    /// Per-channel kernels use folded raw storage. Preserve an explicit
++    /// logical batch with registered views and mask its padding before any
++    /// advice/range predicate can observe it. A folded 3D caller retains the
++    /// historical convention that every represented channel is logical.
++    fn fold_per_channel2d_input(&mut self, x: EdgeId) -> (EdgeId, Vec<usize>, usize, usize, usize) {
++        let shape = self.init_values[x].as_ref().unwrap().shape.clone();
++        let (channels, _, _) = Self::per_channel_lead(&shape);
++        let h = shape[shape.len()-2]; let w = shape[shape.len()-1];
++        let x = if shape.len() == 4 {
++            let reversed = shape.iter().rev().copied().collect::<Vec<_>>();
++            let view = self.change_shape(x, reversed.clone());
++            let masked = self.mask(view, reversed);
++            self.change_shape(masked, vec![channels,h,w])
++        } else { x };
++        (x, shape, channels, h, w)
++    }
++
++    fn restore_per_channel2d_output(&mut self, y: EdgeId, original: &[usize], h: usize, w: usize) -> EdgeId {
++        if original.len() == 4 {
++            // Advice such as maxpool is not intrinsically zero on padded B/C.
++            // Bind output padding to zero explicitly, not just by honest run.
++            let reversed = vec![w,h,original[1],original[0]];
++            let view = self.change_shape(y, reversed.clone());
++            let masked = self.mask(view, reversed);
++            self.change_shape(masked, vec![original[0],original[1],h,w])
++        } else { y }
++    }
++
+     pub fn pad(&mut self, x: EdgeId, pad_h: usize, pad_w: usize) -> EdgeId {
+-        let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+-        let (channels, _batch, _logical_c) = Self::per_channel_lead(x_shape);
+-        let off = x_shape.len() - 3;
+-        let input_h = x_shape[off + 1];
+-        let input_w = x_shape[off + 2];
++        let (x, original_shape, channels, input_h, input_w) = self.fold_per_channel2d_input(x);
+ 
+         let h_out = input_h + 2 * pad_h;
+         let w_out = input_w + 2 * pad_w;
+@@ -680,7 +795,7 @@
+             0,
+             Role::Output,
+         )));
+-        outs[0]
++        self.restore_per_channel2d_output(outs[0], &original_shape, h_out, w_out)
+     }
+ 
+     /// 2×2 max pooling: X[C, H, W] → Y[C, H/pool_h, W/pool_w].
+@@ -688,11 +803,7 @@
+     pub fn maxpool2d(&mut self, x: EdgeId, pool_h: usize, pool_w: usize) -> EdgeId {
+         use crate::basicblock::maxpool::{MaxPoolHelper, Replicate2x2};
+ 
+-        let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+-        let (channels, _batch, _logical_c) = Self::per_channel_lead(x_shape);
+-        let off = x_shape.len() - 3;
+-        let input_h = x_shape[off + 1];
+-        let input_w = x_shape[off + 2];
++        let (x, original_shape, channels, input_h, input_w) = self.fold_per_channel2d_input(x);
+ 
+         assert_eq!(input_h % pool_h, 0, "H must be divisible by pool_h");
+         assert_eq!(input_w % pool_w, 0, "W must be divisible by pool_w");
+@@ -729,7 +840,7 @@
+         let diff = diff_outs[0];
+         self.add_nonneg_node(diff);
+ 
+-        y
++        self.restore_per_channel2d_output(y, &original_shape, h_out, w_out)
+     }
+ 
+     /// Asymmetric zero-pad: X[C, H, W] → Y[C, H+pt+pb, W+pl+pr].
+@@ -783,26 +894,20 @@
+         let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+         let w_shape = &self.init_values[w].as_ref().unwrap().shape;
+ 
+-        // C_in comes from the WEIGHT, which is unambiguous, and the batch is
+-        // whatever leading extent is left over. A folded input
+-        // [b_pad*c_in_pad, H, W] and an explicit [B, C_in, H, W] both work, and
+-        // neither depends on a convention the caller has to remember.
++        assert_eq!(w_shape.len(), 4, "Conv2D requires one shared [D,C,KH,KW] kernel");
++        assert!(x_shape.len() == 3 || x_shape.len() == 4, "Conv2D input must be [C,H,W], [B,C,H,W], or folded [Bp*Cp,H,W]");
++        let explicit_batch = x_shape.len() == 4;
+         let c_in = w_shape[1];
+-        let lead: usize = x_shape[..x_shape.len() - 2].iter().product();
+-        let c_in_pad = c_in.next_power_of_two();
+-        // An unbatched tensor carries the LOGICAL channel count (RGB is 3, not
+-        // 4), so `lead == c_in` is the single-image case and need not divide
+-        // c_in_pad. Only a folded batch uses padded channel strides.
+-        let batch = if lead == c_in {
+-            1
+-        } else {
+-            assert!(
+-                lead % c_in_pad == 0,
+-                "conv2d: leading extent {} is neither C_in {} nor a multiple of \
+-                 padded C_in {} (X {:?}, W {:?})",
+-                lead, c_in, c_in_pad, x_shape, w_shape
+-            );
+-            lead / c_in_pad
++        let batch = if explicit_batch {
++            assert_eq!(x_shape[1], c_in, "Conv2D explicit input channel count");
++            assert!(x_shape[0] > 0, "Conv2D logical batch must be positive");
++            x_shape[0]
++        } else if x_shape[0] == c_in { 1 } else {
++            // A folded extent cannot recover a hidden non-power-of-two B.
++            // Preserve explicit [B,C,H,W] to carry that logical metadata.
++            let cp = c_in.next_power_of_two();
++            assert!(x_shape[0] > 0 && x_shape[0] % cp == 0, "Conv2D folded channel/batch extent");
++            x_shape[0] / cp
+         };
+         let input_h = x_shape[x_shape.len() - 2];
+         let input_w = x_shape[x_shape.len() - 1];
+@@ -867,7 +972,9 @@
+         }
+ 
+         self.self_claim_edges.push(y_edge);
+-        vec![y_edge]
++        if explicit_batch {
++            vec![self.change_shape(y_edge, vec![batch, c_out, h_out, w_out])]
++        } else { vec![y_edge] }
+     }
+ 
+     /// Conv2D with stride and dilation: FlattenKernel(W) → W_flat, Conv2D(X, W_flat) → Y.
+@@ -876,26 +983,20 @@
+         let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+         let w_shape = &self.init_values[w].as_ref().unwrap().shape;
+ 
+-        // C_in comes from the WEIGHT, which is unambiguous, and the batch is
+-        // whatever leading extent is left over. A folded input
+-        // [b_pad*c_in_pad, H, W] and an explicit [B, C_in, H, W] both work, and
+-        // neither depends on a convention the caller has to remember.
++        assert_eq!(w_shape.len(), 4, "Conv2D requires one shared [D,C,KH,KW] kernel");
++        assert!(x_shape.len() == 3 || x_shape.len() == 4, "Conv2D input must be [C,H,W], [B,C,H,W], or folded [Bp*Cp,H,W]");
++        let explicit_batch = x_shape.len() == 4;
+         let c_in = w_shape[1];
+-        let lead: usize = x_shape[..x_shape.len() - 2].iter().product();
+-        let c_in_pad = c_in.next_power_of_two();
+-        // An unbatched tensor carries the LOGICAL channel count (RGB is 3, not
+-        // 4), so `lead == c_in` is the single-image case and need not divide
+-        // c_in_pad. Only a folded batch uses padded channel strides.
+-        let batch = if lead == c_in {
+-            1
+-        } else {
+-            assert!(
+-                lead % c_in_pad == 0,
+-                "conv2d: leading extent {} is neither C_in {} nor a multiple of \
+-                 padded C_in {} (X {:?}, W {:?})",
+-                lead, c_in, c_in_pad, x_shape, w_shape
+-            );
+-            lead / c_in_pad
++        let batch = if explicit_batch {
++            assert_eq!(x_shape[1], c_in, "Conv2D explicit input channel count");
++            assert!(x_shape[0] > 0, "Conv2D logical batch must be positive");
++            x_shape[0]
++        } else if x_shape[0] == c_in { 1 } else {
++            // A folded extent cannot recover a hidden non-power-of-two B.
++            // Preserve explicit [B,C,H,W] to carry that logical metadata.
++            let cp = c_in.next_power_of_two();
++            assert!(x_shape[0] > 0 && x_shape[0] % cp == 0, "Conv2D folded channel/batch extent");
++            x_shape[0] / cp
+         };
+         let input_h = x_shape[x_shape.len() - 2];
+         let input_w = x_shape[x_shape.len() - 1];
+@@ -962,7 +1063,9 @@
+         }
+ 
+         self.self_claim_edges.push(y_edge);
+-        vec![y_edge]
++        if explicit_batch {
++            vec![self.change_shape(y_edge, vec![batch, c_out, h_out, w_out])]
++        } else { vec![y_edge] }
+     }
+ 
+     /// SubSample2D with explicit output size.
+@@ -987,11 +1090,7 @@
+     /// General max pooling: X[C, H, W] → Y[C, H_out, W_out] with arbitrary kernel and stride.
+     /// Uses GeneralMaxPoolHelper advice node + SubSample2D + Sub + NonNeg for dominance.
+     pub fn maxpool_general(&mut self, x: EdgeId, kernel_h: usize, kernel_w: usize, stride_h: usize, stride_w: usize) -> EdgeId {
+-        let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+-        let (channels, _batch, _logical_c) = Self::per_channel_lead(x_shape);
+-        let off = x_shape.len() - 3;
+-        let input_h = x_shape[off + 1];
+-        let input_w = x_shape[off + 2];
++        let (x, original_shape, channels, input_h, input_w) = self.fold_per_channel2d_input(x);
+ 
+         let out_h = (input_h - kernel_h) / stride_h + 1;
+         let out_w = (input_w - kernel_w) / stride_w + 1;
+@@ -1016,7 +1115,7 @@
+             }
+         }
+ 
+-        y
++        self.restore_per_channel2d_output(y, &original_shape, out_h, out_w)
+     }
+ 
+     /// ReLU: y = max(0, x).
+@@ -1202,26 +1301,20 @@
+         let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+         let w_shape = &self.init_values[w].as_ref().unwrap().shape;
+ 
+-        // C_in comes from the WEIGHT, which is unambiguous, and the batch is
+-        // whatever leading extent is left over. A folded input
+-        // [b_pad*c_in_pad, H, W] and an explicit [B, C_in, H, W] both work, and
+-        // neither depends on a convention the caller has to remember.
++        assert_eq!(w_shape.len(), 4, "Conv2D requires one shared [D,C,KH,KW] kernel");
++        assert!(x_shape.len() == 3 || x_shape.len() == 4, "Conv2D input must be [C,H,W], [B,C,H,W], or folded [Bp*Cp,H,W]");
++        let explicit_batch = x_shape.len() == 4;
+         let c_in = w_shape[1];
+-        let lead: usize = x_shape[..x_shape.len() - 2].iter().product();
+-        let c_in_pad = c_in.next_power_of_two();
+-        // An unbatched tensor carries the LOGICAL channel count (RGB is 3, not
+-        // 4), so `lead == c_in` is the single-image case and need not divide
+-        // c_in_pad. Only a folded batch uses padded channel strides.
+-        let batch = if lead == c_in {
+-            1
+-        } else {
+-            assert!(
+-                lead % c_in_pad == 0,
+-                "conv2d: leading extent {} is neither C_in {} nor a multiple of \
+-                 padded C_in {} (X {:?}, W {:?})",
+-                lead, c_in, c_in_pad, x_shape, w_shape
+-            );
+-            lead / c_in_pad
++        let batch = if explicit_batch {
++            assert_eq!(x_shape[1], c_in, "Conv2D explicit input channel count");
++            assert!(x_shape[0] > 0, "Conv2D logical batch must be positive");
++            x_shape[0]
++        } else if x_shape[0] == c_in { 1 } else {
++            // A folded extent cannot recover a hidden non-power-of-two B.
++            // Preserve explicit [B,C,H,W] to carry that logical metadata.
++            let cp = c_in.next_power_of_two();
++            assert!(x_shape[0] > 0 && x_shape[0] % cp == 0, "Conv2D folded channel/batch extent");
++            x_shape[0] / cp
+         };
+         let input_h = x_shape[x_shape.len() - 2];
+         let input_w = x_shape[x_shape.len() - 1];
+@@ -1302,7 +1395,9 @@
+         // Track Conv2D output as self-claim edge
+         self.self_claim_edges.push(y_edge);
+ 
+-        vec![y_edge]
++        if explicit_batch {
++            vec![self.change_shape(y_edge, vec![batch, c_out, h_out, w_out])]
++        } else { vec![y_edge] }
+     }
+ 
+     /// Create a conv3d subgraph: FlattenKernel3D(W) → W_flat, Conv3D(X, W_flat) → Y.
+@@ -1789,6 +1884,17 @@
+         let letters: String = (0..x_shape.len()).map(|i| (b'a' + i as u8) as char).collect();
+         let equation = format!("{},{}->{}", letters, letters, letters);
+         self.einsum(equation, vec![x, sig], true)[0]
++    }
++
++    /// CNN SiLU with row-major logical padding. The generic sigmoid/exp
++    /// profile uses column-major axes; reverse metadata on entry and restore
++    /// it on exit so those public masks address the same logical coordinates.
++    pub fn silu_row_major(&mut self, x: EdgeId) -> EdgeId {
++        let shape = self.init_values[x].as_ref().unwrap().shape.clone();
++        assert!(!shape.is_empty());
++        let view = self.change_shape(x, shape.iter().rev().copied().collect());
++        let out = self.silu(view);
++        self.change_shape(out, shape)
+     }
+ 
+     /// Nearest-neighbor 2x upsample: X[C, H, W] → Y[C, 2H, 2W].
+--- a/zk-torch-4/src/dag/cnn_layout_tests.rs
++++ b/zk-torch-4/src/dag/cnn_layout_tests.rs
+@@ -0,0 +1,327 @@
++//! Real CPU graph execution and independently indexed logical references.
++//! Direct range predicates/statement checks are not cryptographic replay.
++use super::*;
++use crate::basicblock::{BasicBlock, BasicBlockType, ChangeShape};
++use crate::util::arith::{f_to_int, int_to_f};
++
++fn input(g: &mut DagBuilder, shape: Vec<usize>, values: Vec<i128>, sf: usize) -> EdgeId {
++    g.committed_input(Witness::new(shape, values.into_iter().map(int_to_f).collect(), DataType::Float, sf, Role::Input))
++}
++fn forward(d: &Dag, w: &mut [Vec<Witness>]) {
++    for &n in &d.topo {
++        let nd = &d.nodes[n];
++        if let BasicBlockType::NonNegative(r) = &nd.kind {
++            for value in w[nd.inputs[0]][0].data.as_ref().unwrap().evaluations_ref() {
++                let v = f_to_int(*value);
++                assert!(v >= 0 && v < 1i128 << r.table_size_log, "range root {n}: {v}");
++            }
++        }
++        let inputs = nd.inputs.iter().map(|&e| &w[e][0]).collect::<Vec<_>>();
++        let outputs = nd.kind.run(&inputs);
++        for (&e, out) in nd.outputs.iter().zip(outputs) { w[e] = vec![out]; }
++    }
++}
++fn values(w: &Witness) -> Vec<i128> {
++    w.data.as_ref().unwrap().evaluations_ref().iter().map(|v| f_to_int(*v)).collect()
++}
++fn row_major(shape: &[usize], poison: i128) -> (Vec<i128>, Vec<i128>) {
++    let count = shape.iter().product::<usize>();
++    let padded = shape.iter().map(|s| s.next_power_of_two()).collect::<Vec<_>>();
++    let mut data = vec![poison; padded.iter().product()];
++    let logical = (0..count).map(|i| i as i128 - (count / 2) as i128).collect::<Vec<_>>();
++    for i in 0..count {
++        let (mut rem, mut raw, mut stride) = (i, 0, 1);
++        for d in (0..shape.len()).rev() {
++            raw += (rem % shape[d]) * stride;
++            rem /= shape[d]; stride *= padded[d];
++        }
++        data[raw] = logical[i];
++    }
++    (data, logical)
++}
++
++#[test]
++fn flatten_row_major_actual_graph_matches_logical_reference_with_poison() {
++    for shape in [vec![16,5,5], vec![3,3,5], vec![2,4,8], vec![3], vec![3,2,3,5]] {
++        for poison in [-777777, 888888] {
++            let (data, mut expected) = row_major(&shape, poison);
++            let mut g = DagBuilder::new();
++            let x = input(&mut g, shape.clone(), data, *crate::SF_LOG);
++            let y = g.flatten_row_major(x);
++            let (d, mut w) = g.compile();
++            forward(&d, &mut w);
++            expected.resize(expected.len().next_power_of_two(), 0);
++            assert_eq!(values(&w[y][0]), expected, "shape={shape:?}");
++            assert_eq!(w[y][0].sf, *crate::SF_LOG);
++            if shape == [16,5,5] {
++                let old = ChangeShape { target_shape: vec![400] }.run(&[&w[x][0]]);
++                assert_ne!(values(&old[0]), expected, "old truncation must be caught");
++                assert_eq!(old[0].data.as_ref().unwrap().evaluations_ref().len(), 512);
++                assert_eq!(d.program_literals.values().map(Vec::len).sum::<usize>(), 16384);
++                assert_eq!(d.program_literals.values().flatten().filter(|&&v| v == 1).count(), 1200);
++            }
++        }
++    }
++}
++
++#[test]
++fn lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding() {
++    let sf = *crate::SF_LOG;
++    assert!(sf <= 20);
++    let q = 1i128 << sf;
++    for poison in [-12345, 333333] {
++        let mut g = DagBuilder::new();
++        let mut expected = (0..400).map(|i| (i as i128 % 23 - 11)*q).collect::<Vec<_>>();
++        let mut data = vec![poison; 1024];
++        for c in 0..16 { for h in 0..5 { for w in 0..5 {
++            data[w+8*(h+8*c)] = expected[w+5*(h+5*c)];
++        }}}
++        let x = input(&mut g, vec![16,5,5], data, sf);
++        let x = g.flatten_row_major(x);
++        let mut weights = Vec::new(); let mut biases = Vec::new();
++        for (ni, no) in [(400usize,120usize),(120,84),(84,10)] {
++            let mut w = vec![poison; ni.next_power_of_two()*no.next_power_of_two()];
++            let mut b = vec![poison; no.next_power_of_two()];
++            let mut next = vec![0i128; no];
++            for o in 0..no {
++                for i in 0..ni {
++                    let v = if i == (o*7)%ni { q } else if i == (o*7+1)%ni { -q } else { 0 };
++                    w[o+no.next_power_of_two()*i] = v;
++                    next[o] += expected[i]*v;
++                }
++                b[o] = (o as i128 % 5 - 2)*q;
++                next[o] = (next[o]+q/2).div_euclid(q)+b[o];
++            }
++            weights.push(Witness::new(vec![no,ni], w.into_iter().map(int_to_f).collect(), DataType::Float, sf, Role::Constant));
++            biases.push(Witness::new(vec![no], b.into_iter().map(int_to_f).collect(), DataType::Float, sf, Role::Constant));
++            expected = next;
++        }
++        let y = super::lenet::classifier(&mut g, x, &weights, &biases);
++        let (d, mut w) = g.compile(); forward(&d, &mut w);
++        expected.resize(16,0);
++        assert_eq!(values(&w[y][0]), expected);
++        for &edge in &d.layer_boundaries {
++            let v = values(&w[edge][0]); let logical = w[edge][0].shape[0];
++            assert!(v[logical..].iter().all(|&v| v == 0));
++        }
++    }
++}
++
++#[test]
++fn resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference() {
++    let sf = *crate::SF_LOG; assert!(sf <= 20); let q = 1i128 << sf;
++    for (batch, channels, h, width) in [(1usize,3usize,3usize,5usize),(3,3,3,5),(5,5,2,3)] {
++        for explicit in [true,false] {
++            for poison in [-98765,222222] {
++                let (cp,bp,hp,wp) = (channels.next_power_of_two(),batch.next_power_of_two(),h.next_power_of_two(),width.next_power_of_two());
++                let mut data = vec![poison; bp*cp*hp*wp];
++                let mut means = vec![vec![0i128; channels]; batch];
++                for b in 0..batch { for c in 0..channels {
++                    let mut sum = 0;
++                    for ih in 0..h { for iw in 0..width {
++                        let v = ((b*7+c*3+iw) as i128-ih as i128-5)*q + (iw%2) as i128;
++                        data[iw+wp*(ih+hp*(c+cp*b))] = v; sum += v;
++                    }}
++                    let n = (h*width) as i128; means[b][c] = (sum+n/2).div_euclid(n);
++                }}
++                let shape = if explicit {vec![batch,channels,h,width]} else if batch==1 {vec![channels,h,width]} else {vec![bp*cp,h,width]};
++                let mut g = DagBuilder::new(); let x = input(&mut g,shape,data,sf);
++                let classes = 5usize; let op = classes.next_power_of_two();
++                let mut w = vec![poison; cp*op]; let mut bv = vec![poison;op];
++                let mut expected = vec![0i128; op*bp];
++                for o in 0..classes {
++                    bv[o] = (o as i128-2)*q;
++                    for c in 0..channels { w[c+cp*o] = ((c+o)%3) as i128*q-q; }
++                    for b in 0..batch {
++                        let sum = (0..channels).map(|c| means[b][c]*w[c+cp*o]).sum::<i128>();
++                        expected[o+op*b] = (sum+q/2).div_euclid(q)+bv[o];
++                    }
++                }
++                let weight = g.param(Witness::new(vec![channels,classes],w.into_iter().map(int_to_f).collect(),DataType::Float,sf,Role::Constant));
++                // Public API documents a vector bias even for batched FC.
++                let bias = g.param(Witness::new(vec![classes],bv.into_iter().map(int_to_f).collect(),DataType::Float,sf,Role::Constant));
++                let y = super::resnet::classifier_head(&mut g,x,weight,Some(bias),batch,sf);
++                let (d,mut w) = g.compile(); forward(&d,&mut w);
++                assert_eq!(values(&w[y][0]),expected,"B={batch} C={channels} explicit={explicit}");
++                assert_eq!(w[y][0].shape,if batch==1 {vec![classes]} else {vec![classes,batch]});
++            }
++        }
++    }
++}
++
++#[test]
++fn flatten_maps_are_immutable_public_program_data_not_private_sources() {
++    use crate::morpheus::{piop::{Graph,Config},statement,params::Profile,keys::KeySeed};
++    let mut statements = Vec::new();
++    for poison in [-77,88] {
++        let mut g = DagBuilder::new();
++        let (v,_) = row_major(&[3,2,3],poison);
++        let x = input(&mut g,vec![3,2,3],v,0); g.flatten_row_major(x);
++        let (d,mut w) = g.compile(); forward(&d,&mut w);
++        let mut graph = Graph::new(&d,&w,Config::default());
++        for (&e,v) in &d.program_literals {
++            assert_eq!(&**graph.public.get(&e).unwrap(),v);
++            assert!(!graph.model[e]);
++        }
++        statements.push(statement::model_words(&graph,&Profile::toy(),&KeySeed([7;8]),11,false,4).unwrap());
++        let (&e,v) = d.program_literals.iter().next().unwrap();
++        let mut changed = v.clone(); changed[0] ^= 1;
++        graph.public.insert(e,std::sync::Arc::new(changed));
++        assert!(statement::words(&graph,&Profile::toy(),&KeySeed([7;8]),11,false,4).is_err());
++    }
++    assert_eq!(statements[0],statements[1],"private padding cannot change the program");
++}
++
++#[test]
++fn row_major_channel_bias_distinct_channels_basis_and_poisoned_padding() {
++    use crate::basicblock::Add;
++    for (batch, spatial, explicit) in [(1usize,vec![3usize,5usize],false),(3,vec![3,5],true),(3,vec![3,5],false),(1,vec![2,3,5],false)] {
++        let channels = 3usize; let cp = 4; let bp = batch.next_power_of_two();
++        let sp = spatial.iter().map(|s|s.next_power_of_two()).product::<usize>();
++        let logical_sp = spatial.iter().product::<usize>();
++        let mut shape = if explicit {vec![batch,channels]} else if batch==1 {vec![channels]} else {vec![batch*cp]};
++        shape.extend(&spatial);
++        for bias_form in 0..3 {
++            for poison in [-123456,777777] {
++                let mut data = vec![poison;bp*cp*sp];
++                let mut expected = vec![0;data.len()];
++                let mut bias_data = if bias_form<2 {vec![poison;cp]} else {vec![poison;cp*sp]};
++                for c in 0..channels { if bias_form<2 {bias_data[c] = 101*(c as i128+1);} }
++                for b in 0..batch { for c in 0..channels { for pos in 0..logical_sp {
++                    let (mut rem,mut raw,mut stride)=(pos,0,1);
++                    for d in (0..spatial.len()).rev() {raw+=(rem%spatial[d])*stride;rem/=spatial[d];stride*=spatial[d].next_power_of_two();}
++                    let i = raw+sp*(c+cp*b);
++                    let base = if c==1 && pos==logical_sp/2 {1000*(b as i128+1)} else {0};
++                    data[i] = base;
++                    let v = 101*(c as i128+1)+if bias_form==2 {pos as i128} else {0};
++                    expected[i] = base+v;
++                    if bias_form==2 {bias_data[raw+sp*c]=v;}
++                }}}
++                let bias_shape = match bias_form {0=>vec![channels],1=>{let mut s=vec![channels];s.extend(vec![1;spatial.len()]);s},_=>{let mut s=vec![channels];s.extend(&spatial);s}};
++                let mut g=DagBuilder::new();let x=input(&mut g,shape.clone(),data,0);
++                let bias=g.param(Witness::new(bias_shape,bias_data.into_iter().map(int_to_f).collect(),DataType::Float,0,Role::Constant));
++                let y=g.add_channel_bias_row_major(x,bias,channels,spatial.len());
++                let (d,mut w)=g.compile();forward(&d,&mut w);
++                assert_eq!(values(&w[y][0]),expected,"B={batch} spatial={spatial:?} explicit={explicit} form={bias_form}");
++                if batch==1 && spatial.len()==2 && bias_form==1 {
++                    let old=Add.run(&[&w[x][0],&w[bias][0]]);
++                    assert_ne!(values(&old[0]),expected,"old column-major broadcast must fail");
++                }
++            }
++        }
++    }
++}
++
++#[test]
++fn resnet_head_rejects_same_padded_size_but_wrong_logical_extents() {
++    for (shape,features,batch) in [(vec![3usize,3,2,3],4usize,3usize),(vec![3,3,2,3],3,4),(vec![3,2,3],4,1),(vec![8,2,3],3,3)] {
++        assert!(std::panic::catch_unwind(|| {
++            let mut g=DagBuilder::new();let x=g.input(shape,DataType::Float);
++            let w=g.param(Witness::new(vec![features,5],vec![int_to_f(0);features.next_power_of_two()*8],DataType::Float,0,Role::Constant));
++            super::resnet::classifier_head(&mut g,x,w,None,batch,0);
++        }).is_err());
++    }
++}
++
++#[test]
++fn cnn_public_literal_source_census_representative_graphs() {
++    use crate::morpheus::{piop::{Graph,Config,layout::{TKey,Layout}},params::Profile};
++    fn census(label:&str,g:DagBuilder) {
++        let(d,mut w)=g.compile();forward(&d,&mut w);
++        let graph=Graph::new(&d,&w,Config{tcl:4,slots_log:17,req_planes_log:5});
++        let mut specs=Vec::new();let mut slots=0usize;let mut coords=0usize;
++        for (&e,values) in &d.program_literals {
++            assert!(graph.committed[e] && graph.public.contains_key(&e) && !graph.model[e]);
++            let max_bits=values.iter().map(|&v| {let p=almost_goldilocks_cuda::field::ALMOST_GOLDILOCKS_PRIME;let a=if v>p/2 {p-v}else{v};(64-a.leading_zeros() as usize).max(1)}).max().unwrap();
++            let planes=max_bits.next_power_of_two();let bits=values.iter().all(|&v|v<=1);
++            let raw=values.len()*planes;slots+=values.len();coords+=raw;
++            specs.push((TKey::Edge(e),graph.nvars[e],planes.trailing_zeros() as usize,bits));
++            println!("CENSUS {label} edge={e} shape={:?} field_slots={} planes={planes} bit_typed={bits} raw_coordinates={raw}",w[e][0].shape,values.len());
++        }
++        let profile=Profile::ternary();let layout=Layout::pack(&profile,&specs);
++        let packed=layout.tensors.iter().flat_map(|t|&t.pieces).map(|p|1usize<<(p.region.m+p.region.p)).sum::<usize>();
++        assert_eq!(packed,coords);
++        println!("CENSUS_TOTAL {label} literals={} field_slots={slots} raw_coordinates={coords} public_only_sources={} source_payload_cap={} n_max={} energy_cap_log2={} whole_workload_compatibility=UNVERIFIED",d.program_literals.len(),layout.n_sources,profile.source_payload_cols*crate::morpheus::ring::N,profile.n_max,profile.s_max_log2);
++    }
++    let sf=*crate::SF_LOG;
++    let zero=|shape:Vec<usize>| {let n=shape.iter().map(|s|s.next_power_of_two()).product();Witness::new(shape,vec![int_to_f(0);n],DataType::Float,sf,Role::Constant)};
++    let mut g=DagBuilder::new();let x=input(&mut g,vec![1,32,32],vec![0;1024],sf);
++    let cw=vec![zero(vec![6,1,5,5]),zero(vec![16,6,5,5])];
++    let cb=vec![zero(vec![6,28,28]),zero(vec![16,10,10])];
++    let fw=vec![zero(vec![120,400]),zero(vec![84,120]),zero(vec![10,84])];let fb=vec![zero(vec![120]),zero(vec![84]),zero(vec![10])];
++    g.pipe(&[x],super::lenet::lenet5(cw,cb,fw,fb));census("LeNet5_full_graph",g);
++    let mut g=DagBuilder::new();let x=input(&mut g,vec![3,2048,7,7],vec![0;4*2048*8*8],sf);
++    let w=g.param(zero(vec![2048,1000]));let b=g.param(zero(vec![1000]));
++    super::resnet::classifier_head(&mut g,x,w,Some(b),3,sf);census("ResNet_head_B3_C2048_7x7_O1000",g);
++}
++
++#[test]
++fn explicit_nonpower_batch_survives_pad_and_pool_registered_views() {
++    let b=3usize;let c=3usize;let (h,w)=(4usize,6usize);let (cp,bp,hp,wp)=(4,4,4,8);
++    for poison in [1i128<<40,-(1i128<<40)] {
++        let mut raw=vec![poison;bp*cp*hp*wp];
++        for ib in 0..b {for ic in 0..c {for ih in 0..h {for iw in 0..w {
++            raw[iw+wp*(ih+hp*(ic+cp*ib))]=(ib*100+ic*10+ih*2+iw) as i128;
++        }}}}
++        for general in [false,true] {
++            let mut g=DagBuilder::new();let x=input(&mut g,vec![b,c,h,w],raw.clone(),0);
++            let padded=g.pad(x,1,1);
++            assert_eq!(g.init_values[padded].as_ref().unwrap().shape,vec![b,c,6,8]);
++            let y=if general {g.maxpool_general(padded,2,2,2,2)}else{g.maxpool2d(padded,2,2)};
++            assert_eq!(g.init_values[y].as_ref().unwrap().shape,vec![b,c,3,4]);
++            let (d,mut wit)=g.compile();forward(&d,&mut wit);
++            assert_eq!(wit[y][0].shape,vec![b,c,3,4]);
++            let got=values(&wit[y][0]);let mut expected=vec![0;bp*cp*4*4];
++            for ib in 0..b {for ic in 0..c {for oh in 0..3 {for ow in 0..4 {
++                let mut maximum=i128::MIN;
++                for dh in 0..2 {for dw in 0..2 {
++                    let ih=(oh*2+dh) as isize-1;let iw=(ow*2+dw) as isize-1;
++                    let v=if ih>=0 && ih<h as isize && iw>=0 && iw<w as isize {(ib*100+ic*10+ih as usize*2+iw as usize) as i128}else{0};
++                    maximum=maximum.max(v);
++                }}
++                expected[ow+4*(oh+4*(ic+cp*ib))]=maximum;
++            }}}}
++            assert_eq!(got,expected,"general={general}");
++        }
++    }
++}
++
++#[test]
++fn explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference() {
++    let (batch,ci,co,h,w)=(3usize,3usize,5usize,4usize,6usize);
++    for mode in 0..3 {
++        let (kernel,stride,dilation)=match mode {0=>(1usize,1usize,1usize),1=>(1,2,1),_=>(2,1,2)};
++        let (ph,pw)=(h+2,w+2);let oh=(ph-dilation*(kernel-1)-1)/stride+1;let ow=(pw-dilation*(kernel-1)-1)/stride+1;
++        let khp=kernel.next_power_of_two();let mut raw=vec![int_to_f(1i128<<40);4*4*4*8];
++        for b in 0..batch {for c in 0..ci {for ih in 0..h {for iw in 0..w {raw[iw+8*(ih+4*(c+4*b))]=int_to_f((b*40+c*10+ih*2+iw)as i128);}}}}
++        let mut weights=vec![int_to_f(-55555);8*4*khp*khp];
++        for d in 0..co {for c in 0..ci {for kh in 0..kernel {for kw in 0..kernel {
++            weights[kw+khp*(kh+khp*(c+4*d))]=int_to_f(if c==d%ci {(1+kh+kw)as i128}else{0});
++        }}}}
++        let mut g=DagBuilder::new();let x=g.committed_input(Witness::new(vec![batch,ci,h,w],raw,DataType::Float,0,Role::Input));
++        let weight=g.param(Witness::new(vec![co,ci,kernel,kernel],weights,DataType::Float,0,Role::Constant));
++        let padded=g.pad(x,1,1);
++        let convolved=match mode {0=>g.conv2d(padded,weight,(kernel,kernel))[0],1=>g.conv2d_strided(padded,weight,(kernel,kernel),(stride,stride))[0],_=>g.conv2d_dilated(padded,weight,(kernel,kernel),(stride,stride),(dilation,dilation))[0]};
++        assert_eq!(g.init_values[convolved].as_ref().unwrap().shape,vec![batch,co,oh,ow]);
++        let mut bias_values=vec![int_to_f(777);8];for c in 0..co {bias_values[c]=int_to_f((c+1)as i128*11);}
++        let bias=g.param(Witness::new(vec![co,1,1],bias_values,DataType::Float,0,Role::Constant));
++        let biased=g.add_channel_bias_row_major(convolved,bias,co,2);
++        let y=g.maxpool_general(biased,2,2,1,1);
++        let (d,mut wit)=g.compile();forward(&d,&mut wit);
++        assert!(d.nodes.iter().any(|n|matches!(&n.kind,BasicBlockType::Conv2D(c) if c.batch==batch)));
++        let out_h=oh-1;let out_w=ow-1;let hp=out_h.next_power_of_two();let wp=out_w.next_power_of_two();
++        let mut expected=vec![0;4*8*hp*wp];
++        let cv=|b:usize,d:usize,ho:usize,wo:usize| {
++            let mut total=(d+1)as i128*11;let c=d%ci;
++            for kh in 0..kernel {for kw in 0..kernel {
++                let ih=(ho*stride+kh*dilation)as isize-1;let iw=(wo*stride+kw*dilation)as isize-1;
++                if ih>=0 && ih<h as isize && iw>=0 && iw<w as isize {total+=(b*40+c*10+ih as usize*2+iw as usize)as i128*(1+kh+kw)as i128;}
++            }} total
++        };
++        for b in 0..batch {for c in 0..co {for ih in 0..out_h {for iw in 0..out_w {
++            let mut maximum=i128::MIN;for dh in 0..2 {for dw in 0..2 {maximum=maximum.max(cv(b,c,ih+dh,iw+dw));}}
++            expected[iw+wp*(ih+hp*(c+8*b))]=maximum;
++        }}}}
++        assert_eq!(wit[y][0].shape,vec![batch,co,out_h,out_w]);assert_eq!(values(&wit[y][0]),expected,"mode={mode}");
++    }
++}
+--- a/zk-torch-4/src/dag/lenet.rs
++++ b/zk-torch-4/src/dag/lenet.rs
+@@ -78,8 +78,11 @@
+ }
+ 
+ /// EZKL's LeNet-5. `conv_w` is `[conv1 (6,1,5,5), conv2 (16,6,5,5)]`, `fc_w` is
+-/// `[400x120, 120x84, 84x10]`, and the biases follow ONNX shapes. The graph is
+-/// built to match the exported ONNX operator for operator.
++/// column-major `[120,400]`, `[84,120]`, `[10,84]` (out,in): entry (o,i)
++/// is stored at `o + out.next_power_of_two()*i`. Raw ONNX row-major weight
++/// bytes must be encoded into this layout, not merely relabelled. FC biases
++/// are vectors; convolution biases may be [C], [C,1,1] or full row-major
++/// [C,H,W]. This is the stated operator graph, not an ONNX-loader validation.
+ pub fn lenet5(
+     conv_w: Vec<Witness>,
+     conv_b: Vec<Witness>,
+@@ -97,7 +100,7 @@
+         h = g.conv2d(h, w0, (5, 5))[0];
+         if *SF_LOG > 0 { h = g.scale(h, 2 * *SF_LOG, *SF_LOG)[0]; }
+         let b0 = g.param(conv_b[0].clone());
+-        h = g.add(h, b0)[0];
++        h = g.add_channel_bias_row_major(h, b0, 6, 2);
+         h = quadratic_activation(g, h, "chw,chw->chw");
+         h = avg_pool2x2(g, h, 6);
+         g.layer_boundaries.push(h);
+@@ -107,7 +110,7 @@
+         h = g.conv2d(h, w1, (5, 5))[0];
+         if *SF_LOG > 0 { h = g.scale(h, 2 * *SF_LOG, *SF_LOG)[0]; }
+         let b1 = g.param(conv_b[1].clone());
+-        h = g.add(h, b1)[0];
++        h = g.add_channel_bias_row_major(h, b1, 16, 2);
+         h = quadratic_activation(g, h, "chw,chw->chw");
+         h = avg_pool2x2(g, h, 16);
+         g.layer_boundaries.push(h);
+@@ -115,16 +118,39 @@
+         // Flatten to 400 and run the classifier. ONNX Gemm has transB=1, so the
+         // stored weight is [out, in] and the contraction is over `out`'s second
+         // axis; einsum states that directly rather than transposing first.
+-        h = g.change_shape(h, vec![16 * 5 * 5]);
+-        for i in 0..3 {
+-            let w_e = g.param(fc_w[i].clone());
+-            h = g.einsum("i,oi->o".to_string(), vec![h, w_e], false)[0];
+-            if *SF_LOG > 0 { h = g.scale(h, 2 * *SF_LOG, *SF_LOG)[0]; }
+-            let b_e = g.param(fc_b[i].clone());
+-            h = g.add(h, b_e)[0];
+-            g.layer_boundaries.push(h);
+-        }
++        assert_eq!(g.init_values[h].as_ref().unwrap().shape, vec![16, 5, 5]);
++        h = g.flatten_row_major(h);
++        h = classifier(g, h, &fc_w, &fc_b);
+         vec![h]
+     }
+ }
+ 
++
++/// Exact logical FC chain after compact flatten. Weights use column-major
++/// [out,in] storage, not ONNX's unencoded row-major bytes.
++pub(crate) fn classifier(g: &mut DagBuilder, mut h: EdgeId, fc_w: &[Witness], fc_b: &[Witness]) -> EdgeId {
++    assert_eq!(fc_w.len(), 3);
++    assert_eq!(fc_b.len(), 3);
++    for i in 0..3 {
++            let w_e = g.param(fc_w[i].clone());
++            // Einsum is column-major: [out,in] means offset o + out_pad*i.
++            // A compact ONNX row-major buffer must be encoded before becoming
++            // a Witness; the shape alone does not transpose its storage.
++            let input_shape = g.init_values[h].as_ref().unwrap().shape.clone();
++            assert_eq!(input_shape.len(), 1);
++            let weight_shape = g.init_values[w_e].as_ref().unwrap().shape.clone();
++            assert_eq!(weight_shape.len(), 2);
++            assert_eq!(weight_shape[1], input_shape[0]);
++            h = g.mask(h, input_shape);
++            h = g.einsum("i,oi->o".to_string(), vec![h, w_e], false)[0];
++            if *SF_LOG > 0 { h = g.scale(h, 2 * *SF_LOG, *SF_LOG)[0]; }
++            let b_e = g.param(fc_b[i].clone());
++            assert_eq!(g.init_values[b_e].as_ref().unwrap().shape, vec![weight_shape[0]]);
++            h = g.add(h, b_e)[0];
++            // Bias/weight padding is not logical data and must not enter the
++            // next contraction (120 and 84 both have padded coordinates).
++            h = g.mask(h, vec![weight_shape[0]]);
++            g.layer_boundaries.push(h);
++    }
++    h
++}
+--- a/zk-torch-4/src/dag/mod.rs
++++ b/zk-torch-4/src/dag/mod.rs
+@@ -1296,3 +1296,6 @@
+ 
+ #[cfg(test)]
+ mod normalization_tests;
++
++#[cfg(test)]
++mod cnn_layout_tests;
+--- a/zk-torch-4/src/dag/pointpillar.rs
++++ b/zk-torch-4/src/dag/pointpillar.rs
+@@ -26,7 +26,8 @@
+         g.conv2d(h, w, (3, 3))[0]
+     };
+     let h = rescale_conv(g, h, w);
+-    let h = g.add(h, bias)[0];
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    let h = g.add_channel_bias_row_major(h, bias, c, 2);
+     g.relu(h)
+ }
+ 
+@@ -40,7 +41,8 @@
+ ) -> EdgeId {
+     let h = g.conv2d(x, w, (1, 1))[0];
+     let h = rescale_conv(g, h, w);
+-    let h = g.add(h, bias)[0];
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    let h = g.add_channel_bias_row_major(h, bias, c, 2);
+     g.relu(h)
+ }
+ 
+@@ -55,7 +57,8 @@
+ ) -> EdgeId {
+     let h = g.conv_transpose2d(x, w, kernel, stride)[0];
+     let h = rescale_conv(g, h, w);
+-    let h = g.add(h, bias)[0];
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    let h = g.add_channel_bias_row_major(h, bias, c, 2);
+     g.relu(h)
+ }
+ 
+--- a/zk-torch-4/src/dag/resnet.rs
++++ b/zk-torch-4/src/dag/resnet.rs
+@@ -18,7 +18,7 @@
+     // Conv 1×1 (c_in → c_mid), stride=1
+     let mut h = g.conv2d(x, weights[0], (1, 1))[0];
+     if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-    if let Some(b) = biases.get(0).copied().flatten() { h = g.add(h, b)[0]; }
++    if let Some(b) = biases.get(0).copied().flatten() { let c = g.init_values[weights[0]].as_ref().unwrap().shape[0]; h = g.add_channel_bias_row_major(h, b, c, 2); }
+     h = g.relu(h);
+ 
+     // Conv 3×3 (c_mid → c_mid), with padding=1, stride=stride
+@@ -29,13 +29,13 @@
+         g.conv2d(h, weights[1], (3, 3))[0]
+     };
+     if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-    if let Some(b) = biases.get(1).copied().flatten() { h = g.add(h, b)[0]; }
++    if let Some(b) = biases.get(1).copied().flatten() { let c = g.init_values[weights[1]].as_ref().unwrap().shape[0]; h = g.add_channel_bias_row_major(h, b, c, 2); }
+     h = g.relu(h);
+ 
+     // Conv 1×1 (c_mid → c_out), stride=1
+     h = g.conv2d(h, weights[2], (1, 1))[0];
+     if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-    if let Some(b) = biases.get(2).copied().flatten() { h = g.add(h, b)[0]; }
++    if let Some(b) = biases.get(2).copied().flatten() { let c = g.init_values[weights[2]].as_ref().unwrap().shape[0]; h = g.add_channel_bias_row_major(h, b, c, 2); }
+ 
+     // Shortcut
+     let shortcut = if has_projection {
+@@ -45,7 +45,7 @@
+             g.conv2d(x, weights[3], (1, 1))[0]
+         };
+         if sf_log > 0 { s = g.scale(s, 2 * sf_log, sf_log)[0]; }
+-        if let Some(b) = biases.get(3).copied().flatten() { s = g.add(s, b)[0]; }
++        if let Some(b) = biases.get(3).copied().flatten() { let c = g.init_values[weights[3]].as_ref().unwrap().shape[0]; s = g.add_channel_bias_row_major(s, b, c, 2); }
+         s
+     } else {
+         x
+@@ -189,14 +189,31 @@
+             // still builds one chain. Conv binds the batch variables, and every
+             // other op in the body is per-channel, for which a batch is simply
+             // more channels. RGB pads to 4 channels.
+-            let lead = g.init_values[inp].as_ref().unwrap().shape[0];
+-            let batch = (lead / 3usize.next_power_of_two()).max(1);
++            let input_shape = g.init_values[inp].as_ref().unwrap().shape.clone();
++            let batch = match input_shape.as_slice() {
++                [3, _, _] => 1,
++                [lead, _, _] => {
++                    assert!(*lead > 0 && *lead % 4 == 0, "invalid folded RGB input");
++                    *lead / 4 // Every represented folded batch is logical.
++                }
++                [batch, 3, _, _] => { assert!(*batch > 0); *batch }
++                _ => panic!("ResNet input must be [3,H,W], [B*4,H,W], or [B,3,H,W]"),
++            };
+             let mut h = inp;
++            if input_shape.len() == 4 {
++                // Keep logical B in this closure before per-channel blocks
++                // fold it into padded channels. Exclude poisoned B/C/spatial
++                // padding in the registered graph, not in the input loader.
++                let reversed = input_shape.iter().rev().copied().collect::<Vec<_>>();
++                let view = g.change_shape(h, reversed.clone());
++                let masked = g.mask(view, reversed);
++                h = g.change_shape(masked, input_shape);
++            }
+             // Stem
+             h = g.pad(h, 3, 3);
+             h = g.conv2d_strided(h, sw, (7, 7), (2, 2))[0];
+             if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-            if let Some(b) = sb { h = g.add(h, b)[0]; }
++            if let Some(b) = sb { let c = g.init_values[sw].as_ref().unwrap().shape[0]; h = g.add_channel_bias_row_major(h, b, c, 2); }
+             h = g.relu(h);
+             h = g.pad(h, 1, 1);
+             h = g.maxpool_general(h, 3, 3, 2, 2);
+@@ -211,22 +228,55 @@
+             // CNN raw buffers are row-major. Reinterpret [foldedC,H,W]
+             // as [W,H,foldedC] before column-major Einsum reduction.
+             // Result keeps c in low bits and b in high bits for the FC view.
+-            h = global_mean_row_major(g,h);
+-            if batch > 1 {
+-                let feat = g.init_values[h].as_ref().unwrap().shape[0] / batch;
+-                h = g.change_shape(h, vec![feat, batch]);
+-                h = g.einsum("ib,ij->jb".to_string(), vec![h, fc_w], false)[0];
+-                if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-                if let Some(b) = fc_b { h = g.add(h, b)[0]; }
+-            } else {
+-                h = g.einsum("i,ij->j".to_string(), vec![h, fc_w], false)[0];
+-                if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-                if let Some(b) = fc_b { h = g.add(h, b)[0]; }
+-            }
++            h = classifier_head(g, h, fc_w, fc_b, batch, sf_log);
+             outs.push(h);
+         }
+         outs
+     }
++}
++
++/// GAP + column-major FC. `batch` is the public logical batch count retained
++/// by the caller, not a count inferred from a padded intermediate. This helper
++/// repairs head semantics; the Morpheus Conv2D PIOP still needs batch support.
++pub(crate) fn classifier_head(
++    g: &mut DagBuilder, x: EdgeId, weight: EdgeId, bias: Option<EdgeId>,
++    batch: usize, sf_log: usize,
++) -> EdgeId {
++    assert!(batch > 0);
++    let ws = g.init_values[weight].as_ref().unwrap().shape.clone();
++    assert_eq!(ws.len(), 2, "ResNet FC weight must be column-major [in,out]");
++    let (features, classes) = (ws[0], ws[1]);
++    assert!(features > 0 && classes > 0);
++    let xs = &g.init_values[x].as_ref().unwrap().shape;
++    match xs.as_slice() {
++        [b, c, _, _] => { assert_eq!(*b, batch); assert_eq!(*c, features); }
++        [c, _, _] if batch == 1 => assert_eq!(*c, features),
++        [lead, _, _] => assert!(*lead == batch * features.next_power_of_two()
++            || *lead == batch.next_power_of_two() * features.next_power_of_two(),
++            "folded GAP channels do not match the declared logical batch/features"),
++        _ => panic!("GAP expects row-major [C,H,W] or [B,C,H,W]"),
++    }
++    let h = global_mean_row_major(g, x);
++    let n = crate::util::arith::get_n(&g.init_values[h].as_ref().unwrap().shape);
++    assert_eq!(1usize << n, features.next_power_of_two() * batch.next_power_of_two(),
++        "GAP feature/batch extent does not match FC weight and logical batch");
++    let shape = if batch == 1 { vec![features] } else { vec![features, batch] };
++    let h = g.change_shape(h, shape.clone());
++    let h = g.mask(h, shape);
++    let equation = if batch == 1 { "i,ij->j" } else { "ib,ij->jb" };
++    let mut out = g.einsum(equation.into(), vec![h, weight], false)[0];
++    if sf_log > 0 { out = g.scale(out, 2 * sf_log, sf_log)[0]; }
++    if let Some(bias) = bias {
++        let bs = &g.init_values[bias].as_ref().unwrap().shape;
++        assert!(bs == &vec![classes] || bs == &vec![classes, 1],
++            "FC bias must contain exactly one class vector");
++        let bias_shape = if batch == 1 { vec![classes] } else { vec![classes, 1] };
++        let bias = g.change_shape(bias, bias_shape);
++        out = g.add(out, bias)[0];
++    }
++    // Bias broadcasts also fill padded batches; bind those outputs to zero.
++    let shape = if batch == 1 { vec![classes] } else { vec![classes, batch] };
++    g.mask(out, shape)
+ }
+ 
+ /// CNN storage is row-major (W is fastest), whereas Einsum is column-major.
+--- a/zk-torch-4/src/dag/unet3d.rs
++++ b/zk-torch-4/src/dag/unet3d.rs
+@@ -258,7 +258,8 @@
+             h = rescale_conv3d(g, h, w_e);
+ 
+             if let Some(bias_e) = out_bias_e {
+-                h = g.add(h, bias_e)[0];
++                let c = g.init_values[w_e].as_ref().unwrap().shape[0];
++                h = g.add_channel_bias_row_major(h, bias_e, c, 3);
+             }
+         }
+ 
+--- a/zk-torch-4/src/dag/vgg.rs
++++ b/zk-torch-4/src/dag/vgg.rs
+@@ -82,7 +82,8 @@
+                 h = g.pad(h, 1, 1);
+                 h = g.conv2d(h, cp.w, (3, 3))[0];
+                 if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
+-                h = g.add(h, cp.b)[0];
++                let c = g.init_values[cp.w].as_ref().unwrap().shape[0];
++                h = g.add_channel_bias_row_major(h, cp.b, c, 2);
+                 h = g.relu(h);
+                 g.layer_boundaries.push(h);
+                 if cp.maxpool_after { h = g.maxpool2d(h, 2, 2); }
+--- a/zk-torch-4/src/dag/yolo.rs
++++ b/zk-torch-4/src/dag/yolo.rs
+@@ -35,8 +35,9 @@
+     };
+     let h = g.conv2d_strided(h, w, kernel, stride)[0];
+     let h = rescale_conv(g, h, w);
+-    let h = g.add(h, bias)[0];
+-    g.silu(h)
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    let h = g.add_channel_bias_row_major(h, bias, c, 2);
++    g.silu_row_major(h)
+ }
+ 
+ /// CBS with depthwise conv: DWConv + bias + SiLU.
+@@ -56,8 +57,9 @@
+     };
+     let h = g.depthwise_conv2d_strided(h, w, kernel, stride)[0];
+     let h = rescale_conv(g, h, w);
+-    let h = g.add(h, bias)[0];
+-    g.silu(h)
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    let h = g.add_channel_bias_row_major(h, bias, c, 2);
++    g.silu_row_major(h)
+ }
+ 
+ /// Plain conv + bias (no activation).
+@@ -77,7 +79,8 @@
+     };
+     let h = g.conv2d_strided(h, w, kernel, stride)[0];
+     let h = rescale_conv(g, h, w);
+-    g.add(h, bias)[0]
++    let c = g.init_values[h].as_ref().unwrap().shape[0];
++    g.add_channel_bias_row_major(h, bias, c, 2)
+ }
+ 
+ /// C3k block (1 bottleneck): cv1 → split → bottleneck(half) → concat → cv2.
+--- a/zk-torch-4/src/morpheus/piop/cnn_layout_tests.rs
++++ b/zk-torch-4/src/morpheus/piop/cnn_layout_tests.rs
+@@ -0,0 +1,63 @@
++//! Actual masked PIOP replay tests. These are authored/typechecked even when
++//! native CUDA symbols prevent execution; no proof acceptance is inferred.
++use super::*;
++use crate::basicblock::BasicBlock;
++use crate::dag::{DagBuilder,DataType};
++use crate::util::arith::int_to_f;
++use crate::morpheus::params::Profile;
++
++fn rows_hold(rows: &[Row], raw: &[Vec<i8>]) -> bool {
++    rows.iter().all(|row| {
++        let mut acc=K8::ZERO;
++        for t in &row.terms {
++            let eq=crate::morpheus::field8::eq_table(&t.r);let mut sum=K8::ZERO;
++            for (i,e) in eq.iter().enumerate() {for (b,pw) in t.pw.iter().enumerate() {
++                let digit=raw[t.region.source][t.region.base+(i<<t.region.p)+b];
++                sum=sum.add(&e.mul(pw).mul(&kb(digit as i128)));
++            }}
++            acc=acc.add(&sum.mul(&t.scale));
++        }
++        acc==row.y
++    })
++}
++fn replay(g:&Graph,pd:&ProverData)->bool {
++    let p=Profile::toy();let lay=Layout::pack(&p,&tensor_specs(g,pd));
++    let raw=fill_sources(g,pd,&lay,p.ell());
++    let tr=MTranscript::new("cnn-logical-layout-test",&[0;64]);
++    let mut pc=Ctx::prover(tr.clone(),&pd.bank,&lay,g.cfg.slots_log);
++    Walk::new(g,Some(pd)).run(&mut pc);
++    let mut vc=Ctx::verifier(tr,pc.proof.clone(),&lay,g.cfg.slots_log);
++    Walk::new(g,None).run(&mut vc);
++    vc.ok && vc.consumed() && rows_hold(&vc.rows,&raw)
++}
++fn flatten_case()->(Dag,Vec<Vec<Witness>>,usize) {
++    let mut b=DagBuilder::new();let mut raw=vec![int_to_f(777);32];
++    for c in 0..3 {for h in 0..2 {for w in 0..3 {raw[w+4*(h+2*c)]=int_to_f((w+3*(h+2*c)) as i128-9);}}}
++    let x=b.committed_input(Witness::new(vec![3,2,3],raw,DataType::Float,0,Role::Input));
++    let out=b.flatten_row_major(x);
++    let (d,mut w)=b.compile();
++    for &n in &d.topo {let nd=&d.nodes[n];let ins=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();let outs=nd.kind.run(&ins);for (&e,v) in nd.outputs.iter().zip(outs) {w[e]=vec![v];}}
++    (d,w,out)
++}
++#[test]
++fn logical_flatten_piop_rejects_wrong_logical_and_padding_outputs() {
++    let (d,w,out)=flatten_case();
++    let mut g=Graph::new(&d,&w,Config{tcl:4,slots_log:12,req_planes_log:6});
++    let mut pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<12]);
++    assert!(replay(&g,&pd));
++    let honest=pd.vals[out].as_ref().unwrap().clone();
++    for index in [5,18,31] {
++        let mut bad=honest.as_ref().clone();bad[index]=from_i128(123);
++        let bad=Arc::new(bad);pd.vals[out]=Some(bad.clone());g.outputs=vec![(out,bad)];
++        assert!(!replay(&g,&pd),"mutated output {index}");
++    }
++}
++#[test]
++fn logical_flatten_piop_rejects_changed_public_gather_factor() {
++    let (d,w,_)=flatten_case();let g=Graph::new(&d,&w,Config{tcl:4,slots_log:12,req_planes_log:6});
++    let mut pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<12]);
++    assert!(replay(&g,&pd));
++    let (&map,values)=d.program_literals.iter().next().unwrap();
++    let mut bad=values.clone();bad[0]^=1;pd.vals[map]=Some(Arc::new(bad));
++    assert!(!replay(&g,&pd));
++}
+--- a/zk-torch-4/src/morpheus/piop/mod.rs
++++ b/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -1142,3 +1142,6 @@
+         }
+     }
+ }
++
++#[cfg(test)]
++mod cnn_layout_tests;

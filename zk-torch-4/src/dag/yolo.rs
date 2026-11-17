@@ -35,8 +35,9 @@ fn cbs(
     };
     let h = g.conv2d_strided(h, w, kernel, stride)[0];
     let h = rescale_conv(g, h, w);
-    let h = g.add(h, bias)[0];
-    g.silu(h)
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    let h = g.add_channel_bias_row_major(h, bias, c, 2);
+    g.silu_row_major(h)
 }
 
 /// CBS with depthwise conv: DWConv + bias + SiLU.
@@ -56,8 +57,9 @@ fn cbs_dw(
     };
     let h = g.depthwise_conv2d_strided(h, w, kernel, stride)[0];
     let h = rescale_conv(g, h, w);
-    let h = g.add(h, bias)[0];
-    g.silu(h)
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    let h = g.add_channel_bias_row_major(h, bias, c, 2);
+    g.silu_row_major(h)
 }
 
 /// Plain conv + bias (no activation).
@@ -77,7 +79,8 @@ fn conv_bias(
     };
     let h = g.conv2d_strided(h, w, kernel, stride)[0];
     let h = rescale_conv(g, h, w);
-    g.add(h, bias)[0]
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    g.add_channel_bias_row_major(h, bias, c, 2)
 }
 
 /// C3k block (1 bottleneck): cv1 → split → bottleneck(half) → concat → cv2.
@@ -177,6 +180,15 @@ fn c3k2_block(
     (out, wi)
 }
 
+/// The actual SPPF pooling stage, shared with its boundary regression.
+pub(crate) fn sppf_pool(g:&mut DagBuilder,h:EdgeId)->[EdgeId;3] {
+    // Zero padding changes negative SiLU borders; exclude it authentically.
+    let m1=g.maxpool_general_padded(h,5,5,1,1,2,2);
+    let m2=g.maxpool_general_padded(m1,5,5,1,1,2,2);
+    let m3=g.maxpool_general_padded(m2,5,5,1,1,2,2);
+    [m1,m2,m3]
+}
+
 /// SPPF block: cv1 → 3 cascaded MaxPool k5s1p2 → concat → cv2.
 fn sppf_block(
     g: &mut DagBuilder,
@@ -190,13 +202,7 @@ fn sppf_block(
     let h = cbs(g, x, weights[wi].0, weights[wi].1, (1, 1), (1, 1), (0, 0));
     wi += 1;
 
-    // 3 cascaded MaxPool k5, s1, p2 (maintains spatial)
-    let p1_padded = g.pad_asym(h, 2, 2, 2, 2);
-    let m1 = g.maxpool_general(p1_padded, 5, 5, 1, 1);
-    let p2_padded = g.pad_asym(m1, 2, 2, 2, 2);
-    let m2 = g.maxpool_general(p2_padded, 5, 5, 1, 1);
-    let p3_padded = g.pad_asym(m2, 2, 2, 2, 2);
-    let m3 = g.maxpool_general(p3_padded, 5, 5, 1, 1);
+    let [m1,m2,m3] = sppf_pool(g,h);
 
     // Concat: h + m1 + m2 + m3 = 4 * c_mid = 2 * c_in
     let cat = g.multi_concat(vec![h, m1, m2, m3]);

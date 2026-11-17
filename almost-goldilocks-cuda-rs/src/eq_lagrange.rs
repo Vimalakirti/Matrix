@@ -73,6 +73,34 @@ pub fn ext2_eq_dp_all(r: &[AlmostGoldilocksExt2]) -> Result<Vec<AlmostGoldilocks
     Ok(result)
 }
 
+/// Ext2 eq table built AND KEPT on the device, as the flat `u64` pairs
+/// (c0, c1) the bool-sumcheck kernels index. `ext2_eq_dp_all` returns the
+/// same table on the host; a caller that is about to upload it again (the
+/// GPU bool prover) paid a 2^arity D2H plus an H2D for nothing -- 268 MB
+/// each way at arity 24. Same kernel, so the table is bit-identical.
+pub fn ext2_eq_dp_all_device_u64(r: &[AlmostGoldilocksExt2]) -> Result<DeviceBuffer<u64>> {
+    let log_n = r.len();
+    if log_n == 0 {
+        return DeviceBuffer::from_slice(&[1u64, 0u64]);
+    }
+    let n = 1usize << log_n;
+    let d_r = DeviceBuffer::from_slice(r)?;
+    let mut d_a: DeviceBuffer<u64> = DeviceBuffer::new(2 * n)?;
+    let mut d_b: DeviceBuffer<u64> = DeviceBuffer::new(2 * n)?;
+    let mut result_ptr: *mut u64 = std::ptr::null_mut();
+    let ret = unsafe {
+        ffi::aext2_eq_dp_all_ffi(
+            d_r.as_ptr() as *const u64,
+            d_a.as_mut_ptr(),
+            d_b.as_mut_ptr(),
+            log_n as i32,
+            &mut result_ptr,
+        )
+    };
+    if ret != 0 { return Err(CudaError::KernelFailed); }
+    Ok(if result_ptr == d_a.as_ptr() as *mut u64 { d_a } else { d_b })
+}
+
 /// Device-resident base-field variant. Returns both buffers and a flag
 /// indicating which one contains the final result.
 pub fn eq_dp_all_device(

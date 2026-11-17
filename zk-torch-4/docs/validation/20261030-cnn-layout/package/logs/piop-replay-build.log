@@ -1,0 +1,468 @@
+   Compiling almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs)
+warning: unused variable: `out_dir`
+  --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/build.rs:53:9
+   |
+53 |     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_out_dir`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `cuda_wrapper`
+  --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/build.rs:56:9
+   |
+56 |     let cuda_wrapper = manifest_dir.join("cuda/wrapper.cu");
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cuda_wrapper`
+
+warning: function `find_cuda_paths` is never used
+ --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/build.rs:6:4
+  |
+6 | fn find_cuda_paths() -> (String, String) {
+  |    ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `almost-goldilocks-cuda` (build script) generated 3 warnings
+warning: variable does not need to be mutable
+   --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:595:13
+    |
+595 |         let mut d_scratch = pool_take(total_u64s)?;
+    |             ----^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `leaf_stride_ext2`
+   --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:636:17
+    |
+636 |             let leaf_stride_ext2 = leaf_u64s / 2;
+    |                 ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_leaf_stride_ext2`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:755:13
+    |
+755 |         let mut d_scratch = pool_take(total_u64s)?;
+    |             ----^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `n_terms`
+    --> /workspace/shared/morpheus-cnn-layout-joint-replay/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:2132:13
+     |
+2132 |         let n_terms = weights.len();
+     |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_n_terms`
+
+   Compiling zk-torch-4 v0.1.0 (/workspace/shared/morpheus-cnn-layout-joint-replay/zk-torch-4)
+warning: `almost-goldilocks-cuda` (lib) generated 4 warnings (run `cargo fix --lib -p almost-goldilocks-cuda` to apply 4 suggestions)
+warning: unused import: `next_pow`
+ --> src/dag/builder.rs:8:36
+  |
+8 | use crate::util::arith::{int_to_f, next_pow};
+  |                                    ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `bit_decompose::decompose_and_pack`
+  --> src/dag/fold_integration.rs:21:21
+   |
+21 | use crate::commit::{bit_decompose::decompose_and_pack, AjtaiKey, GpuAjtaiStore};
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `get_n`
+  --> src/dag/fold_integration.rs:49:71
+   |
+49 | use crate::util::arith::{ext2_add, ext2_field_eq, ext2_mul, ext2_sub, get_n};
+   |                                                                       ^^^^^
+
+warning: unused import: `rayon::prelude::*`
+   --> src/fold/same_point_sumcheck.rs:109:9
+    |
+109 |     use rayon::prelude::*;
+    |         ^^^^^^^^^^^^^^^^^
+
+warning: trailing semicolon in macro used in expression position
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `uint_full_mul_reg`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: `#[warn(semicolon_in_expressions_from_non_local_macros)]` (part of `#[warn(future_incompatible)]`) on by default
+   = note: this warning originates in the macro `$crate::uint_full_mul_reg` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused imports: `Item` and `Stage`
+  --> src/morpheus/auth_gpu.rs:21:25
+   |
+21 | use super::transcript::{Item, MTranscript, Stage};
+   |                         ^^^^               ^^^^^
+
+warning: unused import: `interpolate`
+  --> src/morpheus/link_fast.rs:23:19
+   |
+23 | use super::link::{interpolate, raw_to_cols, LinkOutput, LinkProof, Statement};
+   |                   ^^^^^^^^^^^
+
+warning: unused import: `raw_to_cols`
+  --> src/morpheus/pcs_gpu.rs:11:19
+   |
+11 | use super::link::{raw_to_cols, uniform_q_coin};
+   |                   ^^^^^^^^^^^
+
+warning: unused import: `A_ENC_COLS`
+  --> src/morpheus/pcs_gpu.rs:13:30
+   |
+13 | use super::params::{Profile, A_ENC_COLS};
+   |                              ^^^^^^^^^^
+
+warning: unused import: `f_to_int`
+  --> src/morpheus/piop/mod.rs:41:26
+   |
+41 | use crate::util::arith::{f_to_int, log2_ceil};
+   |                          ^^^^^^^^
+
+warning: unused import: `LinkProof`
+  --> src/morpheus/request.rs:23:25
+   |
+23 | use super::link::{self, LinkProof, Row, Statement};
+   |                         ^^^^^^^^^
+
+warning: unused import: `almost_goldilocks_cuda::field::AlmostGoldilocksField`
+  --> src/pcs/mrlc.rs:43:5
+   |
+43 | use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated constant `std::isize::MAX`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+   = note: this warning originates in the macro `$crate::uint_overflowing_binop` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated constant `std::isize::MAX`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::uint_overflowing_binop` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u16>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i8>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i16>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl isize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i128>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `crate::poly::MLPoly`
+  --> src/mlperf.rs:21:5
+   |
+21 | use crate::poly::MLPoly;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Roots`
+  --> src/morpheus/gaussian.rs:22:28
+   |
+22 | use num_integer::{Integer, Roots};
+   |                            ^^^^^
+
+warning: value assigned to `combined_part_aux` is never read
+   --> src/dag/lookups.rs:487:64
+    |
+487 |         let mut combined_part_aux: Vec<AlmostGoldilocksExt2> = Vec::new();
+    |                                                                ^^^^^^^^^^ this value is reassigned later and never used
+...
+508 |         combined_part_aux = vec![AlmostGoldilocksExt2::zero(); max_table_size];
+    |         ----------------- `combined_part_aux` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/dag/mod.rs:627:13
+    |
+627 |         let mut collect = |nodes: &[NodeId]| -> Vec<usize> {
+    |             ----^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t0`
+    --> src/fold/tree.rs:1297:9
+     |
+1297 |     let t0 = std::time::Instant::now();
+     |         ^^ help: if this is intentional, prefix it with an underscore: `_t0`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `degs`
+   --> src/morpheus/auth_gpu.rs:116:9
+    |
+116 |     let degs = p.degs();
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_degs`
+
+warning: unused variable: `half`
+   --> src/morpheus/auth_gpu.rs:117:9
+    |
+117 |     let half = K8::ONE.scale((Q + 1) / 2);
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_half`
+
+warning: unused variable: `nvars`
+   --> src/morpheus/link_fast.rs:443:9
+    |
+443 |     let nvars = ell + 1;
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_nvars`
+
+warning: unused variable: `pos_of`
+   --> src/morpheus/link_gpu.rs:233:9
+    |
+233 |     let pos_of: Vec<usize> = { let mut v = vec![0; order.len()]; for (k, &t) in order.iter().enumerate() { v[t] = k; } v };
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_pos_of`
+
+warning: value assigned to `model_reg` is never read
+  --> src/morpheus/driver.rs:47:25
+   |
+47 |     let mut model_reg = None;
+   |                         ^^^^ this value is reassigned later and never used
+...
+82 |         model_reg = Some(m);
+   |         --------- `model_reg` is overwritten here before the previous value is read
+
+warning: value assigned to `model_secs` is never read
+  --> src/morpheus/driver.rs:48:26
+   |
+48 |     let mut model_secs = 0.0;
+   |                          ^^^ this value is reassigned later and never used
+...
+81 |         model_secs = m.secs;
+   |         ------------------- `model_secs` is overwritten here before the previous value is read
+
+warning: unused variable: `b`
+    --> src/pcs/link.rs:1060:17
+     |
+1060 |             let b = d_bits.as_ref().unwrap();
+     |                 ^ help: if this is intentional, prefix it with an underscore: `_b`
+
+warning: unused variable: `b`
+    --> src/pcs/link.rs:1132:17
+     |
+1132 |             let b = d_bits.as_ref().unwrap();
+     |                 ^ help: if this is intentional, prefix it with an underscore: `_b`
+
+warning: unused variable: `beta`
+   --> src/sumcheck/grand_product.rs:180:5
+    |
+180 |     beta: AlmostGoldilocksExt2,
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_beta`
+
+warning: function `load_weights` is never used
+  --> src/dag/pointpillar.rs:66:4
+   |
+66 | fn load_weights(g: &mut DagBuilder, all_weights: &[(Witness, Witness)], wi: &mut usize, n: usize) -> Vec<(EdgeId, EdgeId)> {
+   |    ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `digit_to_ternary_chunks` is never used
+   --> src/fold/multifold.rs:256:4
+    |
+256 | fn digit_to_ternary_chunks(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `prefix_mle` is never used
+  --> src/morpheus/piop/cv.rs:65:4
+   |
+65 | fn prefix_mle(n: usize, x: &[K8]) -> K8 {
+   |    ^^^^^^^^^^
+
+warning: function `key_devs` is never used
+   --> src/morpheus/request.rs:400:4
+    |
+400 | fn key_devs<'k>(pc: &'k PcsGpu, reps: &'k [AuthReplica]) -> Vec<(i32, &'k auth_gpu::Keys)> {
+    |    ^^^^^^^^
+
+warning: field `partial` is never read
+   --> src/pcs/link.rs:645:5
+    |
+641 | pub struct LinkScratch {
+    |            ----------- field in this struct
+...
+645 |     partial: Option<DeviceBuffer<u64>>,
+    |     ^^^^^^^
+
+warning: `zk-torch-4` (lib) generated 48 warnings (1 duplicate) (run `cargo fix --lib -p zk-torch-4` to apply 20 suggestions)
+error: linking with `cc` failed: exit status: 1
+  |
+  = note:  "cc" "-m64" "/workspace/shared/morpheus-cnn-layout-target/debug/deps/rustcVU0HcO/symbols.o" "<2 object files omitted>" "-Wl,--as-needed" "-Wl,-Bstatic" "/workspace/shared/morpheus-cnn-layout-target/debug/deps/{libzk_torch_4-9943326cc12c2fcc,libbincode-3fd07cf0c5fbca48,libserde_yaml-f654478fd2c62121,libryu-ab5619bac4f183a3,libitoa-82c82173a96fdb4c,libindexmap-17f2aa5c801cccc6,libequivalent-e26f2218c19cf27a,libhashbrown-0f77eb44cf39b68c,libunsafe_libyaml-fa61cd7580d7f614,libuint-4951eb1ed617d901,libcrunchy-3f51d8525754ebbd,libstatic_assertions-b6d57474686bf8da,libhex-44fc00d4b7ad263b,libbyteorder-707bdf32f951334c,libnum_bigint-4a71913c880ea4a7,libsha3-09e57557ed1b0737,libkeccak-fcf4a582c3fd986c,libonce_cell-2be7caba55a71d21,librand-f3bf8d3bc22b9ec7,librand_chacha-06086680a6dfac3e,libppv_lite86-7fa4ebbf12bd0c95,libzerocopy-94d9f726f93dc351,librand_core-ff17e188edb92dd1,libgetrandom-e5f575d55b5d09d1,liblibc-a8b9bd55f161ec67,libndarray-ebf3e8ce27da6643,libmatrixmultiply-b44065ba0e791b35,libapprox-3f6e93b6370a0a9d,libnum_complex-22ec581c12b9a3f5,libnum_integer-effaeb74addce461,libnum_traits-84554fa0bfb1fd1b,librawpointer-9778ff329eab520a,libsha2-c0061d4562eebb36,libcpufeatures-cae7fb35b87786be,libcfg_if-e0aeaadc47f151e7,libdigest-c0582d7c52cd21de,libblock_buffer-28feed875f1323af,libcrypto_common-656f86f5a3384dd8,libgeneric_array-1d994dd180b21a2e,libtypenum-701d2ec0d10abb90,librayon-707c26f98f05a2be,librayon_core-f5041825db1de1fd,libcrossbeam_deque-53a0126dd1c448a8,libcrossbeam_epoch-2a4f136ada1c3345,libcrossbeam_utils-e9bd4405362b7686,libeither-995232a2713f8d27,libalmost_goldilocks_cuda-e60d8af952c54907,libserde-128565976f24ae77,libserde_core-1a1a91d45cc3c129,libthiserror-192312c7cf051161}.rlib" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib/{libstd-*,libpanic_unwind-*,libobject-*,libmemchr-*,libaddr2line-*,libgimli-*,libcfg_if-*,librustc_demangle-*,libstd_detect-*,libhashbrown-*,librustc_std_workspace_alloc-*,libminiz_oxide-*,libadler2-*,libunwind-*,liblibc-*,librustc_std_workspace_core-*,liballoc-*,libcore-*,libcompiler_builtins-*}.rlib" "-Wl,-Bdynamic" "-lgcc_s" "-lutil" "-lrt" "-lpthread" "-lm" "-ldl" "-lc" "-L" "/workspace/shared/morpheus-cnn-layout-target/debug/deps/rustcVU0HcO/raw-dylibs" "-B<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld" "-fuse-ld=lld" "-Wl,--eh-frame-hdr" "-Wl,-z,noexecstack" "-L" "<sysroot>/lib/rustlib/x86_64-unknown-linux-gnu/lib" "-o" "/workspace/shared/morpheus-cnn-layout-target/debug/deps/cpu_cnn_replay-c707f72663ad8943" "-Wl,--gc-sections" "-pie" "-Wl,-z,relro,-z,now" "-Wl,--strip-debug" "-nodefaultlibs"
+  = note: some arguments are omitted. use `--verbose` to show all linker arguments
+  = note: rust-lld: error: undefined symbol: cuda_memset
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.10
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.10.rcgu.o:(<almost_goldilocks_cuda::memory::DeviceBuffer<u64>>::zero) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_sel_lookup
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::sel_lookup) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_pe
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::partial_eval) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_eq_outer
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::eq) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_axpy
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::axpy) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_lift
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::lift) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_gather
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::gather) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_sc_fold
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::sc_fold) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_mpiop_sc_round
+          >>> referenced by zk_torch_4.7d657578ce28168f-cgu.07
+          >>>               zk_torch_4-9943326cc12c2fcc.zk_torch_4.7d657578ce28168f-cgu.07.rcgu.o:(zk_torch_4::morpheus::piop::gpu::sc_round) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libzk_torch_4-9943326cc12c2fcc.rlib
+          
+          rust-lld: error: undefined symbol: agl_cuda_error_string
+          >>> referenced by almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07
+          >>>               almost_goldilocks_cuda-e60d8af952c54907.almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07.rcgu.o:(almost_goldilocks_cuda::cuda_error_string) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libalmost_goldilocks_cuda-e60d8af952c54907.rlib
+          
+          rust-lld: error: undefined symbol: cuda_memcpy_htod
+          >>> referenced by almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07
+          >>>               almost_goldilocks_cuda-e60d8af952c54907.almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07.rcgu.o:(<almost_goldilocks_cuda::memory::DeviceBuffer<u64>>::from_slice) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libalmost_goldilocks_cuda-e60d8af952c54907.rlib
+          
+          rust-lld: error: undefined symbol: cuda_memcpy_dtoh
+          >>> referenced by almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07
+          >>>               almost_goldilocks_cuda-e60d8af952c54907.almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07.rcgu.o:(<almost_goldilocks_cuda::memory::DeviceBuffer<u64>>::read_slice) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libalmost_goldilocks_cuda-e60d8af952c54907.rlib
+          
+          rust-lld: error: undefined symbol: cuda_malloc
+          >>> referenced by almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07
+          >>>               almost_goldilocks_cuda-e60d8af952c54907.almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07.rcgu.o:(<almost_goldilocks_cuda::memory::DeviceBuffer<u64>>::new) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libalmost_goldilocks_cuda-e60d8af952c54907.rlib
+          
+          rust-lld: error: undefined symbol: cuda_free
+          >>> referenced by almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07
+          >>>               almost_goldilocks_cuda-e60d8af952c54907.almost_goldilocks_cuda.5f8e53cfbd42411e-cgu.07.rcgu.o:(<almost_goldilocks_cuda::memory::DeviceBuffer<u64> as core::ops::drop::Drop>::drop) in archive /workspace/shared/morpheus-cnn-layout-target/debug/deps/libalmost_goldilocks_cuda-e60d8af952c54907.rlib
+          collect2: error: ld returned 1 exit status
+          
+
+error: could not compile `zk-torch-4` (bin "cpu_cnn_replay") due to 1 previous error

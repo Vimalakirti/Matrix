@@ -1,0 +1,131 @@
+{
+  "checks": [
+    {
+      "tool": "prepare_harness.py",
+      "case": "same",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_base_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', 'typecheck']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_harness.py",
+      "case": "descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_base_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed/should-not-create-validation', 'typecheck']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_harness.py",
+      "case": "symlink-descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_base_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/tmp/cnn-portable-guard-wfh86q2c/alias/should-not-create-validation', 'typecheck']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_harness.py",
+      "case": "bundle-descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_base_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/should-not-create-validation', 'typecheck']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_harness.py",
+      "case": "existing",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_base_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/tmp/cnn-portable-guard-wfh86q2c', 'typecheck']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_inherited_harness.py",
+      "case": "same",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_mean_rms_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', 'cpu-normalization']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_inherited_harness.py",
+      "case": "descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_mean_rms_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed/should-not-create-validation', 'cpu-normalization']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_inherited_harness.py",
+      "case": "symlink-descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_mean_rms_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/tmp/cnn-portable-guard-wfh86q2c/alias/should-not-create-validation', 'cpu-normalization']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_inherited_harness.py",
+      "case": "bundle-descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_mean_rms_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/should-not-create-validation', 'cpu-normalization']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "prepare_inherited_harness.py",
+      "case": "existing",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python', '/workspace/shared/morpheus-cnn-layout-q20-evidence/portable/prepare_mean_rms_harness.py', '/workspace/shared/morpheus-cnn-layout-portable-reconstructed', '/tmp/cnn-portable-guard-wfh86q2c', 'cpu-normalization']' returned non-zero exit status 1."
+      ]
+    },
+    {
+      "tool": "reconstruct.py",
+      "case": "same",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "DEST must be outside resolved BASE"
+      ]
+    },
+    {
+      "tool": "reconstruct.py",
+      "case": "descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "DEST must be outside resolved BASE"
+      ]
+    },
+    {
+      "tool": "reconstruct.py",
+      "case": "bundle-descendant",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "DEST must be outside resolved bundle"
+      ]
+    },
+    {
+      "tool": "reconstruct.py",
+      "case": "existing",
+      "returncode": 1,
+      "rejected_before_copy": true,
+      "stderr_tail": [
+        "DEST must not already exist"
+      ]
+    }
+  ],
+  "source_and_base_hashes_unchanged": true
+}

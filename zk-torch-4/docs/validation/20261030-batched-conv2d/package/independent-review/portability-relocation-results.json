@@ -1,0 +1,13 @@
+{
+  "scope": "Explicit-path relocation only; same assertions, no broader acceptance",
+  "relocated_root": "/tmp/morpheus-batch-review-portable-4tHQzA",
+  "invocations": [
+    "python review/check_wrapper_integration.py --root base",
+    "python review/check_joint_overlay.py --base base --root combined --supplement base --manifest base-manifest.json --reviewed-hashes review/reviewed-source-hashes.json"
+  ],
+  "overlay_result_byte_identical": true,
+  "canonical_manifest_sha256": "a57be8f20529556584fef5a97d8bf24c54d77809835890bd4e2678848c227579",
+  "wrapper_assertions": 36552,
+  "wrapper_cases": 36,
+  "wrapper_builder_sha256": "ae679a998ec811c80d4070758ce178d946878b73f35f3cb4f3949fc000103845"
+}

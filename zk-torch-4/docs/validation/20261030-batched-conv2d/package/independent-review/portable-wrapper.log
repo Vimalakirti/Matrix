@@ -1,0 +1,6 @@
+{
+  "scope": "Supplemental index/source check only, not maxpool function soundness or native execution",
+  "cases": 36,
+  "assertions": 36552,
+  "builder_sha256": "ae679a998ec811c80d4070758ce178d946878b73f35f3cb4f3949fc000103845"
+}

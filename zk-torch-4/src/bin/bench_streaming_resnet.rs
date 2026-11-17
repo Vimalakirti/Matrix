@@ -16,9 +16,10 @@ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 use rand::Rng;
 
 use zk_torch_4::commit::{AjtaiKey, GpuAjtaiStore};
-use zk_torch_4::dag::resnet::{resnet50, resnet50_conv_configs, resnet50_output_shape};
+use zk_torch_4::dag::resnet::{resnet50, resnet50_conv_configs, resnet50_output_shape, resnet50_with_biases};
 use zk_torch_4::dag::streaming_accumulator::{AccumulatorState, VerifierAccumulator};
 use zk_torch_4::dag::{DagBuilder, DataType, EdgeId, Role, Witness};
+use zk_torch_4::mlperf::{load_witness, read_metadata};
 use zk_torch_4::transcript::Transcript;
 use zk_torch_4::ser_len;
 use zk_torch_4::SF_LOG;
@@ -98,25 +99,49 @@ fn main() {
 
     let configs = resnet50_conv_configs();
     let max_conv = num_layers.min(configs.len());
-    let conv_weights: Vec<Witness> = configs[..max_conv].iter()
-        .map(|&(c_in, c_out, kh, kw)| gen_conv_weight(c_in, c_out, kh, kw)).collect();
-    let (out_c, _) = resnet50_output_shape(max_conv);
-    let fc_weight = gen_fc_weight(out_c, num_classes);
-    let fc_bias = gen_fc_bias(num_classes, batch_size);
+    // RESNET_REAL=<dir from scripts/export_resnet50.py>: trained weights with
+    // BatchNorm folded into conv biases (signed, scale 2^SF_LOG), and the
+    // exported images as inputs, starting at RESNET_IMAGE (default 0).
+    let real = std::env::var("RESNET_REAL").ok().map(std::path::PathBuf::from);
+    let real_image: usize = std::env::var("RESNET_IMAGE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     let mut g = DagBuilder::new();
-    // ONE folded input [b_pad*4, H, W] (RGB pads to 4 channels) rather than
+    let mut real_x = None;
+    if let Some(dir) = &real {
+        assert!(batch_size == 1 && max_conv == configs.len(), "RESNET_REAL needs BATCH=1 and all 53 convolutions");
+        let meta = read_metadata(dir);
+        assert_eq!(meta.sf_log, *SF_LOG, "export scale must match the config's scale_factor_log");
+        let ld = |name: String| load_witness(&dir.join(name), meta.sf_log, DataType::Int, Role::Constant);
+        let cw: Vec<Witness> = (0..max_conv).map(|i| ld(format!("conv_{:03}_weight.bin", i))).collect();
+        let cb: Vec<Witness> = (0..max_conv).map(|i| ld(format!("conv_{:03}_bias.bin", i))).collect();
+        let x = g.input(vec![3, input_size, input_size], DataType::Int);
+        real_x = Some(x);
+        let _output = g.pipe(&[x], resnet50_with_biases(cw, cb, ld("fc_weight.bin".into()), Some(ld("fc_bias.bin".into())), num_classes, max_conv));
+        println!("Real weights and images: {} (first image {})", dir.display(), real_image);
+    }
+
+    // ONE explicit [B,3,H,W] input retains logical B (including nonpowers
+    // of two); its raw padded buffer is still [b_pad*4,H,W]. Rather than
     // `batch` separate inputs: the batch is bound inside conv, so the graph
     // stays the size of a single image.
-    let xs: Vec<EdgeId> = if batch_size > 1 {
+    let xs: Vec<EdgeId> = if let Some(x) = real_x {
+        vec![x]
+    } else if batch_size > 1 {
         vec![g.input(
-            vec![batch_size.next_power_of_two() * 4, input_size, input_size],
+            vec![batch_size, 3, input_size, input_size],
             DataType::Uint,
         )]
     } else {
         vec![g.input(vec![3, input_size, input_size], DataType::Uint)]
     };
-    let _output = g.pipe(&xs, resnet50(conv_weights, fc_weight, Some(fc_bias), num_classes, max_conv));
+    if real.is_none() {
+        let conv_weights: Vec<Witness> = configs[..max_conv].iter()
+            .map(|&(c_in, c_out, kh, kw)| gen_conv_weight(c_in, c_out, kh, kw)).collect();
+        let (out_c, _) = resnet50_output_shape(max_conv);
+        let fc_weight = gen_fc_weight(out_c, num_classes);
+        let fc_bias = gen_fc_bias(num_classes, batch_size);
+        let _output = g.pipe(&xs, resnet50(conv_weights, fc_weight, Some(fc_bias), num_classes, max_conv));
+    }
     let (mut dag, witnesses_template) = g.compile();
     println!("Compile: {} nodes, {} edges (batch={})", dag.nodes.len(), dag.num_edges(), batch_size);
 
@@ -159,19 +184,20 @@ fn main() {
         let mut witnesses = witnesses_template.clone();
         let sp = input_size.next_power_of_two();
         let batch_inputs: Vec<(EdgeId, Witness)> = xs.iter().map(|&x| {
-            if batch_size > 1 {
+            if let Some(dir) = &real {
+                let img = dir.join("images").join(format!("{:05}.bin", real_image + it));
+                (x, load_witness(&img, *SF_LOG, DataType::Int, Role::Input))
+            } else if batch_size > 1 {
                 let lead = batch_size.next_power_of_two() * 4;
                 let mut d = rand_field_vec(lead * sp * sp);
-                // Channel 3 of every image is PADDING (RGB -> 4) and must be
-                // zero. Unbatched, ZeroPad sanitized it because it knew
-                // channels == 3; folded, nothing downstream can tell padding
-                // from data, and conv would fold over 3 channels while the
-                // opening integrates over 4.
+                // Keep this historical host sanitization, but correctness
+                // no longer depends on it: the registered model masks the
+                // explicit B/C/spatial padding before folding the tensor.
                 for b in 0..batch_size.next_power_of_two() {
                     let base = (b * 4 + 3) * sp * sp;
                     for v in &mut d[base..base + sp * sp] { *v = AlmostGoldilocksField(0); }
                 }
-                (x, Witness::new(vec![lead, input_size, input_size], d,
+                (x, Witness::new(vec![batch_size, 3, input_size, input_size], d,
                                  DataType::Uint, *SF_LOG, Role::Input))
             } else {
                 (x, Witness::new(vec![3, input_size, input_size],

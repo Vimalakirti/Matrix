@@ -1,13 +1,12 @@
-//! Max-pool advice ops and the [`Replicate2x2`] claim transform.
+//! Max-pool advice and the legacy [`Replicate2x2`] claim transform.
 //!
-//! [`MaxPoolHelper`] (2×2) and [`GeneralMaxPoolHelper`] (arbitrary kernel/stride)
-//! emit advice outputs whose soundness is enforced by the surrounding DAG:
-//! Replicate2x2 + Sub + NonNeg proves `Y ≥ X` at every pool position, which
-//! upper-bounds the true max (dominance). True achievability requires a
-//! lookup/selection argument — out of scope for the initial port.
-//!
-//! [`Replicate2x2`] is a pure claim transform — drop bit-0 of W and H in the
-//! evaluation point. No sumcheck.
+//! Both helper outputs receive exact maximum constraints at `DagBuilder::compile`:
+//! a private Boolean selector picks one valid member of each full window, the
+//! output equals the selected member, and signed dominance holds for every
+//! member. Pool padding means only the per-axis power-of-two storage padding;
+//! explicit `pad` values are ordinary logical window elements, including zero.
+//! Partial windows at the right/bottom are discarded (floor output dimensions).
+//! Ties may select any maximum: no selected index is part of the public result.
 
 use almost_goldilocks_cuda::field::{AlmostGoldilocksField, ALMOST_GOLDILOCKS_PRIME};
 
@@ -44,6 +43,10 @@ impl BasicBlock for MaxPoolHelper {
     fn run(&self, inputs: &[&Witness]) -> Vec<Witness> {
         assert_eq!(inputs.len(), 1, "MaxPoolHelper expects 1 input");
         let x = inputs[0];
+        let geometry=GeneralMaxPoolHelper {channels:self.channels,input_h:self.input_h,input_w:self.input_w,
+            kernel_h:self.pool_h,kernel_w:self.pool_w,stride_h:self.pool_h,stride_w:self.pool_w};
+        geometry.output_shape();
+        assert_eq!(x.shape,vec![self.channels,self.input_h,self.input_w]);
         let h_out = self.input_h / self.pool_h;
         let w_out = self.input_w / self.pool_w;
         let w_in_pad = self.input_w.next_power_of_two();
@@ -125,6 +128,8 @@ impl BasicBlock for GeneralMaxPoolHelper {
     fn run(&self, inputs: &[&Witness]) -> Vec<Witness> {
         assert_eq!(inputs.len(), 1, "GeneralMaxPoolHelper expects 1 input");
         let x = inputs[0];
+        self.output_shape();
+        assert_eq!(x.shape,vec![self.channels,self.input_h,self.input_w]);
         let h_out = (self.input_h - self.kernel_h) / self.stride_h + 1;
         let w_out = (self.input_w - self.kernel_w) / self.stride_w + 1;
         let w_in_pad = self.input_w.next_power_of_two();
@@ -185,6 +190,78 @@ impl BasicBlock for GeneralMaxPoolHelper {
     ) -> bool {
         true
     }
+}
+
+/// Public window geometry used by the exact maximum certificate.
+impl GeneralMaxPoolHelper {
+    pub fn output_shape(&self) -> Vec<usize> {
+        assert!(self.channels > 0 && self.kernel_h > 0 && self.kernel_w > 0
+            && self.stride_h > 0 && self.stride_w > 0, "maxpool extents/strides must be positive");
+        assert!(self.input_h >= self.kernel_h && self.input_w >= self.kernel_w,
+            "maxpool requires at least one full window");
+        let shape=vec![self.channels,(self.input_h-self.kernel_h)/self.stride_h+1,
+            (self.input_w-self.kernel_w)/self.stride_w+1];
+        for dims in [&[self.channels,self.input_h,self.input_w][..],shape.as_slice()] {
+            dims.iter().try_fold(1usize,|a,&b|a.checked_mul(b.checked_next_power_of_two()
+                .expect("maxpool padded extent overflow"))).expect("maxpool tensor size overflow");
+        }
+        self.kernel_h.checked_mul(self.kernel_w).and_then(|k|k.checked_next_power_of_two())
+            .expect("maxpool kernel size overflow");
+        shape
+    }
+}
+
+/// Max over an immutable public per-window support; padding is excluded rather
+/// than replaced by a finite numerical sentinel. Empty logical windows fail.
+#[derive(Clone, Debug)]
+pub struct MaskedMaxPoolHelper { pub pool: GeneralMaxPoolHelper }
+fn selected_pool(p:&GeneralMaxPoolHelper,x:&Witness,support:&Witness)->(Witness,Witness) {
+    use crate::util::arith::{f_to_int,int_to_f};
+    let shape=p.output_shape();assert_eq!(x.shape,vec![p.channels,p.input_h,p.input_w]);
+    let (hp,wp)=(shape[1].next_power_of_two(),shape[2].next_power_of_two());
+    let rows=shape[0].next_power_of_two()*hp*wp;
+    let cols=(p.kernel_h*p.kernel_w).next_power_of_two();
+    assert_eq!(support.shape,vec![rows,cols]);
+    let mut h=vec![int_to_f(0);rows.checked_mul(cols).expect("maxpool selector size overflow")];
+    let mut y=vec![int_to_f(0);rows];
+    let (ihp,iwp)=(p.input_h.next_power_of_two(),p.input_w.next_power_of_two());
+    for c in 0..p.channels {for oh in 0..shape[1] {for ow in 0..shape[2] {
+        let row=ow+wp*(oh+hp*c);let mut best=None;
+        for kh in 0..p.kernel_h {for kw in 0..p.kernel_w {
+            let col=kh*p.kernel_w+kw;
+            let valid=f_to_int(support.data.as_ref().unwrap().index(row+rows*col));
+            assert!(valid==0 || valid==1);
+            if valid==0 {continue;}
+            let index=ow*p.stride_w+kw+iwp*(oh*p.stride_h+kh+ihp*c);
+            let v=f_to_int(x.data.as_ref().unwrap().index(index));
+            if best.map(|(b,_)|v>b).unwrap_or(true) {best=Some((v,col));}
+        }}
+        let (v,col)=best.expect("maxpool logical window has no valid member");
+        h[row+rows*col]=int_to_f(1);y[row]=int_to_f(v);
+    }}}
+    (Witness::new(shape,y,DataType::Uint,x.sf,Role::Output),
+     Witness::new(vec![rows,cols],h,DataType::Bool,0,Role::Auxiliary))
+}
+impl BasicBlock for MaskedMaxPoolHelper {
+    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
+        assert_eq!(inputs.len(),2);vec![selected_pool(&self.pool,inputs[0],inputs[1]).0]
+    }
+    fn run_gpu(&self,inputs:&[&Witness])->Vec<Witness>{self.run(inputs)}
+    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>){(vec![],vec![])}
+    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool{true}
+}
+/// Private one-hot witness. Inputs are raw window data, the claimed maximum,
+/// and immutable public support. Compile attaches roots even for raw callers.
+#[derive(Clone, Debug)]
+pub struct MaxPoolSelector { pub pool: GeneralMaxPoolHelper }
+impl BasicBlock for MaxPoolSelector {
+    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
+        assert_eq!(inputs.len(),3);assert_eq!(inputs[1].shape,self.pool.output_shape());
+        vec![selected_pool(&self.pool,inputs[0],inputs[2]).1]
+    }
+    fn run_gpu(&self,inputs:&[&Witness])->Vec<Witness>{self.run(inputs)}
+    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>){(vec![],vec![])}
+    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool{true}
 }
 
 // ============================================================================

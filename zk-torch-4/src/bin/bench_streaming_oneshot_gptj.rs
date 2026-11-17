@@ -204,8 +204,21 @@ fn main() {
     let mut breakdown: Option<String> = None;
 
     println!("Streaming {} generations (seq_len={} each):", n_proofs, seq_len);
+    // Weights (Role::Constant) keep one allocation across generations; only
+    // per-proof edges are reset from the template. Cloning the whole template
+    // every generation deep-copied every weight, so device-side weight caches
+    // (einsum operands, keyed by host address) could not hit. Same contents,
+    // same proofs.
+    let mut witnesses = witnesses_template.clone();
+    let const_edge: Vec<bool> = witnesses_template.iter()
+        .map(|ws| !ws.is_empty() && ws.iter().all(|w| w.role == zk_torch_4::dag::Role::Constant))
+        .collect();
     for it in 0..n_proofs {
-        let mut witnesses = witnesses_template.clone();
+        if it > 0 {
+            for (e, c) in const_edge.iter().enumerate() {
+                if !*c { witnesses[e] = witnesses_template[e].clone(); }
+            }
+        }
         let tokens: Vec<usize> = (0..seq_len).map(|_| rng.gen::<usize>() % vocab_size).collect();
         witnesses[emb_sel] = vec![DagBuilder::build_one_hot_selector_witness(
             seq_len, vocab_size, &tokens, Role::Input)];

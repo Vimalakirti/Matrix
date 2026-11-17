@@ -1,0 +1,34 @@
+[
+  {
+    "path": "README.md",
+    "sha256": "a88a463feb9c3cd3a9e60640cd54fdda5d13d21814effb72f2066081b09cae27"
+  },
+  {
+    "path": "adaptation-integrity.json",
+    "sha256": "8814a2ae55dd69fbbb31fb5802cbcee035aa9360c52c789f3dabab891f07ea9b"
+  },
+  {
+    "path": "check-q20.log",
+    "sha256": "4418f5bb1ee6ec63b0acd5ab6beb3a49766dca9ce0a5fff8fea395fd156d3791"
+  },
+  {
+    "path": "cpu-scales-0-20.log",
+    "sha256": "48c0f50ff9253da44dff6bbbad73d7950d398a334f45ce5c2a8eaaffaff2bf61"
+  },
+  {
+    "path": "integrity.json",
+    "sha256": "bbd1904e4a98a59a0feca3cf0d83b9e2884a9ac44cb4f859945f2552283787d8"
+  },
+  {
+    "path": "partial-chunks.log",
+    "sha256": "16179ce08b593dbe4715b3c82b0862de6f8958b11f2b4330c3ef97018885c3fc"
+  },
+  {
+    "path": "patch-replay.json",
+    "sha256": "7c9312c757536b6556cbf18aec46a6456dde9d7012c4d8abb968a48303d70968"
+  },
+  {
+    "path": "terminal-results.txt",
+    "sha256": "2d6c594361de63ae8a796ded4a1085b0fa2fdcaa4356b88296b718d07e78b9f4"
+  }
+]

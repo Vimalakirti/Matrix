@@ -1,0 +1,1939 @@
+diff --git a/zk-torch-4/scripts/bench/morpheus/run_models.sh b/zk-torch-4/scripts/bench/morpheus/run_models.sh
+index 5eba295..7bcb7ca 100755
+--- a/zk-torch-4/scripts/bench/morpheus/run_models.sh
++++ b/zk-torch-4/scripts/bench/morpheus/run_models.sh
+@@ -15,6 +15,8 @@ set -u
+ for flag in NO_AUTH NO_VERIFY LAYOUT_ONLY LINK_ROWS MORPHEUS_UNCLAIMED MORPHEUS_COIN_SEED; do
+   if [ "${!flag+x}" ]; then echo "Refusing benchmark override: $flag" >&2; exit 2; fi
+ done
++# Resolved before the cd below, so the lock works however the script is invoked.
++GPU_LOCK_FILE=$(realpath -m "$(dirname "$0")/GPU_LOCK")
+ cd "$(dirname "$0")/../../.."
+ OUT=${OUT:-scripts/bench/morpheus/out}
+ mkdir -p "$OUT"
+@@ -34,7 +36,7 @@ wait_gpus() {
+   [ -n "${NO_GPU_WAIT:-}" ] && return
+   local said=
+   # GPU_LOCK (next to this script) marks a timed foreign run, e.g. a baseline.
+-  while [ -e "$(dirname "$0")/GPU_LOCK" ] || [ "$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '$1 > 1000' | wc -l)" -gt 0 ]; do
++  while [ -e "$GPU_LOCK_FILE" ] || [ "$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | awk '$1 > 1000' | wc -l)" -gt 0 ]; do
+     [ -z "$said" ] && echo "[$(date +%T)] waiting for free GPUs" && said=1
+     sleep 60
+   done
+@@ -188,3 +190,8 @@ want_x ezkl8 && MODES=mono run nanoGPT_s8 hook:bench_streaming_nanogpt:llama2_co
+ # full-convolution advice (MORPHEUS_CONV=pp) against the default.
+ want_x convpp && MODES=mono run VGG-16_pp hook:bench_streaming_vgg:cv_config.yaml:1 MORPHEUS_CONV=pp VGG_VARIANT=16 NUM_LAYERS=13 INPUT_SIZE=32 ZK4_TABLE_SIZE_LOG=12
+ want_x convpp && MODES=mono run ResNet-50_pp hook:bench_streaming_resnet:cv_config.yaml:1 MORPHEUS_CONV=pp NUM_LAYERS=53 INPUT_SIZE=224 ZK4_TABLE_SIZE_LOG=12
++# ResNet-50 with trained weights (BatchNorm folded) and real images:
++# RESNET_REAL is an export of scripts/export_resnet50.py, RESNET_IMAGE picks
++# the image. Real activations reach 21 bits, so this row needs 32 request
++# planes and a 2^22 range table.
++want_x resnet_real && MODES=mono run ResNet-50-real hook:bench_streaming_resnet:cv_config.yaml:1 NUM_LAYERS=53 INPUT_SIZE=224 ZK4_TABLE_SIZE_LOG=${RESNET_TSL:-24} REQ_PLANES_LOG=5 SLOTS_LOG=${RESNET_SLOTS:-15}
+diff --git a/zk-torch-4/src/basicblock/einsum.rs b/zk-torch-4/src/basicblock/einsum.rs
+index ebd6fef..9766199 100644
+--- a/zk-torch-4/src/basicblock/einsum.rs
++++ b/zk-torch-4/src/basicblock/einsum.rs
+@@ -612,11 +612,119 @@ fn try_run_gpu(equation: &str, inputs: &[&Witness]) -> Option<Vec<Witness>> {
+ // CPU forward einsum
+ // ============================================================================
+ 
++/// Opt-in fast CPU forward for two-input contractions over exactly one
++/// summation index (the matmuls, attention products, embedding lookup and LM
++/// head): each operand is repacked with the summation axis contiguous, sparse
++/// rows (one-hot selectors) are contracted over their nonzeros only. Equal
++/// field VALUES to the generic path (canonical words; the generic path's words
++/// may be non-canonical), so it is off by default and on for WEIGHTS=real
++/// (where the Jacobi generation runs ~100 forward passes) or
++/// ZK4_FAST_EINSUM=1; ZK4_FAST_EINSUM=0 forces the generic path.
++fn fast_einsum_enabled() -> bool {
++    static F: OnceLock<bool> = OnceLock::new();
++    *F.get_or_init(|| match std::env::var("ZK4_FAST_EINSUM").ok().as_deref() {
++        Some("1") => true,
++        Some("0") => false,
++        _ => std::env::var("WEIGHTS").ok().as_deref() == Some("real"),
++    })
++}
++
++fn einsum_compute_fast(
++    equation: &str,
++    inputs: &[&[AlmostGoldilocksField]],
++    input_shapes: &[Vec<usize>],
++) -> Option<Vec<AlmostGoldilocksField>> {
++    if inputs.len() != 2 { return None; }
++    let (lhs, rhs) = equation.split_once("->")?;
++    let terms: Vec<Vec<char>> = lhs.split(',').map(|t| t.chars().collect()).collect();
++    let out: Vec<char> = rhs.chars().collect();
++    for (t, sh) in terms.iter().zip(input_shapes) {
++        if t.len() != sh.len() { return None; }
++        let mut seen = HashSet::new();
++        if !t.iter().all(|c| seen.insert(*c)) { return None; }
++    }
++    let mut dim: HashMap<char, usize> = HashMap::new();
++    for (t, sh) in terms.iter().zip(input_shapes) {
++        for (&c, &d) in t.iter().zip(sh) { dim.insert(c, d.next_power_of_two()); }
++    }
++    let sums: Vec<char> = dim.keys().copied().filter(|c| !out.contains(c)).collect();
++    if sums.len() != 1 { return None; }
++    let k = sums[0];
++    if !terms.iter().all(|t| t.contains(&k)) { return None; }
++    if !out.iter().all(|c| dim.contains_key(c)) { return None; }
++    let kd = dim[&k];
++    let out_dims: Vec<usize> = out.iter().map(|c| dim[c]).collect();
++    let out_size: usize = out_dims.iter().product::<usize>().max(1);
++    // Pack operand t as rows over its free chars (in term order), the
++    // summation axis contiguous: packed[row * kd + kk].
++    struct Packed { rows: Vec<AlmostGoldilocksField>, nz: Vec<Option<Vec<(u32, AlmostGoldilocksField)>>>, free: Vec<char>, free_dims: Vec<usize> }
++    let pack = |t: usize| -> Packed {
++        let chars = &terms[t];
++        let pd: Vec<usize> = chars.iter().map(|c| dim[c]).collect();
++        let mut strides = Vec::with_capacity(pd.len());
++        let mut st = 1usize;
++        for &d in &pd { strides.push(st); st *= d; }
++        let kpos = chars.iter().position(|&c| c == k).unwrap();
++        let free: Vec<char> = chars.iter().copied().filter(|&c| c != k).collect();
++        let free_pos: Vec<usize> = (0..chars.len()).filter(|&i| i != kpos).collect();
++        let free_dims: Vec<usize> = free_pos.iter().map(|&i| pd[i]).collect();
++        let nrows: usize = free_dims.iter().product::<usize>().max(1);
++        let src = inputs[t];
++        let kstride = strides[kpos];
++        let mut rows = vec![AlmostGoldilocksField(0); nrows * kd];
++        rows.par_chunks_mut(kd).enumerate().for_each(|(r, row)| {
++            let mut rem = r;
++            let mut base = 0usize;
++            for (j, &i) in free_pos.iter().enumerate() { base += (rem % free_dims[j]) * strides[i]; rem /= free_dims[j]; }
++            for (kk, x) in row.iter_mut().enumerate() {
++                let li = base + kk * kstride;
++                *x = if li < src.len() { src[li].reduce() } else { AlmostGoldilocksField(0) };
++            }
++        });
++        let nz = rows.par_chunks(kd).map(|row| {
++            let n = row.iter().filter(|x| x.0 != 0).count();
++            if n * 8 <= kd { Some(row.iter().enumerate().filter(|(_, x)| x.0 != 0).map(|(i, &x)| (i as u32, x)).collect()) } else { None }
++        }).collect();
++        Packed { rows, nz, free, free_dims }
++    };
++    let (a, b) = (pack(0), pack(1));
++    // Output position -> packed row of each operand.
++    let opos: HashMap<char, usize> = out.iter().enumerate().map(|(i, &c)| (c, i)).collect();
++    let row_map = |p: &Packed| -> Vec<(usize, usize)> {
++        let mut m = Vec::new();
++        let mut st = 1usize;
++        for (c, &d) in p.free.iter().zip(&p.free_dims) { m.push((opos[c], st)); st *= d; }
++        m
++    };
++    let (ma, mb) = (row_map(&a), row_map(&b));
++    let res: Vec<AlmostGoldilocksField> = (0..out_size).into_par_iter().with_min_len(64).map(|o| {
++        let mut multi = [0usize; 16];
++        let mut rem = o;
++        for (p, &d) in out_dims.iter().enumerate() { multi[p] = rem % d; rem /= d; }
++        let ra: usize = ma.iter().map(|&(p, st)| multi[p] * st).sum();
++        let rb: usize = mb.iter().map(|&(p, st)| multi[p] * st).sum();
++        let (xa, xb) = (&a.rows[ra * kd..(ra + 1) * kd], &b.rows[rb * kd..(rb + 1) * kd]);
++        let mut acc = AlmostGoldilocksField(0);
++        if let Some(nz) = &a.nz[ra] {
++            for &(i, v) in nz { acc = acc + v * xb[i as usize]; }
++        } else if let Some(nz) = &b.nz[rb] {
++            for &(i, v) in nz { acc = acc + xa[i as usize] * v; }
++        } else {
++            for i in 0..kd { acc = acc + xa[i] * xb[i]; }
++        }
++        acc.reduce()
++    }).collect();
++    Some(res)
++}
++
+ fn einsum_compute(
+     equation: &str,
+     inputs: &[&[AlmostGoldilocksField]],
+     input_shapes: &[Vec<usize>],
+ ) -> Vec<AlmostGoldilocksField> {
++    if fast_einsum_enabled() {
++        if let Some(r) = einsum_compute_fast(equation, inputs, input_shapes) { return r; }
++    }
+     let (lhs, rhs) = equation.split_once("->").expect("Einsum equation must have ->");
+     let input_terms: Vec<&str> = lhs.split(',').collect();
+     let output_indices: Vec<char> = rhs.chars().collect();
+diff --git a/zk-torch-4/src/basicblock/exp.rs b/zk-torch-4/src/basicblock/exp.rs
+index 4ddeb40..75baa89 100644
+--- a/zk-torch-4/src/basicblock/exp.rs
++++ b/zk-torch-4/src/basicblock/exp.rs
+@@ -96,6 +96,7 @@ impl BasicBlock for ExpHelper {
+             data_type: x.data_type,
+             sf: 0,
+             role: Role::Auxiliary,
++            channel_shift: None,
+         };
+         vec![r, aux]
+     }
+diff --git a/zk-torch-4/src/basicblock/range.rs b/zk-torch-4/src/basicblock/range.rs
+index 49d434c..91a6103 100644
+--- a/zk-torch-4/src/basicblock/range.rs
++++ b/zk-torch-4/src/basicblock/range.rs
+@@ -44,7 +44,7 @@ impl BasicBlock for NonNegative {
+         let num_var = get_n(&x_shape_padded);
+         let table_size = 1usize << self.table_size_log;
+         if crate::dag::lean_aux() {
+-            return vec![Witness { shape: x.shape.clone(), data: None, poly_type: PolyType::Sparse, data_type: x.data_type, sf: 0, role: Role::Auxiliary }];
++            return vec![Witness { shape: x.shape.clone(), data: None, poly_type: PolyType::Sparse, data_type: x.data_type, sf: 0, role: Role::Auxiliary, channel_shift: None }];
+         }
+ 
+         let mut selection = Vec::with_capacity(n);
+@@ -90,6 +90,7 @@ impl BasicBlock for NonNegative {
+             data_type: x.data_type,
+             sf: 0,
+             role: Role::Auxiliary,
++            channel_shift: None,
+         };
+         vec![aux]
+     }
+diff --git a/zk-torch-4/src/basicblock/scale.rs b/zk-torch-4/src/basicblock/scale.rs
+index a6b4b2e..7e83e85 100644
+--- a/zk-torch-4/src/basicblock/scale.rs
++++ b/zk-torch-4/src/basicblock/scale.rs
+@@ -118,6 +118,7 @@ impl BasicBlock for ScaleDown {
+             data_type: x.data_type,
+             sf: 0,
+             role: Role::Auxiliary,
++            channel_shift: None,
+         };
+         vec![y, aux]
+     }
+@@ -233,6 +234,7 @@ impl BasicBlock for ScaleUp {
+             data_type: x.data_type,
+             sf: 0,
+             role: Role::Auxiliary,
++            channel_shift: None,
+         };
+         vec![y, aux]
+     }
+diff --git a/zk-torch-4/src/bin/bench_streaming_resnet.rs b/zk-torch-4/src/bin/bench_streaming_resnet.rs
+index ebf154c..e1ac342 100644
+--- a/zk-torch-4/src/bin/bench_streaming_resnet.rs
++++ b/zk-torch-4/src/bin/bench_streaming_resnet.rs
+@@ -16,9 +16,10 @@ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+ use rand::Rng;
+ 
+ use zk_torch_4::commit::{AjtaiKey, GpuAjtaiStore};
+-use zk_torch_4::dag::resnet::{resnet50, resnet50_conv_configs, resnet50_output_shape};
++use zk_torch_4::dag::resnet::{resnet50, resnet50_conv_configs, resnet50_output_shape, resnet50_with_biases};
+ use zk_torch_4::dag::streaming_accumulator::{AccumulatorState, VerifierAccumulator};
+ use zk_torch_4::dag::{DagBuilder, DataType, EdgeId, Role, Witness};
++use zk_torch_4::mlperf::{load_witness, read_metadata};
+ use zk_torch_4::transcript::Transcript;
+ use zk_torch_4::ser_len;
+ use zk_torch_4::SF_LOG;
+@@ -98,18 +99,34 @@ fn main() {
+ 
+     let configs = resnet50_conv_configs();
+     let max_conv = num_layers.min(configs.len());
+-    let conv_weights: Vec<Witness> = configs[..max_conv].iter()
+-        .map(|&(c_in, c_out, kh, kw)| gen_conv_weight(c_in, c_out, kh, kw)).collect();
+-    let (out_c, _) = resnet50_output_shape(max_conv);
+-    let fc_weight = gen_fc_weight(out_c, num_classes);
+-    let fc_bias = gen_fc_bias(num_classes, batch_size);
++    // RESNET_REAL=<dir from scripts/export_resnet50.py>: trained weights with
++    // BatchNorm folded into conv biases (signed, scale 2^SF_LOG), and the
++    // exported images as inputs, starting at RESNET_IMAGE (default 0).
++    let real = std::env::var("RESNET_REAL").ok().map(std::path::PathBuf::from);
++    let real_image: usize = std::env::var("RESNET_IMAGE").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+ 
+     let mut g = DagBuilder::new();
++    let mut real_x = None;
++    if let Some(dir) = &real {
++        assert!(batch_size == 1 && max_conv == configs.len(), "RESNET_REAL needs BATCH=1 and all 53 convolutions");
++        let meta = read_metadata(dir);
++        assert_eq!(meta.sf_log, *SF_LOG, "export scale must match the config's scale_factor_log");
++        let ld = |name: String| load_witness(&dir.join(name), meta.sf_log, DataType::Int, Role::Constant);
++        let cw: Vec<Witness> = (0..max_conv).map(|i| ld(format!("conv_{:03}_weight.bin", i))).collect();
++        let cb: Vec<Witness> = (0..max_conv).map(|i| ld(format!("conv_{:03}_bias.bin", i))).collect();
++        let x = g.input(vec![3, input_size, input_size], DataType::Int);
++        real_x = Some(x);
++        let _output = g.pipe(&[x], resnet50_with_biases(cw, cb, ld("fc_weight.bin".into()), Some(ld("fc_bias.bin".into())), num_classes, max_conv));
++        println!("Real weights and images: {} (first image {})", dir.display(), real_image);
++    }
++
+     // ONE explicit [B,3,H,W] input retains logical B (including nonpowers
+     // of two); its raw padded buffer is still [b_pad*4,H,W]. Rather than
+     // `batch` separate inputs: the batch is bound inside conv, so the graph
+     // stays the size of a single image.
+-    let xs: Vec<EdgeId> = if batch_size > 1 {
++    let xs: Vec<EdgeId> = if let Some(x) = real_x {
++        vec![x]
++    } else if batch_size > 1 {
+         vec![g.input(
+             vec![batch_size, 3, input_size, input_size],
+             DataType::Uint,
+@@ -117,7 +134,14 @@ fn main() {
+     } else {
+         vec![g.input(vec![3, input_size, input_size], DataType::Uint)]
+     };
+-    let _output = g.pipe(&xs, resnet50(conv_weights, fc_weight, Some(fc_bias), num_classes, max_conv));
++    if real.is_none() {
++        let conv_weights: Vec<Witness> = configs[..max_conv].iter()
++            .map(|&(c_in, c_out, kh, kw)| gen_conv_weight(c_in, c_out, kh, kw)).collect();
++        let (out_c, _) = resnet50_output_shape(max_conv);
++        let fc_weight = gen_fc_weight(out_c, num_classes);
++        let fc_bias = gen_fc_bias(num_classes, batch_size);
++        let _output = g.pipe(&xs, resnet50(conv_weights, fc_weight, Some(fc_bias), num_classes, max_conv));
++    }
+     let (mut dag, witnesses_template) = g.compile();
+     println!("Compile: {} nodes, {} edges (batch={})", dag.nodes.len(), dag.num_edges(), batch_size);
+ 
+@@ -160,7 +184,10 @@ fn main() {
+         let mut witnesses = witnesses_template.clone();
+         let sp = input_size.next_power_of_two();
+         let batch_inputs: Vec<(EdgeId, Witness)> = xs.iter().map(|&x| {
+-            if batch_size > 1 {
++            if let Some(dir) = &real {
++                let img = dir.join("images").join(format!("{:05}.bin", real_image + it));
++                (x, load_witness(&img, *SF_LOG, DataType::Int, Role::Input))
++            } else if batch_size > 1 {
+                 let lead = batch_size.next_power_of_two() * 4;
+                 let mut d = rand_field_vec(lead * sp * sp);
+                 // Keep this historical host sanitization, but correctness
+diff --git a/zk-torch-4/src/bin/morpheus_e2e.rs b/zk-torch-4/src/bin/morpheus_e2e.rs
+index e195d0b..ffae368 100644
+--- a/zk-torch-4/src/bin/morpheus_e2e.rs
++++ b/zk-torch-4/src/bin/morpheus_e2e.rs
+@@ -13,7 +13,9 @@ fn main() {
+     almost_goldilocks_cuda::init().expect("CUDA init");
+     let model = std::env::var("MODEL").unwrap_or_else(|_| "gpt2".into());
+     let t = Instant::now();
+-    let mut inst = models::build(&model, 0);
++    // MORPHEUS_PROMPT_SEED picks the request's prompt; weights are fixed.
++    let prompt_seed: u64 = std::env::var("MORPHEUS_PROMPT_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
++    let mut inst = models::build(&model, prompt_seed);
+     println!("{}: {} nodes, {} edges; graph {:.2}s, witness {:.2}s; {} {}s per request",
+         inst.name, inst.dag.nodes.len(), inst.dag.num_edges(), t.elapsed().as_secs_f64() - inst.witness_secs, inst.witness_secs, inst.units, inst.unit);
+     driver::run_with_ar(&inst.name, &inst.dag, &mut inst.wit, &inst.public, inst.units, inst.unit, inst.ar.clone());
+diff --git a/zk-torch-4/src/dag/builder.rs b/zk-torch-4/src/dag/builder.rs
+index 2cc38e8..6a3f938 100644
+--- a/zk-torch-4/src/dag/builder.rs
++++ b/zk-torch-4/src/dag/builder.rs
+@@ -9,6 +9,16 @@ use crate::util::arith::{int_to_f, next_pow};
+ use crate::util::shape::{broadcast_shape, pad_to_pow_of_two};
+ use crate::SF_LOG;
+ 
++/// Mark a weight as stored per output channel: entry c of its output axis
++/// holds round(W_c / 2^shifts[c]) (scale 2^(SF - shifts[c])). Every einsum
++/// that consumes it multiplies its output channel c by 2^shifts[c], a
++/// committed model constant, before any rescale, so the graph computes
++/// x·W at scale 2^SF as before. Keeps each stored weight within 8 digit
++/// planes when a few outliers would otherwise widen the whole tensor.
++pub fn register_channel_shift(w: &mut Witness, shifts: Vec<u32>) {
++    w.channel_shift = Some(std::sync::Arc::new(shifts));
++}
++
+ fn letters(a: usize) -> String {
+     (0..a).map(|i| (b'a' + i as u8) as char).collect()
+ }
+@@ -26,6 +36,14 @@ pub struct DagBuilder {
+     pub layer_boundaries: Vec<EdgeId>,
+     /// Output edges that need self-claims (Conv2D output edges).
+     pub self_claim_edges: Vec<EdgeId>,
++    /// Merge attention heads with a real transpose (`bhsd->bshd`) instead of
++    /// the default storage reinterpretation of `[1, h, s, d]` as
++    /// `[1, s, h, d]` (see [`Self::merge_heads`]). Set for pretrained
++    /// checkpoints (morpheus::models, WEIGHTS=real).
++    pub exact_head_merge: bool,
++    /// Weights stored per output channel (see [`register_channel_shift`]).
++    pub channel_shift: HashMap<EdgeId, Vec<u32>>,
++    shift_ok: bool,
+ }
+ 
+ impl DagBuilder {
+@@ -39,6 +57,9 @@ impl DagBuilder {
+             two_pow: Vec::new(),
+             layer_boundaries: Vec::new(),
+             self_claim_edges: Vec::new(),
++            exact_head_merge: false,
++            channel_shift: HashMap::new(),
++            shift_ok: false,
+         }
+     }
+ 
+@@ -61,6 +82,7 @@ impl DagBuilder {
+         let e = self.num_edges;
+         self.num_edges += 1;
+         assert_eq!(t.role, Role::Constant, "Parameters must be constants");
++        if let Some(sh) = t.channel_shift.as_ref() { self.channel_shift.insert(e, sh.to_vec()); }
+         self.init_values.push(Some(t));
+         e
+     }
+@@ -83,6 +105,125 @@ impl DagBuilder {
+         self.public_literal(Witness::new(shape, vec![int_to_f(value); n], DataType::Float, sf, Role::Input))
+     }
+ 
++    /// Every ScaleDown quotient y = (x + floor(S/2) - r)/S is an integer only
++    /// for the honest remainder; with any other r in [0, S) it is a field
++    /// element far from the integers. Each quotient therefore needs an
++    /// integer bound (Eq. rounding_nowrap). A structural pass marks the edges
++    /// some constraint already bounds: committed leaves and literals,
++    /// NonNegative inputs, views of bounded edges, sums and differences whose
++    /// other two terms are bounded (e.g. ReLU's y = x + neg), contractions of
++    /// bounded operands, and rescale numerators of bounded quotients. Every
++    /// quotient still unbounded, in graph order, gets one lookup root
++    /// y + B in [0, 2B), B = 2^ZK4_RESCALE_BOUND_LOG (default 26): a table
++    /// index lifts uniquely, so y lifts into [-B, B). 2^26 leaves 4x headroom
++    /// over the widest real-checkpoint quotient (2^24, Llama-3.1-8B), and
++    /// keeps Q.K^T below 2^62 even for RoPE sums (2^27) over head_dim 256, so
++    /// the contractions that consume y stay certified too. The structural pass only picks sites;
++    /// the magnitudes are checked by the bounds census (morpheus::bounds).
++    fn certify_rescales(&mut self) {
++        let blog: usize = std::env::var("ZK4_RESCALE_BOUND_LOG").ok().and_then(|v| v.parse().ok()).unwrap_or(26);
++        assert!((8..=48).contains(&blog), "ZK4_RESCALE_BOUND_LOG must be in 8..=48");
++        let mut bnd = vec![false; self.num_edges];
++        let mut producer = vec![false; self.num_edges];
++        for n in &self.nodes { for &o in &n.outputs { producer[o] = true; } }
++        for e in 0..self.num_edges {
++            let leaf = !producer[e] && self.init_values[e].as_ref().map(|w| matches!(w.role, Role::Constant | Role::Input)).unwrap_or(false);
++            bnd[e] = leaf || self.program_literals.contains_key(&e);
++        }
++        for n in &self.nodes { if matches!(n.kind, BasicBlockType::NonNegative(_)) { bnd[n.inputs[0]] = true; } }
++        let sites: Vec<EdgeId> = self.nodes.iter()
++            .filter(|n| matches!(n.kind, BasicBlockType::ScaleDown(_))).map(|n| n.outputs[0]).collect();
++        let size = |b: &Self, e: EdgeId| -> usize { b.init_values[e].as_ref().unwrap().shape.iter().map(|&d| d.next_power_of_two()).product() };
++        // The rules below are monotone, so their least fixed point does not
++        // depend on evaluation order. Precompute each node's static facts once;
++        // nodes added later only touch bounded edges and need no rule.
++        enum Rule { Lin(EdgeId, EdgeId, EdgeId), Fwd(Vec<EdgeId>, EdgeId), Back(Vec<EdgeId>, EdgeId) }
++        let mut rules: Vec<Rule> = Vec::new();
++        for nd in &self.nodes {
++            let (ins, o) = (&nd.inputs, nd.outputs[0]);
++            match &nd.kind {
++                BasicBlockType::Add(_) | BasicBlockType::Sub(_) => rules.push(Rule::Lin(ins[0], ins[1], o)),
++                BasicBlockType::ChangeShape(_) => {
++                    rules.push(Rule::Fwd(vec![ins[0]], o));
++                    if size(self, o) >= size(self, ins[0]) { rules.push(Rule::Back(vec![ins[0]], o)); }
++                }
++                BasicBlockType::Einsum(es) => {
++                    let (lhs, rhs) = es.equation.split_once("->").unwrap();
++                    let view = ins.len() == 1 && lhs.chars().all(|c| rhs.contains(c));
++                    rules.push(Rule::Fwd(ins.clone(), o));
++                    if view { rules.push(Rule::Back(vec![ins[0]], o)); }
++                    // o = a * 1 entrywise against an all-ones literal: a = o.
++                    let entrywise = ins.len() == 2 && lhs.split(',').all(|t| t.trim() == rhs.trim());
++                    if entrywise {
++                        for k in 0..2 {
++                            let ones = self.program_literals.get(&ins[1 - k]).map(|v| v.iter().all(|&x| x == 1)).unwrap_or(false);
++                            if ones && size(self, ins[k]) == size(self, o) { rules.push(Rule::Back(vec![ins[k]], o)); }
++                        }
++                    }
++                }
++                BasicBlockType::ScaleUp(_) => rules.push(Rule::Fwd(vec![ins[0]], o)),
++                BasicBlockType::ScaleDown(_) => rules.push(Rule::Back(vec![ins[0]], o)),
++                k if matches!(k, BasicBlockType::Conv1D(_) | BasicBlockType::Conv2D(_) | BasicBlockType::Conv3D(_)
++                    | BasicBlockType::DepthwiseConv2D(_) | BasicBlockType::ConvTranspose1D(_)
++                    | BasicBlockType::ConvTranspose2D(_) | BasicBlockType::ConvTranspose3D(_)
++                    | BasicBlockType::ZeroPad(_) | BasicBlockType::ZeroPadAsym(_) | BasicBlockType::ZeroPad3D(_)
++                    | BasicBlockType::SubSample2D(_) | BasicBlockType::Replicate2x2(_) | BasicBlockType::ChannelSlice(_)
++                    | BasicBlockType::Concat(_) | BasicBlockType::FlattenKernel(_) | BasicBlockType::FlattenKernel3D(_)
++                    | BasicBlockType::Permute(_)) => {
++                    rules.push(Rule::Fwd(ins.clone(), o));
++                    // Views that keep every input entry bound their inputs back.
++                    if matches!(k, BasicBlockType::ZeroPad(_) | BasicBlockType::ZeroPadAsym(_) | BasicBlockType::ZeroPad3D(_)
++                        | BasicBlockType::Concat(_) | BasicBlockType::Replicate2x2(_)) { rules.push(Rule::Back(ins.clone(), o)); }
++                }
++                _ => {}
++            }
++        }
++        let propagate = |bnd: &mut Vec<bool>| loop {
++            let mut ch = false;
++            let mut set = |bnd: &mut Vec<bool>, e: EdgeId| if !bnd[e] { bnd[e] = true; ch = true; };
++            for r in &rules {
++                match r {
++                    Rule::Lin(a, c, o) => {
++                        let (a, c, o) = (*a, *c, *o);
++                        if bnd[a] && bnd[c] { set(bnd, o); }
++                        if bnd[o] && bnd[c] { set(bnd, a); }
++                        if bnd[o] && bnd[a] { set(bnd, c); }
++                    }
++                    Rule::Fwd(ins, o) => if ins.iter().all(|&i| bnd[i]) { set(bnd, *o); },
++                    Rule::Back(ins, o) => if bnd[*o] { for &i in ins { set(bnd, i); } },
++                }
++            }
++            if !ch { break; }
++        };
++        propagate(&mut bnd);
++        let mut added = 0usize;
++        for y in sites {
++            if bnd[y] { continue; }
++            let w = self.init_values[y].as_ref().unwrap(); let (shape, sf) = (w.shape.clone(), w.sf);
++            let b = self.integer_literal(shape, 1i128 << blog, sf);
++            let t = self.add(y, b)[0];
++            self.init_values[t].as_mut().unwrap().role = Role::Output;
++            self.add_nonneg_node_bits(t, blog + 1);
++            added += 1;
++            bnd.resize(self.num_edges, true);
++            bnd[y] = true;
++            propagate(&mut bnd);
++        }
++        if std::env::var_os("ZK4_RESCALE_REPORT").is_some() {
++            // Lookup volume: padded entries x table bits, over all NonNegative roots.
++            let (mut n_all, mut bits_all, mut n_new, mut bits_new) = (0u128, 0u128, 0u128, 0u128);
++            let first_new = self.nodes.len() - 2 * added;
++            for nd in &self.nodes {
++                let BasicBlockType::NonNegative(t) = &nd.kind else { continue };
++                let n: u128 = self.init_values[nd.inputs[0]].as_ref().unwrap().shape.iter().map(|&d| d.next_power_of_two() as u128).product();
++                n_all += n; bits_all += n * t.table_size_log as u128;
++                if nd.id >= first_new { n_new += n; bits_new += n * t.table_size_log as u128; }
++            }
++            eprintln!("[rescale] {added} quotient bounds added (|y| < 2^{blog}): +{n_new} lookup entries ({:.2}% of {n_all}), +{bits_new} entry-bits ({:.2}% of {bits_all})",
++                100.0 * n_new as f64 / n_all.max(1) as f64, 100.0 * bits_new as f64 / bits_all.max(1) as f64);
++        }
++    }
++
+     /// Integer interval certificate. Both sides are lookup roots, with a
+     /// common authenticated small sum; the field relation therefore lifts.
+     pub(crate) fn integer_interval(&mut self, a: EdgeId, lo: i128, hi: i128) {
+@@ -121,6 +262,8 @@ impl DagBuilder {
+     }
+ 
+     pub fn add_gkr_node(&mut self, inps: Vec<EdgeId>, basicblock: BasicBlockType) -> Vec<EdgeId> {
++        assert!(self.shift_ok || !inps.iter().any(|e| self.channel_shift.contains_key(e)),
++            "a per-channel weight may only feed an einsum that keeps its channel axis");
+         let nid = self.nodes.len();
+         let eid = self.num_edges;
+         let outs: Vec<EdgeId> = (eid..eid + basicblock.out_arity()).collect();
+@@ -296,6 +439,20 @@ impl DagBuilder {
+         out
+     }
+ 
++    /// Attention output `[1, h, s, d]` -> `[1, s, h, d]`. The default
++    /// (`exact_head_merge == false`, the paper's benchmark graphs) is a
++    /// `change_shape`, which only reinterprets the padded storage: it does
++    /// NOT move position s / head h to their new axes, so for h, s > 1 it
++    /// mixes heads and positions (harmless for synthetic weights, wrong for a
++    /// real model). `exact_head_merge` uses the transpose einsum instead.
++    pub fn merge_heads(&mut self, out: EdgeId, seq_len: usize, num_heads: usize, head_dim: usize) -> EdgeId {
++        if self.exact_head_merge {
++            self.einsum("bhsd->bshd".to_string(), vec![out], false)[0]
++        } else {
++            self.change_shape(out, vec![1, seq_len, num_heads, head_dim])
++        }
++    }
++
+     pub fn mask(&mut self, a: EdgeId, raw_mask_shape: Vec<usize>) -> EdgeId {
+         let s = letters(raw_mask_shape.len());
+         let val_num: usize = raw_mask_shape.iter().product();
+@@ -429,13 +586,30 @@ impl DagBuilder {
+             .sum();
+         let output_sf = self.init_values[inputs[0]].as_ref().unwrap().sf;
+ 
++        self.shift_ok = true;
+         let mut outs = self.add_gkr_node(inputs.clone(), einsum_basicblock);
++        self.shift_ok = false;
+         self.init_values.push(Some(Witness::new_wo_data(
+-            output_shape,
++            output_shape.clone(),
+             output_data_type,
+             input_sf,
+             Role::Output,
+         )));
++        // Per-channel weights: restore channel c's scale with the committed
++        // factor 2^shift[c] (exact integer product, before the rescale).
++        let out_sym: Vec<char> = equation.split("->").nth(1).unwrap().chars().collect();
++        for (k, &e) in inputs.iter().enumerate() {
++            let Some(sh) = self.channel_shift.get(&e).cloned() else { continue };
++            let kept: Vec<char> = input_symbols[k].chars().filter(|c| out_sym.contains(c)).collect();
++            assert_eq!(kept.len(), 1, "per-channel weight {e}: {equation} must keep exactly one of its axes");
++            let n = *shape_map.get(&kept[0].to_string()).unwrap();
++            assert_eq!(sh.len(), n, "per-channel weight {e}: {} shifts for a {n}-channel axis", sh.len());
++            let mut d = vec![int_to_f(1); n.next_power_of_two()];
++            for (c, &s) in sh.iter().enumerate() { d[c] = int_to_f(1i128 << s); }
++            let f = self.param(Witness::new(vec![n], d, DataType::Float, 0, Role::Constant));
++            let o: String = out_sym.iter().collect();
++            outs = self.einsum(format!("{o},{}->{o}", kept[0]), vec![outs[0], f], false);
++        }
+         if scale_back {
+             outs = self.scale(outs[0], input_sf, output_sf);
+         }
+@@ -2003,6 +2177,7 @@ impl DagBuilder {
+         }).collect();
+         let exp_guard_nodes = helpers.into_iter().map(|(n,x,r,bits)|
+             (n, self.exp_guards(x,r,bits))).collect();
++        self.certify_rescales();
+         let DagBuilder {
+             program_literals,
+             nodes,
+@@ -2012,6 +2187,9 @@ impl DagBuilder {
+             two_pow,
+             layer_boundaries,
+             self_claim_edges,
++            exact_head_merge: _,
++            channel_shift: _,
++            shift_ok: _,
+         } = self;
+ 
+         if std::env::var("ZK4_KIND_REPORT").is_ok() {
+diff --git a/zk-torch-4/src/dag/gpt2.rs b/zk-torch-4/src/dag/gpt2.rs
+index d0dd1d3..9be1b5f 100644
+--- a/zk-torch-4/src/dag/gpt2.rs
++++ b/zk-torch-4/src/dag/gpt2.rs
+@@ -129,7 +129,7 @@ pub fn gpt2_attention(
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+-        let out = g.change_shape(out, vec![1, seq_len, num_heads, head_dim]);
++        let out = g.merge_heads(out, seq_len, num_heads, head_dim);
+         let out = g.reshape(out, vec![1, seq_len, hidden_dim])[0];
+ 
+         let out =
+diff --git a/zk-torch-4/src/dag/gptj.rs b/zk-torch-4/src/dag/gptj.rs
+index 32a2992..6243035 100644
+--- a/zk-torch-4/src/dag/gptj.rs
++++ b/zk-torch-4/src/dag/gptj.rs
+@@ -40,12 +40,26 @@ pub fn gptj_mlp(
+     w_2_e: EdgeId,
+     b_1_e: EdgeId,
+     b_2_e: EdgeId,
++) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
++    gptj_mlp_ext(w_1_e, w_2_e, b_1_e, b_2_e, false)
++}
++
++/// [`gptj_mlp`]; `gelu_mul` computes GELU(h) ~ h * sigmoid(1.702 h) as GPT-2
++/// does (the default graph feeds sigmoid(1.702 h) alone to fc_out, one
++/// elementwise product less; pretrained checkpoints need the product).
++pub fn gptj_mlp_ext(
++    w_1_e: EdgeId,
++    w_2_e: EdgeId,
++    b_1_e: EdgeId,
++    b_2_e: EdgeId,
++    gelu_mul: bool,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "This custom MLP layer expects 1 input");
+         let x = x[0];
+         let h_1 = g.einsum("bsi,ij->bsj".to_string(), vec![x, w_1_e], true)[0];
+         let h_1 = g.add(h_1, b_1_e)[0];
++        let h_1_x = h_1;
+ 
+         // compute Gelu
+         let shape = g.init_values[h_1].as_ref().unwrap().shape.clone();
+@@ -66,6 +80,7 @@ pub fn gptj_mlp(
+         let constant = g.param(constant);
+         let h_1 = g.einsum("bsi,bsi->bsi".to_string(), vec![h_1, constant], true)[0];
+         let h_1 = g.sigmoid(h_1)[0];
++        let h_1 = if gelu_mul { g.einsum("bsi,bsi->bsi".to_string(), vec![h_1_x, h_1], true)[0] } else { h_1 };
+ 
+         let h_2 = g.einsum("bsi,ij->bsj".to_string(), vec![h_1, w_2_e], true)[0];
+         let h_2 = g.add(h_2, b_2_e)[0];
+@@ -127,7 +142,7 @@ pub fn gptj_attention(
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+-        let out = g.change_shape(out, vec![1, seq_len, num_heads, head_dim]);
++        let out = g.merge_heads(out, seq_len, num_heads, head_dim);
+         let out = g.reshape(out, vec![1, seq_len, num_heads * head_dim])[0];
+ 
+         let out =
+@@ -152,6 +167,30 @@ pub fn gptj_block(
+     seq_len: usize,
+     cos_param: EdgeId,
+     sin_param: EdgeId,
++) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
++    gptj_block_ext(attn_norm_w, attn_q_w, attn_k_w, attn_v_w, attn_o_w, attn_norm_b, proj_1_w, proj_2_w,
++        proj_1_b, proj_2_b, num_heads, head_dim, seq_len, cos_param, sin_param, false)
++}
++
++/// [`gptj_block`] with the MLP's `gelu_mul` choice (see [`gptj_mlp_ext`]).
++#[allow(clippy::too_many_arguments)]
++pub fn gptj_block_ext(
++    attn_norm_w: Witness,
++    attn_q_w: Witness,
++    attn_k_w: Witness,
++    attn_v_w: Witness,
++    attn_o_w: Witness,
++    attn_norm_b: Witness,
++    proj_1_w: Witness,
++    proj_2_w: Witness,
++    proj_1_b: Witness,
++    proj_2_b: Witness,
++    num_heads: usize,
++    head_dim: usize,
++    seq_len: usize,
++    cos_param: EdgeId,
++    sin_param: EdgeId,
++    gelu_mul: bool,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "This custom Block layer expects 1 input");
+@@ -176,7 +215,7 @@ pub fn gptj_block(
+         let mlp_inp = vec![attn_norm_out[0]];
+         let mlp_out = g.pipe(
+             &mlp_inp,
+-            gptj_mlp(proj_1_w, proj_2_w, proj_1_b, proj_2_b),
++            gptj_mlp_ext(proj_1_w, proj_2_w, proj_1_b, proj_2_b, gelu_mul),
+         );
+         let combine_attn_mlp = g.add(attn_out[0], mlp_out[0])[0];
+ 
+@@ -295,26 +334,55 @@ pub fn gpt_j_6b_hidden(
+     num_heads: usize,
+     head_dim: usize,
+     seq_len: usize,
++) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
++    gpt_j_6b_hidden_ext(attn_norm_w_vec, attn_q_w_vec, attn_k_w_vec, attn_v_w_vec, attn_o_w_vec, attn_norm_b_vec,
++        proj_1_w_vec, proj_2_w_vec, proj_1_b_vec, proj_2_b_vec, layer_norm_w, layer_norm_b, num_heads, head_dim, seq_len, None, false)
++}
++
++/// [`gpt_j_6b_hidden`] with explicit RoPE tables (`None`: the default ones,
++/// full-width rotation with the Llama-3 frequency scaling) and the MLP's
++/// `gelu_mul` choice. Pretrained GPT-J: partial rotary tables
++/// (`llama::rope_mats_plain(.., rot = 64)`) and `gelu_mul = true`.
++#[allow(clippy::too_many_arguments)]
++pub fn gpt_j_6b_hidden_ext(
++    attn_norm_w_vec: Vec<Witness>,
++    attn_q_w_vec: Vec<Witness>,
++    attn_k_w_vec: Vec<Witness>,
++    attn_v_w_vec: Vec<Witness>,
++    attn_o_w_vec: Vec<Witness>,
++    attn_norm_b_vec: Vec<Witness>,
++    proj_1_w_vec: Vec<Witness>,
++    proj_2_w_vec: Vec<Witness>,
++    proj_1_b_vec: Vec<Witness>,
++    proj_2_b_vec: Vec<Witness>,
++    layer_norm_w: Witness,
++    layer_norm_b: Witness,
++    num_heads: usize,
++    head_dim: usize,
++    seq_len: usize,
++    rope: Option<(Vec<AlmostGoldilocksField>, Vec<AlmostGoldilocksField>)>,
++    gelu_mul: bool,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "gpt_j_6b_hidden expects 1 input");
+         let mut x = x[0];
+         let theta = 10000.0;
++        let (cos_data, sin_data) = rope.unwrap_or_else(|| (rope_cos_mat_llama3(head_dim, seq_len, theta), rope_sin_mat_llama3(head_dim, seq_len, theta)));
+         let cos_param = g.param(Witness::new(
+-            vec![seq_len, head_dim], rope_cos_mat_llama3(head_dim, seq_len, theta),
++            vec![seq_len, head_dim], cos_data,
+             DataType::Float, *SF_LOG, Role::Constant));
+         let sin_param = g.param(Witness::new(
+-            vec![seq_len, head_dim], rope_sin_mat_llama3(head_dim, seq_len, theta),
++            vec![seq_len, head_dim], sin_data,
+             DataType::Float, *SF_LOG, Role::Constant));
+         let num_layers = attn_norm_w_vec.len();
+         for i in 0..num_layers {
+-            let block = g.pipe(&[x], gptj_block(
++            let block = g.pipe(&[x], gptj_block_ext(
+                 attn_norm_w_vec[i].clone(), attn_q_w_vec[i].clone(),
+                 attn_k_w_vec[i].clone(), attn_v_w_vec[i].clone(),
+                 attn_o_w_vec[i].clone(), attn_norm_b_vec[i].clone(),
+                 proj_1_w_vec[i].clone(), proj_2_w_vec[i].clone(),
+                 proj_1_b_vec[i].clone(), proj_2_b_vec[i].clone(),
+-                num_heads, head_dim, seq_len, cos_param, sin_param));
++                num_heads, head_dim, seq_len, cos_param, sin_param, gelu_mul));
+             x = block[0];
+             if i < num_layers - 1 { g.layer_boundaries.push(x); }
+         }
+diff --git a/zk-torch-4/src/dag/llama.rs b/zk-torch-4/src/dag/llama.rs
+index f4fe342..29ec512 100644
+--- a/zk-torch-4/src/dag/llama.rs
++++ b/zk-torch-4/src/dag/llama.rs
+@@ -300,14 +300,33 @@ pub(crate) fn rms_square(g: &mut DagBuilder, x: EdgeId) -> EdgeId {
+     let _=rms_bounds(sf);
+     let shape=g.init_values[x].as_ref().unwrap().shape.clone();
+     assert!((1..=(1<<20)).contains(shape.last().unwrap()), "unsupported RMS reduction dimension");
++    let n_red=shape.last().unwrap().next_power_of_two() as i128;
+     let x=g.mask(x,shape);
+-    let bound=floor_sqrt(RMS_MEAN_MAX*(1i128<<sf));
++    let emax=rms_elem_max();
++    assert!(emax*n_red < (1i128<<54), "ZK4_RMS_ELEM_LOG too wide for this reduction (sum leaves the division domain)");
++    let bound=floor_sqrt(emax*(1i128<<sf));
+     g.integer_interval(x,-bound,bound);
+     let sq=g.einsum("bsi,bsi->bsi".into(),vec![x,x],true)[0];
+-    g.integer_interval(sq,0,RMS_MEAN_MAX);
++    g.integer_interval(sq,0,emax);
+     sq
+ }
+ 
++/// Per-element bound on the rescaled squares (and so on |x|) of the RMS /
++/// LayerNorm input. Default RMS_MEAN_MAX (|x| < 2^14 / 2^(sf/2): 512 at
++/// scale 2^10). ZK4_RMS_ELEM_LOG=b widens it to 2^b - 1 (b in 28..=40)
++/// for real checkpoints with massive activations (GPT-2's residual reaches
++/// |x - mean| ~ 3000, needing b >= 34 at scale 2^10). The mean itself stays
++/// bounded by RMS_MEAN_MAX through the bucket constraints; rms_square asserts
++/// that the sum of the n squares stays inside the 2^54 division domain
++/// (n * 2^b < 2^54), and the downstream |h| interval is capped at 2^31.
++pub(crate) fn rms_elem_max() -> i128 {
++    use crate::basicblock::llama::RMS_MEAN_MAX;
++    match std::env::var("ZK4_RMS_ELEM_LOG").ok().and_then(|v| v.parse::<u32>().ok()) {
++        None => RMS_MEAN_MAX,
++        Some(b) => { assert!((28..=40).contains(&b), "ZK4_RMS_ELEM_LOG must be in 28..=40"); (1i128 << b) - 1 }
++    }
++}
++
+ /// The two RMS output rescales are bounded locally as well; unrelated graph
+ /// rescales remain outside this normalization certificate.
+ pub(crate) fn rms_apply(g: &mut DagBuilder,x: EdgeId,r: EdgeId,w: EdgeId) -> EdgeId {
+@@ -315,10 +334,18 @@ pub(crate) fn rms_apply(g: &mut DagBuilder,x: EdgeId,r: EdgeId,w: EdgeId) -> Edg
+     let sf=g.init_values[x].as_ref().unwrap().sf;
+     assert_eq!(g.init_values[w].as_ref().unwrap().sf,sf,"RMS gain scale mismatch");
+     let (rmax,_,_)=rms_bounds(sf); let q=1i128<<sf;
+-    let xmax=floor_sqrt(RMS_MEAN_MAX*q);
++    let xmax=floor_sqrt(rms_elem_max()*q);
+     // Mean/square roots also imply |h|<2^31 across s<=20,n<=2^20.
+     // See the profile proof; this extra bound is independent of final output.
+-    let hmax=((xmax*rmax+q-1)/q).min((1i128<<31)-1);
++    // Tighter, and independent of the element width: the squares round to
++    // nearest (x_i^2 <= q(S + n/2)) and so does the mean (S <= n(m + 1/2)),
++    // so x_i^2 <= q n (m+1); with r <= sqrt(q^3/m) + 1/2 (r = 0 at m = 0),
++    // |h| <= sqrt(2n) q + sqrt(n (m+1)/q)/2 + 1/2 for m <= RMS_MEAN_MAX.
++    // Without it a wide ZK4_RMS_ELEM_LOG leaves |h| at the 2^31 cap and the
++    // next projection's accumulator past q (E2 census, real GPT-J).
++    let n=*g.init_values[x].as_ref().unwrap().shape.last().unwrap() as i128;
++    let hcap=floor_sqrt(2*n*q*q)+1+(floor_sqrt(n*(RMS_MEAN_MAX+1)/q)+1)/2+1;
++    let hmax=((xmax*rmax+q-1)/q).min((1i128<<31)-1).min(hcap);
+     let wmax=(1i128<<30)-1;
+     g.integer_interval(w,-wmax,wmax);
+     let h=g.einsum("bsi,bs->bsi".into(),vec![x,r],true)[0];
+@@ -455,7 +482,7 @@ pub fn llama_attention(
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+-        let out = g.change_shape(out, vec![1, seq_len, num_heads, head_dim]);
++        let out = g.merge_heads(out, seq_len, num_heads, head_dim);
+         let out = g.reshape(out, vec![1, seq_len, num_heads * head_dim])[0];
+ 
+         let out =
+@@ -531,16 +558,64 @@ pub fn llama_2_7b_hidden(
+     num_heads: usize,
+     head_dim: usize,
+     seq_len: usize,
++) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
++    llama_2_7b_hidden_rope(attn_norm_w_vec, attn_q_w_vec, attn_k_w_vec, attn_v_w_vec, attn_o_w_vec,
++        proj_norm_w_vec, proj_1_w_vec, proj_2_w_vec, proj_3_w_vec, layer_norm_w, num_heads, head_dim, seq_len, None)
++}
++
++/// RoPE tables in the layout of [`rope_cos_mat_llama3`] (pair i at dims
++/// (2i, 2i+1), s stride 1) WITHOUT the Llama-3 frequency scaling: pair i
++/// rotates by m * theta^(-2i/rot) for 2i < rot; dims >= rot pass through
++/// (cos 1, sin 0). The pretrained-checkpoint tables of Llama-2 (rot = d) and
++/// GPT-J (rot = rotary_dim = 64).
++pub fn rope_mats_plain(d: usize, seq_len: usize, theta: f64, rot: usize) -> (Vec<AlmostGoldilocksField>, Vec<AlmostGoldilocksField>) {
++    assert!(d % 2 == 0 && rot % 2 == 0 && rot <= d, "bad rotary profile");
++    let sp = seq_len.next_power_of_two().max(1);
++    let one = field_from_i64(*SF_FLOAT as i64);
++    let mut cos = vec![AlmostGoldilocksField(0); sp * d];
++    let mut sin = vec![AlmostGoldilocksField(0); sp * d];
++    for i in 0..d / 2 {
++        for m in 0..seq_len {
++            let (c, s) = if 2 * i < rot {
++                let angle = m as f64 * theta.powf(-2.0 * (i as f64) / (rot as f64));
++                (field_from_i64((angle.cos() * *SF_FLOAT as f64).round() as i64), (angle.sin() * *SF_FLOAT as f64).round() as i64)
++            } else { (one, 0) };
++            cos[m + 2 * i * sp] = c; cos[m + (2 * i + 1) * sp] = c;
++            sin[m + 2 * i * sp] = field_from_i64(s); sin[m + (2 * i + 1) * sp] = field_from_i64(-s);
++        }
++    }
++    (cos, sin)
++}
++
++/// [`llama_2_7b_hidden`] with explicit RoPE tables (`None`: the default
++/// tables, theta 10000 with the Llama-3 frequency scaling).
++#[allow(clippy::too_many_arguments)]
++pub fn llama_2_7b_hidden_rope(
++    attn_norm_w_vec: Vec<Witness>,
++    attn_q_w_vec: Vec<Witness>,
++    attn_k_w_vec: Vec<Witness>,
++    attn_v_w_vec: Vec<Witness>,
++    attn_o_w_vec: Vec<Witness>,
++    proj_norm_w_vec: Vec<Witness>,
++    proj_1_w_vec: Vec<Vec<Witness>>,
++    proj_2_w_vec: Vec<Vec<Witness>>,
++    proj_3_w_vec: Vec<Vec<Witness>>,
++    layer_norm_w: Witness,
++    num_heads: usize,
++    head_dim: usize,
++    seq_len: usize,
++    rope: Option<(Vec<AlmostGoldilocksField>, Vec<AlmostGoldilocksField>)>,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "llama_2_7b_hidden expects 1 input");
+         let mut x = x[0];
+         let theta = 10000.0;
++        let (cos_data, sin_data) = rope.unwrap_or_else(|| (rope_cos_mat_llama3(head_dim, seq_len, theta), rope_sin_mat_llama3(head_dim, seq_len, theta)));
+         let cos_param = g.param(Witness::new(
+-            vec![seq_len, head_dim], rope_cos_mat_llama3(head_dim, seq_len, theta),
++            vec![seq_len, head_dim], cos_data,
+             DataType::Float, *SF_LOG, Role::Constant));
+         let sin_param = g.param(Witness::new(
+-            vec![seq_len, head_dim], rope_sin_mat_llama3(head_dim, seq_len, theta),
++            vec![seq_len, head_dim], sin_data,
+             DataType::Float, *SF_LOG, Role::Constant));
+         let num_layers = attn_norm_w_vec.len();
+         for i in 0..num_layers {
+diff --git a/zk-torch-4/src/dag/mod.rs b/zk-torch-4/src/dag/mod.rs
+index 98567b1..66147d8 100644
+--- a/zk-torch-4/src/dag/mod.rs
++++ b/zk-torch-4/src/dag/mod.rs
+@@ -105,6 +105,9 @@ pub struct Witness {
+     pub data_type: DataType,
+     pub sf: usize,
+     pub role: Role,
++    /// A weight stored per output channel (see
++    /// dag::builder::register_channel_shift); None for everything else.
++    pub channel_shift: Option<std::sync::Arc<Vec<u32>>>,
+ }
+ 
+ impl std::fmt::Debug for Witness {
+@@ -146,6 +149,7 @@ impl Witness {
+             data_type,
+             sf,
+             role,
++            channel_shift: None,
+         }
+     }
+ 
+@@ -163,6 +167,7 @@ impl Witness {
+             data_type,
+             sf,
+             role,
++            channel_shift: None,
+         }
+     }
+ 
+@@ -180,6 +185,7 @@ impl Witness {
+             data_type,
+             sf,
+             role,
++            channel_shift: None,
+         }
+     }
+ 
+@@ -208,6 +214,7 @@ impl Witness {
+             data_type,
+             sf,
+             role,
++            channel_shift: None,
+         }
+     }
+ 
+@@ -219,6 +226,7 @@ impl Witness {
+             data_type,
+             sf,
+             role,
++            channel_shift: None,
+         }
+     }
+ 
+@@ -336,6 +344,7 @@ impl Clone for Witness {
+             data_type: self.data_type,
+             sf: self.sf,
+             role: self.role,
++            channel_shift: self.channel_shift.clone(),
+         }
+     }
+ }
+@@ -719,6 +728,18 @@ impl Dag {
+ 
+     pub fn run(&self, witnesses: &mut [Vec<Witness>], feed: &[(EdgeId, Witness)]) {
+         self.run_inner(witnesses, feed);
++        // E2 bounds pass: certified integer bounds / no-wrap checks. Runs after
++        // the first forward pass only so that edge scale metadata (sf) is what
++        // the Morpheus statement sees; it reads only public statement data
++        // (shapes, roles, scales, literals, model/public values), never
++        // computed request values.
++        if std::env::var_os("MORPHEUS_RESCALE_STATS").is_some() {
++            crate::morpheus::bounds::rescale_stats(self, witnesses);
++        }
++        if let Ok(prefix) = std::env::var("MORPHEUS_BOUNDS") {
++            crate::morpheus::bounds::run(self, witnesses, &prefix);
++            std::process::exit(0);
++        }
+         // Morpheus hand-off: the MORPHEUS_AT_RUN-th forward pass of this
+         // process is proven by the Morpheus prover (same graph and witness
+         // as the calling benchmark), then the process exits.
+diff --git a/zk-torch-4/src/dag/softmax.rs b/zk-torch-4/src/dag/softmax.rs
+index d1fba48..4965867 100644
+--- a/zk-torch-4/src/dag/softmax.rs
++++ b/zk-torch-4/src/dag/softmax.rs
+@@ -5,7 +5,9 @@ use crate::basicblock::normalization::ratio_budget;
+ use crate::dag::{DagBuilder,DataType,EdgeId,Role,Witness};
+ use crate::util::arith::int_to_f;
+ 
+-const SCORE_BOUND:i128=(1i128<<54)-1;
++// Scores are rescale quotients, so their bound enters Eq. rounding_nowrap
++// as |x| + S*SCORE_BOUND + S/2 < q; 2^54 broke it at S = 2^10.
++const SCORE_BOUND:i128=(1i128<<40)-1;
+ fn mul(b:&mut DagBuilder,a:EdgeId,c:EdgeId)->EdgeId {
+     let ndim=b.init_values[a].as_ref().unwrap().shape.len();
+     let s:String=(0..ndim).map(|i|(b'a'+i as u8)as char).collect();
+diff --git a/zk-torch-4/src/mlperf.rs b/zk-torch-4/src/mlperf.rs
+index ac25439..c986a92 100644
+--- a/zk-torch-4/src/mlperf.rs
++++ b/zk-torch-4/src/mlperf.rs
+@@ -203,7 +203,7 @@ pub fn range_health_check(witnesses: &[Vec<Witness>], table_size_log: usize) ->
+     for (eid, ws) in witnesses.iter().enumerate() {
+         for w in ws {
+             let Some(d) = w.data.as_ref() else { continue };
+-            for &f in d.evaluations_ref() {
++            for &f in d.evaluations().iter() {
+                 let a = f_to_int(f).abs();
+                 if a > rep.max_abs {
+                     rep.max_abs = a;
+diff --git a/zk-torch-4/src/morpheus/coins.rs b/zk-torch-4/src/morpheus/coins.rs
+index 539308a..536f685 100644
+--- a/zk-torch-4/src/morpheus/coins.rs
++++ b/zk-torch-4/src/morpheus/coins.rs
+@@ -95,6 +95,15 @@ impl Address {
+ pub struct CoinsExhausted;
+ 
+ /// The fixed 106-byte message for block `j` of address `a`.
++/// MORPHEUS_NO_ZK=1: a same-protocol ablation that removes zero knowledge
++/// (never a paper configuration). Every hiding sample (ternary suffixes,
++/// uniform masks, Gaussian masks) is zero and every attempt is accepted; the
++/// proof keeps its shape and still verifies.
++pub fn no_zk() -> bool {
++    static F: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
++    *F.get_or_init(|| std::env::var_os("MORPHEUS_NO_ZK").is_some())
++}
++
+ pub fn encode(profile: CoinProfile, seed: &[u8; 64], a: &Address, j: u8) -> [u8; MESSAGE_BYTES] {
+     let mut m = [0u8; MESSAGE_BYTES];
+     let mut o = 0;
+diff --git a/zk-torch-4/src/morpheus/gaussian_fast.rs b/zk-torch-4/src/morpheus/gaussian_fast.rs
+index a0f9114..9b65eb6 100644
+--- a/zk-torch-4/src/morpheus/gaussian_fast.rs
++++ b/zk-torch-4/src/morpheus/gaussian_fast.rs
+@@ -180,6 +180,7 @@ impl FastSigma {
+ 
+ /// One certified sample: fixed fast pass, exact replay on anything else.
+ pub fn sample(fs: &FastSigma, streams: &mut dyn GaussianStreams, st: &mut Stats) -> Result<i64, Abort> {
++    if super::coins::no_zk() { return Ok(0); }
+     let mark = streams.mark();
+     if let Some(k) = sample_fixed(fs, streams, st)? { return Ok(k); }
+     streams.rewind(mark);
+diff --git a/zk-torch-4/src/morpheus/gaussian_gpu.rs b/zk-torch-4/src/morpheus/gaussian_gpu.rs
+index 7a477d2..ace1639 100644
+--- a/zk-torch-4/src/morpheus/gaussian_gpu.rs
++++ b/zk-torch-4/src/morpheus/gaussian_gpu.rs
+@@ -49,6 +49,11 @@ pub fn sample_range_device(
+     coord0: u32,
+     n: u32,
+ ) -> Result<(DeviceBuffer<i64>, GpuGaussReport), Abort> {
++    if super::coins::no_zk() {
++        let mut out = DeviceBuffer::<i64>::new(n as usize).expect("device alloc");
++        out.zero().expect("zero masks");
++        return Ok((out, GpuGaussReport { n: n as usize, replayed: 0, gpu_ms: 0.0, replay_ms: 0.0 }));
++    }
+     let consts = words(fs);
+     let base = coins.gaussian_base_lanes(opening, attempt);
+     let mut out = DeviceBuffer::<i64>::new(n as usize).expect("device alloc");
+@@ -76,6 +81,11 @@ pub fn sample_range_device(
+ 
+ /// Samples into an existing device range `d_out[0..n)`.
+ pub fn sample_into(coins: &Coins, opening: u64, attempt: u16, fs: &FastSigma, coord0: u32, n: u32, d_out: *mut i64) -> Result<GpuGaussReport, Abort> {
++    if super::coins::no_zk() {
++        let rc = unsafe { ffi::cuda_memset(d_out as *mut std::ffi::c_void, 0, n as usize * 8) };
++        assert_eq!(rc, 0, "zero masks");
++        return Ok(GpuGaussReport { n: n as usize, replayed: 0, gpu_ms: 0.0, replay_ms: 0.0 });
++    }
+     let consts = words(fs);
+     let base = coins.gaussian_base_lanes(opening, attempt);
+     let mut idx: Vec<u32> = Vec::with_capacity(n as usize);
+diff --git a/zk-torch-4/src/morpheus/link.rs b/zk-torch-4/src/morpheus/link.rs
+index d1fadd1..caefc1a 100644
+--- a/zk-torch-4/src/morpheus/link.rs
++++ b/zk-torch-4/src/morpheus/link.rs
+@@ -139,6 +139,7 @@ fn m_term(a: &[K8], u: &K8) -> K8 {
+ // ---------------------------------------------------------------- coins
+ 
+ fn ternary_coin(coins: &Coins, a: Address) -> i64 {
++    if super::coins::no_zk() { return 0; }
+     let mut s = coins.stream(a);
+     loop {
+         let v = (s.next_bit().expect("ternary cap") << 1) | s.next_bit().expect("ternary cap");
+@@ -146,6 +147,7 @@ fn ternary_coin(coins: &Coins, a: Address) -> i64 {
+     }
+ }
+ pub fn uniform_q_coin(coins: &Coins, purpose: Purpose, owner: u64, coord: u32) -> u64 {
++    if super::coins::no_zk() { return 0; }
+     for trial in 0..512u16 {
+         let mut a = Address::new(purpose, owner);
+         a.coordinate = coord;
+diff --git a/zk-torch-4/src/morpheus/link_gpu.rs b/zk-torch-4/src/morpheus/link_gpu.rs
+index cb0a506..4c48e1a 100644
+--- a/zk-torch-4/src/morpheus/link_gpu.rs
++++ b/zk-torch-4/src/morpheus/link_gpu.rs
+@@ -155,6 +155,9 @@ pub struct PreShards { pub owner: Vec<usize>, pub bufs: Vec<Option<DeviceBuffer<
+ /// every source is visited, and the one-hot, binned, factored, reduced-round,
+ /// index, fast-query and many-term paths are off (a same-protocol ablation).
+ pub fn dense_link() -> bool { std::env::var_os("MORPHEUS_DENSE_LINK").is_some() }
++/// MORPHEUS_NO_SKIP=1: visit all-zero chunks too, with every link kernel
++/// still on (a same-protocol ablation of zero-chunk skipping alone).
++pub fn no_skip() -> bool { dense_link() || std::env::var_os("MORPHEUS_NO_SKIP").is_some() }
+ 
+ pub fn shard_gpus(n: usize) -> usize {
+     std::env::var("MORPHEUS_GPUS").ok().and_then(|s| s.parse().ok()).unwrap_or(1usize).max(1).min(n.max(1))
+@@ -167,7 +170,7 @@ pub fn shard_owner(raw: &dyn crate::morpheus::packed::Sources, bits: &[Vec<(usiz
+     let n = raw.count();
+     let wgen: usize = std::env::var("MORPHEUS_GEN_WEIGHT").ok().and_then(|s| s.parse().ok()).unwrap_or(5);
+     let nblk = raw.src_len() >> b0;
+-    let dense = dense_link();
++    let dense = no_skip();
+     let per_src: Vec<usize> = (0..n).into_par_iter().map(|s| {
+         if dense { return nblk; }
+         let mut bit = vec![false; nblk];
+@@ -480,8 +483,9 @@ fn phases_v2_body<'u>(
+         let (rs, rb, rn, ri) = reg_sorted[i - 1];
+         if rs == s && id < rb + rn { Some((ri, id - rb)) } else { None }
+     };
++    let skip_off = no_skip();
+     let blocks: Vec<Blk> = (0..n).into_par_iter().flat_map_iter(|s| {
+-        (0..nblk_src).filter(move |&id| dense || !raw.is_zero(s, id << b0, 1usize << b0)).map(move |id| (s, id)).collect::<Vec<_>>()
++        (0..nblk_src).filter(move |&id| skip_off || !raw.is_zero(s, id << b0, 1usize << b0)).map(move |id| (s, id)).collect::<Vec<_>>()
+     }).map(|(s, id)| match find(s, id) { Some((ri, k)) => Blk { src: s as u32, id: id as u32, region: ri as u32, k: k as u32 }, None => Blk { src: s as u32, id: id as u32, region: u32::MAX, k: 0 } }).collect();
+     lap("nonzero block scan");
+     if std::env::var("MORPHEUS_LINK_STATS").is_ok() {
+diff --git a/zk-torch-4/src/morpheus/mod.rs b/zk-torch-4/src/morpheus/mod.rs
+index 8d19dc8..0a0c9d9 100644
+--- a/zk-torch-4/src/morpheus/mod.rs
++++ b/zk-torch-4/src/morpheus/mod.rs
+@@ -39,3 +39,4 @@ pub mod protocol;
+ pub mod auth_compact;
+ 
+ pub mod public_support;
++pub mod bounds;
+diff --git a/zk-torch-4/src/morpheus/models.rs b/zk-torch-4/src/morpheus/models.rs
+index 8b3e987..c32d985 100644
+--- a/zk-torch-4/src/morpheus/models.rs
++++ b/zk-torch-4/src/morpheus/models.rs
+@@ -8,7 +8,7 @@
+ //! argmax check binding every next token to its logits. The token
+ //! selectors are request inputs and public.
+ 
+-use crate::dag::{gptj::gpt_j_6b_hidden, gpt2::gpt_2_small, llama::{llama3_8b_hidden, llama_2_7b_hidden}, bert::bert_large};
++use crate::dag::{gptj::gpt_j_6b_hidden_ext, gpt2::gpt_2_small, llama::{llama3_8b_hidden, llama_2_7b_hidden_rope, rope_mats_plain}, bert::bert_large};
+ use crate::dag::{Dag, DagBuilder, DataType, EdgeId, Role, Witness};
+ use crate::util::arith::f_to_int;
+ use crate::SF_LOG;
+@@ -61,6 +61,335 @@ fn mat(shape: Vec<usize>) -> Witness {
+     Witness::new(shape, data, DataType::Float, *SF_LOG, Role::Constant)
+ }
+ 
++/// WEIGHTS=real: a pretrained checkpoint exported by
++/// scripts/export_transformer.py into REAL_WEIGHTS (one `<name>.bin` per
++/// tensor: b"ZKRW", ndim:u32, shape:u32*ndim, row-major i32 values that are
++/// already round(w * 2^sf), in the graph's slot layout). The export's
++/// `meta.txt` must name the same scale as SF_LOG. Real prompts:
++/// `prompts.bin` ([N, 16] token ids); request k uses prompt k mod N.
++fn real() -> bool { std::env::var("WEIGHTS").ok().as_deref() == Some("real") }
++
++struct Real { dir: std::path::PathBuf, model: String, hf: Option<Hf> }
++
++/// Direct source: the HF safetensors snapshot named by meta.txt
++/// (`source=hf`, `snapshot=<dir>`), converted in memory with exactly the
++/// transforms of scripts/export_transformer.py (no on-disk int export; the
++/// 7B-8B exports do not fit the available disks).
++struct Hf {
++    /// tensor name -> (file, dtype, shape, byte range)
++    index: std::collections::HashMap<String, (std::path::PathBuf, String, Vec<usize>, (u64, u64))>,
++    cfg: serde_yaml::Value,
++}
++
++impl Hf {
++    fn open(snap: &std::path::Path) -> Hf {
++        use std::io::Read;
++        let mut index = std::collections::HashMap::new();
++        let mut files: Vec<_> = std::fs::read_dir(snap).unwrap_or_else(|e| panic!("{}: {e}", snap.display()))
++            .filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().map(|x| x == "safetensors").unwrap_or(false)).collect();
++        files.sort();
++        assert!(!files.is_empty(), "{}: no safetensors", snap.display());
++        for f in files {
++            let mut fh = std::fs::File::open(&f).unwrap();
++            let mut n = [0u8; 8]; fh.read_exact(&mut n).unwrap();
++            let n = u64::from_le_bytes(n);
++            let mut h = vec![0u8; n as usize]; fh.read_exact(&mut h).unwrap();
++            let v: serde_yaml::Value = serde_yaml::from_slice(&h).expect("safetensors header");
++            for (k, e) in v.as_mapping().unwrap() {
++                let k = k.as_str().unwrap();
++                if k == "__metadata__" { continue; }
++                let dt = e["dtype"].as_str().unwrap().to_string();
++                let shape = e["shape"].as_sequence().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect();
++                let o = e["data_offsets"].as_sequence().unwrap();
++                index.insert(k.to_string(), (f.clone(), dt, shape, (8 + n + o[0].as_u64().unwrap(), 8 + n + o[1].as_u64().unwrap())));
++            }
++        }
++        let cfg = serde_yaml::from_str(&std::fs::read_to_string(snap.join("config.json")).expect("config.json")).expect("config.json");
++        Hf { index, cfg }
++    }
++    fn cfg(&self, k: &str) -> Option<usize> { self.cfg[k].as_u64().map(|v| v as usize) }
++    /// Tensor values as f64 (exact for f16 / bf16 / f32) with its shape.
++    fn get(&self, name: &str) -> (Vec<usize>, Vec<f64>) {
++        use rayon::prelude::*;
++        use std::io::{Read, Seek, SeekFrom};
++        let (f, dt, shape, (a, b)) = self.index.get(name).unwrap_or_else(|| panic!("checkpoint has no tensor {name}"));
++        let mut fh = std::fs::File::open(f).unwrap();
++        fh.seek(SeekFrom::Start(*a)).unwrap();
++        let mut buf = vec![0u8; (*b - *a) as usize];
++        fh.read_exact(&mut buf).unwrap();
++        let v: Vec<f64> = match dt.as_str() {
++            "F16" => buf.par_chunks_exact(2).map(|c| f16_to_f64(u16::from_le_bytes([c[0], c[1]]))).collect(),
++            "BF16" => buf.par_chunks_exact(2).map(|c| f32::from_bits((u16::from_le_bytes([c[0], c[1]]) as u32) << 16) as f64).collect(),
++            "F32" => buf.par_chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]) as f64).collect(),
++            d => panic!("{name}: unsupported dtype {d}"),
++        };
++        assert_eq!(v.len(), shape.iter().product::<usize>());
++        (shape.clone(), v)
++    }
++}
++
++fn f16_to_f64(h: u16) -> f64 {
++    let s = if h >> 15 == 1 { -1.0 } else { 1.0 };
++    let e = ((h >> 10) & 0x1f) as i32;
++    let m = (h & 0x3ff) as f64;
++    match e { 0 => s * m * 2f64.powi(-24), 31 => if m == 0.0 { s * f64::INFINITY } else { f64::NAN }, _ => s * (1.0 + m / 1024.0) * 2f64.powi(e - 15) }
++}
++
++/// round(w * 2^sf) half to even, as torch.round in the exporter.
++fn quant(w: f64) -> i32 {
++    let q = (w * (1u64 << *SF_LOG) as f64).round_ties_even();
++    assert!(q.abs() < 2f64.powi(31), "weight does not fit i32 at scale 2^{}", *SF_LOG);
++    q as i32
++}
++
++/// Quantize a [rows, cols] tensor, optionally selecting rows (`perm`) and
++/// transposing (HF Linear [out, in] -> graph [in, out]).
++fn quant_2d(shape: &[usize], v: &[f64], perm: Option<&[usize]>, transpose: bool) -> (Vec<usize>, Vec<i32>) {
++    use rayon::prelude::*;
++    let (r, c) = (shape[0], shape[1]);
++    let row = |i: usize| perm.map(|p| p[i]).unwrap_or(i);
++    if !transpose {
++        let out = (0..r * c).into_par_iter().map(|k| quant(v[row(k / c) * c + k % c])).collect();
++        (vec![r, c], out)
++    } else {
++        let out = (0..r * c).into_par_iter().map(|k| { let (i, j) = (k / r, k % r); quant(v[row(j) * c + i]) }).collect();
++        (vec![c, r], out)
++    }
++}
++
++/// Row order of a q/k weight so graph slot (h, 2i) holds the pair's second
++/// component and (h, 2i+1) its first (see export_transformer.pair_swap_rows).
++fn pair_swap_perm(heads: usize, hd: usize, rot: usize, half_split: bool) -> Vec<usize> {
++    let mut idx: Vec<usize> = (0..hd).collect();
++    for i in 0..rot / 2 {
++        let (first, second) = if half_split { (i, i + rot / 2) } else { (2 * i, 2 * i + 1) };
++        idx[2 * i] = second; idx[2 * i + 1] = first;
++    }
++    (0..heads * hd).map(|k| (k / hd) * hd + idx[k % hd]).collect()
++}
++
++impl Real {
++    fn open(model: &str) -> Option<Real> {
++        if !real() { return None; }
++        let dir = std::path::PathBuf::from(std::env::var("REAL_WEIGHTS").expect("WEIGHTS=real needs REAL_WEIGHTS=<export dir>"));
++        let meta = std::fs::read_to_string(dir.join("meta.txt")).unwrap_or_else(|e| panic!("{}/meta.txt: {e}", dir.display()));
++        let get = |k: &str| meta.lines().find_map(|l| l.strip_prefix(&format!("{k}="))).map(|v| v.trim().to_string());
++        assert_eq!(get("model").as_deref(), Some(model), "REAL_WEIGHTS holds a different model");
++        let sf: usize = get("sf").and_then(|v| v.parse().ok()).expect("meta.txt: sf");
++        assert_eq!(sf, *SF_LOG, "REAL_WEIGHTS was exported at scale 2^{sf}, the graph runs at 2^{}", *SF_LOG);
++        let hf = (get("source").as_deref() == Some("hf")).then(|| Hf::open(std::path::Path::new(&get("snapshot").expect("meta.txt: snapshot"))));
++        let layers: usize = match hf.as_ref() {
++            Some(h) => h.cfg("num_hidden_layers").or(h.cfg("n_layer")).expect("config: layers"),
++            None => get("layers").and_then(|v| v.parse().ok()).expect("meta.txt: layers"),
++        };
++        let want = ev("NUM_LAYERS", 0);
++        assert!(want <= layers, "NUM_LAYERS={want} but REAL_WEIGHTS has {layers} layers");
++        if hf.is_none() { assert!(std::env::var_os("REAL_RESID_SCALE").is_none(), "REAL_RESID_SCALE needs a direct (source=hf) REAL_WEIGHTS"); }
++        eprintln!("[weights] real {model} checkpoint from {} (scale 2^{sf}, {layers} layers{})", dir.display(),
++            if hf.is_some() { format!(", direct from {}", get("snapshot").unwrap()) } else { " exported".into() });
++        Some(Real { dir, model: model.to_string(), hf })
++    }
++    fn raw(&self, name: &str) -> (Vec<usize>, Vec<i32>) {
++        let Some(hf) = self.hf.as_ref().filter(|_| name != "prompts") else { return read_zkrw(&self.dir.join(format!("{name}.bin"))) };
++        // Graph slot name -> checkpoint tensor and transform (the exporter's).
++        let (layer, slot) = match name.strip_prefix('l').and_then(|r| r.split_once('.')).and_then(|(l, s)| l.parse::<usize>().ok().map(|l| (l, s))) {
++            Some((l, s)) => (Some(l), s),
++            None => (None, name),
++        };
++        // REAL_RESID_SCALE=c multiplies every write into the residual stream
++        // (embeddings, attention / MLP output projections and their biases)
++        // by c. Without an epsilon (the graph's normalizations have none) every
++        // RMSNorm / LayerNorm is invariant to it, so the network computes the
++        // same function (GPT-2's tied head scales its logits by c, argmax
++        // unchanged), but the normalization statistic mean(x^2), formed from
++        // per-element squares rounded at scale 2^sf, gets c^2 more resolution:
++        // Llama-2's first layers have mean(x^2) ~ 5e-5, below the 2^-10 grid.
++        let c: f64 = std::env::var("REAL_RESID_SCALE").ok().map(|v| v.parse().expect("REAL_RESID_SCALE")).unwrap_or(1.0);
++        let resid = matches!(slot, "embed" | "wte" | "wpe" | "o_w" | "o_b" | "down_w" | "fc2_w" | "fc2_b" | "fc_out_w" | "fc_out_b");
++        let k = if resid { c } else { 1.0 };
++        let get = |t: &str| { let (s, mut v) = hf.get(t); if k != 1.0 { v.iter_mut().for_each(|x| *x *= k); } (s, v) };
++        let one = |t: &str| { let (s, v) = get(t); if s.len() == 1 { (s, v.iter().map(|&x| quant(x)).collect()) } else { quant_2d(&s, &v, None, false) } };
++        let lin = |t: &str, perm: Option<Vec<usize>>| { let (s, v) = get(t); quant_2d(&s, &v, perm.as_deref(), true) };
++        match self.model.as_str() {
++            "gpt2" => {
++                let h = hf.cfg("n_embd").unwrap();
++                // Conv1D weights are [in, out]; c_attn [h, 3h] holds q | k | v.
++                let qkv = |l: usize, i: usize, bias: bool| {
++                    let (s, v) = one(&format!("h.{l}.attn.c_attn.{}", if bias { "bias" } else { "weight" }));
++                    if bias { (vec![h], v[i * h..(i + 1) * h].to_vec()) }
++                    else { (vec![s[0], h], (0..s[0] * h).map(|k| v[(k / h) * s[1] + i * h + k % h]).collect()) }
++                };
++                match (layer, slot) {
++                    (None, "lnf_w") => one("ln_f.weight"),
++                    (None, "lnf_b") => one("ln_f.bias"),
++                    (None, "wte") => one("wte.weight"),
++                    (None, "wpe") => one("wpe.weight"),
++                    (Some(l), s) => {
++                        let p = |t: &str| format!("h.{l}.{t}");
++                        match s {
++                            "ln1_w" => one(&p("ln_1.weight")), "ln1_b" => one(&p("ln_1.bias")),
++                            "ln2_w" => one(&p("ln_2.weight")), "ln2_b" => one(&p("ln_2.bias")),
++                            "q_w" => qkv(l, 0, false), "k_w" => qkv(l, 1, false), "v_w" => qkv(l, 2, false),
++                            "q_b" => qkv(l, 0, true), "k_b" => qkv(l, 1, true), "v_b" => qkv(l, 2, true),
++                            "o_w" => one(&p("attn.c_proj.weight")), "o_b" => one(&p("attn.c_proj.bias")),
++                            "fc1_w" => one(&p("mlp.c_fc.weight")), "fc1_b" => one(&p("mlp.c_fc.bias")),
++                            "fc2_w" => one(&p("mlp.c_proj.weight")), "fc2_b" => one(&p("mlp.c_proj.bias")),
++                            _ => panic!("no gpt2 slot {name}"),
++                        }
++                    }
++                    _ => panic!("no gpt2 slot {name}"),
++                }
++            }
++            "llama2" | "llama3" => {
++                let nh = hf.cfg("num_attention_heads").unwrap();
++                let nkv = hf.cfg("num_key_value_heads").unwrap_or(nh);
++                let hd = hf.cfg("hidden_size").unwrap() / nh;
++                match (layer, slot) {
++                    (None, "final_norm") => one("model.norm.weight"),
++                    (None, "embed") => one("model.embed_tokens.weight"),
++                    (None, "lm_head") => one("lm_head.weight"),
++                    (Some(l), s) => {
++                        let p = |t: &str| format!("model.layers.{l}.{t}");
++                        match s {
++                            "attn_norm" => one(&p("input_layernorm.weight")),
++                            "mlp_norm" => one(&p("post_attention_layernorm.weight")),
++                            "q_w" => lin(&p("self_attn.q_proj.weight"), Some(pair_swap_perm(nh, hd, hd, true))),
++                            "k_w" => lin(&p("self_attn.k_proj.weight"), Some(pair_swap_perm(nkv, hd, hd, true))),
++                            "v_w" => lin(&p("self_attn.v_proj.weight"), None),
++                            "o_w" => lin(&p("self_attn.o_proj.weight"), None),
++                            "gate_w" => lin(&p("mlp.gate_proj.weight"), None),
++                            "up_w" => lin(&p("mlp.up_proj.weight"), None),
++                            "down_w" => lin(&p("mlp.down_proj.weight"), None),
++                            _ => panic!("no llama slot {name}"),
++                        }
++                    }
++                    _ => panic!("no llama slot {name}"),
++                }
++            }
++            "gptj" => {
++                let nh = hf.cfg("n_head").unwrap();
++                let hd = hf.cfg("n_embd").unwrap() / nh;
++                let rot = hf.cfg("rotary_dim").unwrap();
++                match (layer, slot) {
++                    (None, "lnf_w") => one("transformer.ln_f.weight"),
++                    (None, "lnf_b") => one("transformer.ln_f.bias"),
++                    (None, "wte") => one("transformer.wte.weight"),
++                    (None, "lm_head") => one("lm_head.weight"),
++                    (None, "lm_head_b") => one("lm_head.bias"),
++                    (Some(l), s) => {
++                        let p = |t: &str| format!("transformer.h.{l}.{t}");
++                        match s {
++                            "ln1_w" => one(&p("ln_1.weight")),
++                            "ln1_b" => one(&p("ln_1.bias")),
++                            "q_w" => lin(&p("attn.q_proj.weight"), Some(pair_swap_perm(nh, hd, rot, false))),
++                            "k_w" => lin(&p("attn.k_proj.weight"), Some(pair_swap_perm(nh, hd, rot, false))),
++                            "v_w" => lin(&p("attn.v_proj.weight"), None),
++                            "o_w" => lin(&p("attn.out_proj.weight"), None),
++                            "fc_in_w" => lin(&p("mlp.fc_in.weight"), None),
++                            "fc_in_b" => one(&p("mlp.fc_in.bias")),
++                            "fc_out_w" => lin(&p("mlp.fc_out.weight"), None),
++                            "fc_out_b" => one(&p("mlp.fc_out.bias")),
++                            _ => panic!("no gptj slot {name}"),
++                        }
++                    }
++                    _ => panic!("no gptj slot {name}"),
++                }
++            }
++            m => panic!("direct checkpoint loading is not wired for {m}; use an exported REAL_WEIGHTS"),
++        }
++    }
++    /// Rows [r0, r0 + nr) and columns [c0, c0 + nc) of a 1-D or 2-D tensor
++    /// (1-D: columns only), as a padded column-major Constant witness.
++    fn block(&self, name: &str, r0: usize, nr: usize, c0: usize, nc: usize) -> Witness {
++        let (shape, v) = self.raw(name);
++        let w = block_witness(name, &shape, &v, r0, nr, c0, nc);
++        self.channels(name, w)
++    }
++    /// The axis of a 2-D weight that its einsums keep (its output channels):
++    /// graph linears are [in, out], the embedding [vocab, hidden] and the LM
++    /// head [vocab, hidden] (logits per vocab row). GPT-2's tied table feeds
++    /// both, so it stays per tensor, as do 1-D gains and biases.
++    fn channel_axis(&self, name: &str) -> Option<usize> {
++        let slot = name.split_once('.').map(|(_, s)| s).unwrap_or(name);
++        match slot {
++            "q_w" | "k_w" | "v_w" | "o_w" | "gate_w" | "up_w" | "down_w" | "fc1_w" | "fc2_w" | "fc_in_w" | "fc_out_w" | "embed" => Some(1),
++            "wte" if self.model != "gpt2" => Some(1),
++            "lm_head" => Some(0),
++            _ => None,
++        }
++    }
++    /// REAL_CHANNEL_SCALE (default on): store a 2-D weight per output channel
++    /// with the fewest right shifts that keep every entry within 8 signed
++    /// digit planes (|w| <= 255); see dag::builder::register_channel_shift.
++    fn channels(&self, name: &str, w: Witness) -> Witness {
++        let Some(axis) = self.channel_axis(name).filter(|_| w.shape.len() == 2 && std::env::var("REAL_CHANNEL_SCALE").map(|v| v != "0").unwrap_or(true)) else { return w };
++        let (r, c) = (w.shape[0], w.shape[1]);
++        let rp = r.next_power_of_two();
++        let ev = w.data.as_ref().unwrap().evaluations();
++        let iv = |k: usize| crate::util::arith::f_to_int(ev[k]);
++        let n = if axis == 0 { r } else { c };
++        let at = |ch: usize, k: usize| if axis == 0 { ch + rp * k } else { k + rp * ch };
++        let len = if axis == 0 { c } else { r };
++        // round(v / 2^s), half to even, as the exporter's torch.round.
++        let shr = |v: i128, s: u32| -> i128 { if s == 0 { return v } let d = 1i128 << s; let q = v.div_euclid(d); let rem = v - q * d; if 2 * rem > d || (2 * rem == d && q % 2 != 0) { q + 1 } else { q } };
++        use rayon::prelude::*;
++        let shifts: Vec<u32> = (0..n).into_par_iter().map(|ch| {
++            let m = (0..len).map(|k| iv(at(ch, k)).abs()).max().unwrap_or(0);
++            (0u32..).find(|&s| shr(m, s).abs() <= 255 && shr(-m, s).abs() <= 255).unwrap()
++        }).collect();
++        let mut d = ev.clone();
++        for ch in 0..n { let s = shifts[ch]; if s == 0 { continue } for k in 0..len { let i = at(ch, k); d[i] = crate::util::arith::int_to_f(shr(iv(i), s)); } }
++        let mut out = Witness::new(w.shape.clone(), d, w.data_type, w.sf, w.role);
++        crate::dag::builder::register_channel_shift(&mut out, shifts);
++        out
++    }
++    /// The whole tensor; its shape must be `shape`.
++    fn full(&self, name: &str, shape: Vec<usize>) -> Witness {
++        let (s, v) = self.raw(name);
++        assert_eq!(s, shape, "{name}: exported shape {s:?}, the graph slot needs {shape:?}");
++        if s.len() == 1 { block_witness(name, &s, &v, 0, 1, 0, s[0]) } else { self.channels(name, block_witness(name, &s, &v, 0, s[0], 0, s[1])) }
++    }
++    fn prompt(&self, k: u64, len: usize) -> Vec<usize> {
++        let (s, v) = self.raw("prompts");
++        assert!(s.len() == 2 && s[0] > 0 && s[1] >= len, "prompts.bin: shape {s:?}");
++        let r = (k as usize) % s[0];
++        v[r * s[1]..r * s[1] + len].iter().map(|&t| t as usize).collect()
++    }
++}
++
++fn read_zkrw(path: &std::path::Path) -> (Vec<usize>, Vec<i32>) {
++    let b = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
++    assert_eq!(&b[..4], b"ZKRW", "{}: not a ZKRW tensor", path.display());
++    let u = |o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap()) as usize;
++    let nd = u(4);
++    let shape: Vec<usize> = (0..nd).map(|i| u(8 + 4 * i)).collect();
++    let off = 8 + 4 * nd;
++    let n: usize = shape.iter().product();
++    assert_eq!(b.len(), off + 4 * n, "{}: truncated", path.display());
++    let v = b[off..].chunks_exact(4).map(|c| i32::from_le_bytes(c.try_into().unwrap())).collect();
++    (shape, v)
++}
++
++/// Logical row-major values -> padded column-major storage (element (i, j)
++/// of an [r, c] tensor at i + j * r.next_power_of_two(), see Witness::get).
++fn block_witness(name: &str, shape: &[usize], v: &[i32], r0: usize, nr: usize, c0: usize, nc: usize) -> Witness {
++    use rayon::prelude::*;
++    let (rows, cols) = match shape.len() { 1 => (1, shape[0]), 2 => (shape[0], shape[1]), _ => panic!("{name}: only 1-D/2-D tensors") };
++    assert!(r0 + nr <= rows && c0 + nc <= cols, "{name}: block [{r0}+{nr}, {c0}+{nc}] outside {shape:?}");
++    let to_f = |x: i32| crate::util::arith::int_to_f(x as i128);
++    if shape.len() == 1 {
++        let mut d = zeros(nc.next_power_of_two());
++        for j in 0..nc { d[j] = to_f(v[c0 + j]); }
++        return Witness::new(vec![nc], d, DataType::Float, *SF_LOG, Role::Constant);
++    }
++    let rp = nr.next_power_of_two();
++    let mut d = zeros(rp * nc.next_power_of_two());
++    d.par_chunks_mut(rp).take(nc).enumerate().for_each(|(j, col)| {
++        for i in 0..nr { col[i] = to_f(v[(r0 + i) * cols + c0 + j]); }
++    });
++    Witness::new(vec![nr, nc], d, DataType::Float, *SF_LOG, Role::Constant)
++}
++
+ /// A normalization gain: 1.0 (dense) or the benchmark's zeros.
+ fn norm(dim: usize) -> Witness {
+     if !dense() { return cw(vec![dim]); }
+@@ -89,6 +418,24 @@ pub struct Instance {
+ #[derive(Clone, Copy)]
+ enum Emb { Gpt2, Const1024, Alt2048 }
+ 
++/// Embedding / head table source: a synthetic pattern, or rows of a real
++/// checkpoint tensor ([vocab, hidden]) with an optional head bias ([vocab]).
++#[derive(Clone, Copy)]
++enum Tab<'a> { Pat(Emb), Real(&'a Real, &'static str, Option<&'static str>) }
++
++impl Tab<'_> {
++    /// Rows [start, start + len) as a [len, hidden] Constant witness.
++    fn rows(&self, start: usize, len: usize, hidden: usize) -> Witness {
++        match *self {
++            Tab::Pat(k) => Witness::new(vec![len, hidden], emb_data(k, len, hidden), DataType::Float, *SF_LOG, Role::Constant),
++            Tab::Real(r, name, _) => r.block(name, start, len, 0, hidden),
++        }
++    }
++    fn bias(&self, start: usize, len: usize) -> Option<Witness> {
++        match *self { Tab::Real(r, _, Some(b)) => Some(r.block(b, 0, 1, start, len)), _ => None }
++    }
++}
++
+ fn emb_data(kind: Emb, rows: usize, hidden: usize) -> Vec<F> {
+     let rp = rows.next_power_of_two();
+     let hp = hidden.next_power_of_two();
+@@ -100,15 +447,16 @@ fn emb_data(kind: Emb, rows: usize, hidden: usize) -> Vec<F> {
+     data
+ }
+ 
+-struct Ar { g: DagBuilder, emb_sel: EdgeId, logits: Vec<EdgeId>, sels: Vec<EdgeId>, ranges: Vec<(usize, usize)>, rank_constants: Vec<[usize;3]> }
++struct Ar { g: DagBuilder, emb_sel: EdgeId, logits: Vec<EdgeId>, sels: Vec<EdgeId>, ranges: Vec<(usize, usize)>, rank_constants: Vec<[usize;3]>, prompt: Option<Vec<usize>> }
+ 
+ /// Embedding, body (closure), LM head (tied for GPT-2), argmax check.
+ #[allow(clippy::too_many_arguments)]
+-fn ar_graph(seq: usize, vocab: usize, hidden: usize, emb: Emb, head: Emb, tied: bool, shards: usize, pos: Option<Witness>,
++fn ar_graph(seq: usize, vocab: usize, hidden: usize, emb: Tab, head: Tab, tied: bool, shards: usize, pos: Option<Witness>,
+             body: &dyn Fn(&mut DagBuilder, EdgeId) -> EdgeId) -> Ar {
+     let init = vec![0usize; seq];
+     let mut g = DagBuilder::new();
+-    let w_e = g.param(Witness::new(vec![vocab, hidden], emb_data(emb, vocab, hidden), DataType::Float, *SF_LOG, Role::Constant));
++    g.exact_head_merge = matches!(emb, Tab::Real(..));
++    let w_e = g.param(emb.rows(0, vocab, hidden));
+     let (h0, emb_sel) = g.embedding_lookup(w_e, seq, vocab, &init, Role::Input);
+     let h0 = match pos { Some(p) => g.add_positional_encoding(h0, p), None => h0 };
+     let h_in = g.change_shape(h0, vec![1, seq, hidden]);
+@@ -116,21 +464,25 @@ fn ar_graph(seq: usize, vocab: usize, hidden: usize, emb: Emb, head: Emb, tied:
+     if shards > 1 {
+         let ranges = DagBuilder::vocab_shard_ranges(vocab, shards);
+         let lens: Vec<usize> = ranges.iter().map(|&(_, l)| l).collect();
+-        let ws: Vec<EdgeId> = lens.iter().map(|&l| g.param(Witness::new(vec![l, hidden], emb_data(head, l, hidden), DataType::Float, *SF_LOG, Role::Constant))).collect();
+-        let lg = g.lm_head_sharded(h_out, &ws, seq, &lens);
++        let ws: Vec<EdgeId> = ranges.iter().map(|&(s, l)| g.param(head.rows(s, l, hidden))).collect();
++        let mut lg = g.lm_head_sharded(h_out, &ws, seq, &lens);
++        for (k, &(s, l)) in ranges.iter().enumerate() {
++            if let Some(b) = head.bias(s, l) { let b = g.param(b); lg[k] = g.add(lg[k], b)[0]; }
++        }
+         let first_new = g.num_edges;
+         let sels = g.argmax_check_sharded(&lg, &ranges, seq, &init, Role::Input);
+         let rank_constants = rank_constants(&g, first_new, ranges.len());
+-        Ar { g, emb_sel, logits: lg, sels, ranges, rank_constants }
++        Ar { g, emb_sel, logits: lg, sels, ranges, rank_constants, prompt: None }
+     } else {
+         let logits = if tied { g.lm_head_weight_tied(h_out, w_e, seq, vocab) } else {
+-            let w = g.param(Witness::new(vec![vocab, hidden], emb_data(head, vocab, hidden), DataType::Float, *SF_LOG, Role::Constant));
++            let w = g.param(head.rows(0, vocab, hidden));
+             g.lm_head(h_out, w, seq, vocab)
+         };
++        let logits = match head.bias(0, vocab) { Some(b) => { let b = g.param(b); g.add(logits, b)[0] } None => logits };
+         let first_new = g.num_edges;
+         let sel = g.argmax_check(logits, seq, vocab, &init, Role::Input);
+         let rank_constants = rank_constants(&g, first_new, 1);
+-        Ar { g, emb_sel, logits: vec![logits], sels: vec![sel], ranges: vec![(0, vocab)], rank_constants }
++        Ar { g, emb_sel, logits: vec![logits], sels: vec![sel], ranges: vec![(0, vocab)], rank_constants, prompt: None }
+     }
+ }
+ 
+@@ -145,7 +497,7 @@ fn rank_constants(g: &DagBuilder, first: usize, shards: usize) -> Vec<[usize;3]>
+ 
+ fn rss_gb() -> f64 { std::fs::read_to_string("/proc/self/statm").ok().and_then(|s| s.split_whitespace().nth(1).and_then(|v| v.parse::<f64>().ok())).unwrap_or(0.0) * 4096.0 / 1e9 }
+ fn ar_run(name: &str, ar: Ar, seq: usize, vocab: usize, request: u64) -> Instance {
+-    let Ar { g, emb_sel, logits, sels, ranges, rank_constants } = ar;
++    let Ar { g, emb_sel, logits, sels, ranges, rank_constants, prompt } = ar;
+     let tr = std::env::var("MORPHEUS_RSS").is_ok();
+     if tr { eprintln!("[rss] graph built {:.1} GB", rss_gb()); }
+     let (dag, mut wit) = g.compile();
+@@ -155,6 +507,56 @@ fn ar_run(name: &str, ar: Ar, seq: usize, vocab: usize, request: u64) -> Instanc
+     assert!(seq > 0);
+     let prompt_len = 16.min(seq);
+     let mut tokens: Vec<usize> = (0..seq).map(|_| rng.gen::<usize>() % vocab).collect();
++    // Real checkpoints: the request's prompt is a real text prompt (the
++    // random suffix is only the Jacobi starting point).
++    if let Some(p) = prompt.as_ref() {
++        assert!(p.len() >= prompt_len && p.iter().all(|&t| t < vocab), "real prompt does not fit the vocabulary");
++        tokens[..prompt_len].copy_from_slice(&p[..prompt_len]);
++    }
++    // Real checkpoints only: starting points for the Jacobi passes. Both only
++    // choose the initial suffix; the passes below still run to the fixed
++    // point, which is the unique fixed-point greedy suffix.
++    //  * MORPHEUS_TOKEN_CACHE=<dir>: reuse the suffix a previous run of the
++    //    same model / depth / shape / scale / prompt generated (then one
++    //    confirming pass), and store this run's suffix.
++    //  * MORPHEUS_DRAFT_CMD=<cmd>: a float draft model (scripts/draft_server.py)
++    //    proposes the suffix after the confirmed prefix, initially and after
++    //    every pass that changed a token: ~one pass per divergence from the
++    //    float model instead of ~one per token.
++    let cache = prompt.as_ref().and_then(|_| std::env::var("MORPHEUS_TOKEN_CACHE").ok()).map(|d| {
++        let _ = std::fs::create_dir_all(&d);
++        std::path::PathBuf::from(d).join(format!("{}_L{}_s{seq}_v{vocab}_sf{}_p{request}.tok", name.replace(['/', ' '], "_"), std::env::var("NUM_LAYERS").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "all".into()), *SF_LOG))
++    });
++    let mut cached = false;
++    if let Some(c) = cache.as_ref() {
++        if let Ok(txt) = std::fs::read_to_string(c) {
++            let t: Vec<usize> = txt.split_whitespace().filter_map(|x| x.parse().ok()).collect();
++            if t.len() == seq && t[..prompt_len] == tokens[..prompt_len] && t.iter().all(|&x| x < vocab) {
++                tokens = t; cached = true;
++                eprintln!("[generate] starting from cached suffix {}", c.display());
++            }
++        }
++    }
++    let mut drafter = prompt.as_ref().and_then(|_| std::env::var("MORPHEUS_DRAFT_CMD").ok()).map(|cmd| {
++        use std::io::BufRead;
++        let mut ch = std::process::Command::new("sh").arg("-c").arg(&cmd)
++            .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().expect("MORPHEUS_DRAFT_CMD");
++        let mut out = std::io::BufReader::new(ch.stdout.take().unwrap());
++        let mut l = String::new(); out.read_line(&mut l).unwrap();
++        assert_eq!(l.trim(), "ready", "draft server did not start");
++        (ch, out)
++    });
++    let mut draft = |tokens: &mut Vec<usize>, keep: usize| {
++        use std::io::{BufRead, Write};
++        let Some((ch, out)) = drafter.as_mut() else { return };
++        let line: Vec<String> = std::iter::once(seq).chain(tokens[..keep].iter().copied()).map(|x| x.to_string()).collect();
++        writeln!(ch.stdin.as_mut().unwrap(), "{}", line.join(" ")).unwrap();
++        let mut l = String::new(); out.read_line(&mut l).unwrap();
++        let t: Vec<usize> = l.split_whitespace().map(|x| x.parse().unwrap()).collect();
++        assert!(t.len() == seq && t[..keep] == tokens[..keep], "bad draft");
++        for (p, x) in t.into_iter().enumerate().skip(keep) { tokens[p] = x.min(vocab - 1); }
++    };
++    if !cached { draft(&mut tokens, prompt_len); }
+     // Generate an actual suffix. This is deliberately outside proof timing.
+     // Jacobi decoding: each pass sets every suffix token to the argmax at the
+     // previous position. The model is causal, so after k passes the first k
+@@ -166,7 +568,9 @@ fn ar_run(name: &str, ar: Ar, seq: usize, vocab: usize, request: u64) -> Instanc
+         dag.run(&mut wit, &[]);
+         passes += 1;
+         if tr { eprintln!("[rss] pass {passes} {:.1} GB", rss_gb()); }
++        if std::env::var_os("MORPHEUS_GEN_TRACE").is_some() { eprintln!("[generate] pass {passes} done at {:.1}s", t.elapsed().as_secs_f64()); }
+         let mut changed = false;
++        let mut first_change = seq;
+         for position in prompt_len..seq {
+             let (mut best, mut value) = (0usize, i128::MIN);
+             for (k, &(start,len)) in ranges.iter().enumerate() {
+@@ -175,11 +579,19 @@ fn ar_run(name: &str, ar: Ar, seq: usize, vocab: usize, request: u64) -> Instanc
+                     if v>value { value=v; best=start+off; }
+                 }
+             }
+-            if tokens[position] != best { tokens[position]=best; changed = true; }
++            if tokens[position] != best { tokens[position]=best; if !changed { first_change = position; } changed = true; }
+         }
+         if !changed { break; }
++        // Tokens before first_change were confirmed, and first_change is now
++        // correct; redraft the rest.
++        if first_change + 1 < seq { draft(&mut tokens, first_change + 1); }
+     }
+     eprintln!("[generate] {} suffix tokens in {passes} forward passes", seq - prompt_len);
++    drop(draft);
++    if let Some((mut ch, _)) = drafter.take() { drop(ch.stdin.take()); let _ = ch.wait(); }
++    if let Some(c) = cache.as_ref() {
++        let _ = std::fs::write(c, tokens.iter().map(|t| t.to_string()).collect::<Vec<_>>().join(" "));
++    }
+     if tr {
+         // Witness memory by producing operator (8 bytes per stored element).
+         let mut by: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+@@ -242,7 +654,19 @@ pub fn gpt2(request: u64) -> Instance {
+     let (layers, seq, vocab) = (ev("NUM_LAYERS", 12), ev("SEQ_LEN", 128), ev("VOCAB_SIZE", 50257));
+     let (nh, hd) = (ev("NUM_HEADS", 12), ev("HEAD_DIM", 64));
+     let h = nh * hd; let ffn = 4 * h;
++    let rw = Real::open("gpt2");
+     let mut v: [Vec<Witness>; 16] = Default::default();
++    if let Some(r) = rw.as_ref() {
++        // Slot order of gpt_2_small: ln1 w, q k v o, ln1 b, q k v o biases,
++        // ln2 w, fc1, fc2, ln2 b, fc1 b, fc2 b.
++        const N: [&str; 16] = ["ln1_w", "q_w", "k_w", "v_w", "o_w", "ln1_b", "q_b", "k_b", "v_b", "o_b", "ln2_w", "fc1_w", "fc2_w", "ln2_b", "fc1_b", "fc2_b"];
++        for l in 0..layers {
++            for (k, n) in N.iter().enumerate() {
++                let shape = match k { 1..=4 => vec![h, h], 11 => vec![h, ffn], 12 => vec![ffn, h], 14 => vec![ffn], _ => vec![h] };
++                v[k].push(r.full(&format!("l{l}.{n}"), shape));
++            }
++        }
++    } else {
+     for _ in 0..layers {
+         v[0].push(norm(h));
+         for k in 1..5 { v[k].push(mat(vec![h, h])); }
+@@ -251,14 +675,20 @@ pub fn gpt2(request: u64) -> Instance {
+         v[11].push(mat(vec![h, ffn])); v[12].push(mat(vec![ffn, h]));
+         v[13].push(bias(h)); v[14].push(bias(ffn)); v[15].push(bias(h));
+     }
+-    let ln = (norm(h), bias(h));
+-    let pos = Witness::new(vec![seq, h], zeros(seq.next_power_of_two() * h.next_power_of_two()), DataType::Float, *SF_LOG, Role::Constant);
++    }
++    let ln = match rw.as_ref() { Some(r) => (r.full("lnf_w", vec![h]), r.full("lnf_b", vec![h])), None => (norm(h), bias(h)) };
++    let pos = match rw.as_ref() {
++        Some(r) => r.block("wpe", 0, seq, 0, h),
++        None => Witness::new(vec![seq, h], zeros(seq.next_power_of_two() * h.next_power_of_two()), DataType::Float, *SF_LOG, Role::Constant),
++    };
+     let v = std::cell::RefCell::new(Some((v, ln)));
+-    let ar = ar_graph(seq, vocab, h, Emb::Gpt2, Emb::Gpt2, true, 1, Some(pos), &|g, x| {
++    let tab = match rw.as_ref() { Some(r) => Tab::Real(r, "wte", None), None => Tab::Pat(Emb::Gpt2) };
++    let mut ar = ar_graph(seq, vocab, h, tab, tab, true, 1, Some(pos), &|g, x| {
+         let (v, ln) = v.borrow_mut().take().unwrap();
+         let [a, b, c, d, e, f, gg, hh, i, j, k, l, m, n, o, p] = v;
+         g.pipe(&[x], gpt_2_small(a, b, c, d, e, f, gg, hh, i, j, k, l, m, n, o, p, ln.0, ln.1, nh, hd, seq))[0]
+     });
++    ar.prompt = rw.as_ref().map(|r| r.prompt(request, 16.min(seq)));
+     ar_run("GPT-2", ar, seq, vocab, request)
+ }
+ 
+@@ -267,7 +697,18 @@ pub fn gptj(request: u64) -> Instance {
+     let (nh, hd, ffn) = (ev("NUM_HEADS", 16), ev("HEAD_DIM", 256), ev("FFN_DIM", 16384));
+     let shards = ev("VOCAB_SHARDS", 1);
+     let h = nh * hd;
++    let rw = Real::open("gptj");
+     let mut v: [Vec<Witness>; 10] = Default::default();
++    if let Some(r) = rw.as_ref() {
++        // Slot order of gpt_j_6b_hidden: ln1 w, q k v o, ln1 b, fc_in, fc_out, fc_in b, fc_out b.
++        const N: [&str; 10] = ["ln1_w", "q_w", "k_w", "v_w", "o_w", "ln1_b", "fc_in_w", "fc_out_w", "fc_in_b", "fc_out_b"];
++        for l in 0..layers {
++            for (k, n) in N.iter().enumerate() {
++                let shape = match k { 1..=4 => vec![h, h], 6 => vec![h, ffn], 7 => vec![ffn, h], 8 => vec![ffn], _ => vec![h] };
++                v[k].push(r.full(&format!("l{l}.{n}"), shape));
++            }
++        }
++    } else {
+     for _ in 0..layers {
+         v[0].push(norm(h));
+         for k in 1..5 { v[k].push(mat(vec![h, h])); }
+@@ -275,12 +716,19 @@ pub fn gptj(request: u64) -> Instance {
+         v[6].push(mat(vec![h, ffn])); v[7].push(mat(vec![ffn, h]));
+         v[8].push(bias(ffn)); v[9].push(bias(h));
+     }
+-    let fin = (norm(h), bias(h));
+-    let v = std::cell::RefCell::new(Some((v, fin)));
+-    let ar = ar_graph(seq, vocab, h, Emb::Alt2048, Emb::Alt2048, false, shards, None, &|g, x| {
+-        let ([a, b, c, d, e, f, gg, hh, i, j], fin) = v.borrow_mut().take().unwrap();
+-        g.pipe(&[x], gpt_j_6b_hidden(a, b, c, d, e, f, gg, hh, i, j, fin.0, fin.1, nh, hd, seq))[0]
++    }
++    let fin = match rw.as_ref() { Some(r) => (r.full("lnf_w", vec![h]), r.full("lnf_b", vec![h])), None => (norm(h), bias(h)) };
++    // Pretrained GPT-J: rotary on the first ROTARY_DIM (64) dims of each
++    // head, no frequency scaling, and GELU(h) = h * sigmoid(1.702 h).
++    let rope = rw.as_ref().map(|_| rope_mats_plain(hd, seq, 10000.0, ev("ROTARY_DIM", 64)));
++    let gelu_mul = rw.is_some();
++    let v = std::cell::RefCell::new(Some((v, fin, rope)));
++    let (emb, head) = match rw.as_ref() { Some(r) => (Tab::Real(r, "wte", None), Tab::Real(r, "lm_head", Some("lm_head_b"))), None => (Tab::Pat(Emb::Alt2048), Tab::Pat(Emb::Alt2048)) };
++    let mut ar = ar_graph(seq, vocab, h, emb, head, false, shards, None, &|g, x| {
++        let ([a, b, c, d, e, f, gg, hh, i, j], fin, rope) = v.borrow_mut().take().unwrap();
++        g.pipe(&[x], gpt_j_6b_hidden_ext(a, b, c, d, e, f, gg, hh, i, j, fin.0, fin.1, nh, hd, seq, rope, gelu_mul))[0]
+     });
++    ar.prompt = rw.as_ref().map(|r| r.prompt(request, 16.min(seq)));
+     ar_run("GPT-J-6B", ar, seq, vocab, request)
+ }
+ 
+@@ -294,7 +742,19 @@ pub fn llama2(request: u64) -> Instance {
+     let (mut p1, mut p2, mut p3): (Vec<Vec<Witness>>, Vec<Vec<Witness>>, Vec<Vec<Witness>>) = (vec![], vec![], vec![]);
+     let sfp = ffn.next_power_of_two() / fs;
+     let cs = |shape: Vec<usize>, n: usize| Witness::new(shape, zeros(n), DataType::Float, *SF_LOG, Role::Constant);
+-    for _ in 0..layers {
++    let rw = Real::open("llama2");
++    if let Some(r) = rw.as_ref() {
++        assert_eq!(ffn % fs, 0, "real weights: FFN_SHARDS must divide FFN_DIM");
++        for l in 0..layers {
++            let n = |s: &str| format!("l{l}.{s}");
++            a.push(r.full(&n("attn_norm"), vec![h])); b.push(r.full(&n("q_w"), vec![h, h])); c.push(r.full(&n("k_w"), vec![h, h]));
++            d.push(r.full(&n("v_w"), vec![h, h])); e.push(r.full(&n("o_w"), vec![h, h])); f.push(r.full(&n("mlp_norm"), vec![h]));
++            p1.push((0..fs).map(|s| r.block(&n("gate_w"), 0, h, s * sf, sf)).collect());
++            p2.push((0..fs).map(|s| r.block(&n("up_w"), 0, h, s * sf, sf)).collect());
++            p3.push((0..fs).map(|s| r.block(&n("down_w"), s * sf, sf, 0, h)).collect());
++        }
++    }
++    for _ in 0..(if rw.is_some() { 0 } else { layers }) {
+         a.push(norm(h)); b.push(mat(vec![h, h])); c.push(mat(vec![h, h])); d.push(mat(vec![h, h])); e.push(mat(vec![h, h])); f.push(norm(h));
+         let hp = h.next_power_of_two();
+         if dense() {
+@@ -307,12 +767,16 @@ pub fn llama2(request: u64) -> Instance {
+             p3.push((0..fs).map(|_| cs(vec![sf, h], sfp * hp)).collect());
+         }
+     }
+-    let fin = norm(h);
+-    let v = std::cell::RefCell::new(Some((a, b, c, d, e, f, p1, p2, p3, fin)));
+-    let ar = ar_graph(seq, vocab, h, Emb::Const1024, Emb::Const1024, false, shards, None, &|g, x| {
+-        let (a, b, c, d, e, f, p1, p2, p3, fin) = v.borrow_mut().take().unwrap();
+-        g.pipe(&[x], llama_2_7b_hidden(a, b, c, d, e, f, p1, p2, p3, fin, nh, hd, seq))[0]
++    let fin = match rw.as_ref() { Some(r) => r.full("final_norm", vec![h]), None => norm(h) };
++    // Pretrained Llama-2: plain RoPE (theta 10000, no Llama-3 scaling).
++    let rope = rw.as_ref().map(|_| rope_mats_plain(hd, seq, 10000.0, hd));
++    let v = std::cell::RefCell::new(Some((a, b, c, d, e, f, p1, p2, p3, fin, rope)));
++    let (emb, head) = match rw.as_ref() { Some(r) => (Tab::Real(r, "embed", None), Tab::Real(r, "lm_head", None)), None => (Tab::Pat(Emb::Const1024), Tab::Pat(Emb::Const1024)) };
++    let mut ar = ar_graph(seq, vocab, h, emb, head, false, shards, None, &|g, x| {
++        let (a, b, c, d, e, f, p1, p2, p3, fin, rope) = v.borrow_mut().take().unwrap();
++        g.pipe(&[x], llama_2_7b_hidden_rope(a, b, c, d, e, f, p1, p2, p3, fin, nh, hd, seq, rope))[0]
+     });
++    ar.prompt = rw.as_ref().map(|r| r.prompt(request, 16.min(seq)));
+     ar_run("LLaMA2-7B", ar, seq, vocab, request)
+ }
+ 
+@@ -322,20 +786,34 @@ pub fn llama3(request: u64) -> Instance {
+     let shards = ev("VOCAB_SHARDS", 1);
+     let h = nh * hd;
+     let kv = nkv * hd;
++    let rw = Real::open("llama3");
+     let mut v: [Vec<Witness>; 9] = Default::default();
+-    for _ in 0..layers {
++    if let Some(r) = rw.as_ref() {
++        const N: [&str; 9] = ["attn_norm", "q_w", "k_w", "v_w", "o_w", "mlp_norm", "gate_w", "up_w", "down_w"];
++        for l in 0..layers {
++            for (k, n) in N.iter().enumerate() {
++                let shape = match k { 0 | 5 => vec![h], 1 | 4 => vec![h, h], 2 | 3 => vec![h, kv], 6 | 7 => vec![h, ffn], _ => vec![ffn, h] };
++                v[k].push(r.full(&format!("l{l}.{n}"), shape));
++            }
++        }
++    }
++    for _ in 0..(if rw.is_some() { 0 } else { layers }) {
+         v[0].push(norm(h));
+         v[1].push(mat(vec![h, h])); v[2].push(mat(vec![h, kv])); v[3].push(mat(vec![h, kv])); v[4].push(mat(vec![h, h]));
+         v[5].push(norm(h));
+         v[6].push(mat(vec![h, ffn])); v[7].push(mat(vec![h, ffn])); v[8].push(mat(vec![ffn, h]));
+     }
+-    let fin = norm(h);
++    let fin = match rw.as_ref() { Some(r) => r.full("final_norm", vec![h]), None => norm(h) };
+     let v = std::cell::RefCell::new(Some((v, fin)));
+-    let ar = ar_graph(seq, vocab, h, Emb::Const1024, Emb::Const1024, false, shards, None, &|g, x| {
++    // The default RoPE tables (theta 500000 with the Llama-3.1 frequency
++    // scaling) are the checkpoint's.
++    let (emb, head) = match rw.as_ref() { Some(r) => (Tab::Real(r, "embed", None), Tab::Real(r, "lm_head", None)), None => (Tab::Pat(Emb::Const1024), Tab::Pat(Emb::Const1024)) };
++    let mut ar = ar_graph(seq, vocab, h, emb, head, false, shards, None, &|g, x| {
+         let ([a, b, c, d, e, f, p1, p2, p3], fin) = v.borrow_mut().take().unwrap();
+         let w = |v: Vec<Witness>| v.into_iter().map(|w| vec![w]).collect();
+         g.pipe(&[x], llama3_8b_hidden(a, b, c, d, e, f, w(p1), w(p2), w(p3), fin, seq, hd, nh, nkv))[0]
+     });
++    ar.prompt = rw.as_ref().map(|r| r.prompt(request, 16.min(seq)));
+     ar_run("LLaMA3-8B", ar, seq, vocab, request)
+ }
+ 
+@@ -378,3 +856,109 @@ pub fn build(name: &str, request: u64) -> Instance {
+         other => panic!("unknown MODEL {other}"),
+     }
+ }
++
++/// CPU-only validation of a built transformer instance (no proving, no GPU):
++/// prints the generated tokens, every range-check (NonNegative) violation of
++/// the witness (the `[range] WARNING` condition, which lean aux skips), and
++/// the widest request tensor (to choose REQ_PLANES_LOG). With `dump`, writes
++/// the tokens and the dequantized logits of every position:
++/// b"ZKLG" | seq:u32 | vocab:u32 | sf:u32 | tokens:u32*seq | logits:f32*seq*vocab.
++pub fn check_report(inst: &Instance, dump: Option<&std::path::Path>) {
++    use crate::basicblock::BasicBlockType;
++    use almost_goldilocks_cuda::field::ALMOST_GOLDILOCKS_PRIME as Q;
++    use rayon::prelude::*;
++    let (dag, wit) = (&inst.dag, &inst.wit);
++    let kind = |e: usize| dag.producers[e].map(|n| format!("{:?}", dag.nodes[n].kind).split(|c: char| c == '(' || c == ' ' || c == '{').next().unwrap().to_string()).unwrap_or("leaf".into());
++    let signed = |x: u64| -> i128 { if x > Q / 2 { -((Q - x) as i128) } else { x as i128 } };
++    let bits = |a: i128| (128 - a.unsigned_abs().leading_zeros()) as usize;
++    let sf = *SF_LOG;
++    // Tokens and logits.
++    if let Some(ar) = inst.ar.as_ref() {
++        let sel = &wit[ar.embedding][0];
++        let tokens: Vec<usize> = (0..ar.seq).map(|i| (0..ar.vocab).find(|&v| f_to_int(sel.get(&[i, v])) == 1).expect("one-hot row")).collect();
++        println!("[check] tokens {tokens:?}");
++        let mut lg = vec![0f32; ar.seq * ar.vocab];
++        let mut amax = 0i128;
++        for (k, &(start, len)) in ar.ranges.iter().enumerate() {
++            let w = &wit[ar.logits[k]][0];
++            for i in 0..ar.seq { for off in 0..len {
++                let v = f_to_int(w.get(&[i, off]));
++                amax = amax.max(v.abs());
++                lg[i * ar.vocab + start + off] = v as f32 / (1u64 << sf) as f32;
++            } }
++        }
++        println!("[check] max |logit| {:.2} ({} bits at scale 2^{sf}; ARGMAX_LOGIT_BITS must exceed it)", amax as f64 / (1u64 << sf) as f64, bits(amax));
++        if let Some(p) = dump {
++            let mut b: Vec<u8> = b"ZKLG".to_vec();
++            for x in [ar.seq as u32, ar.vocab as u32, sf as u32] { b.extend(x.to_le_bytes()); }
++            for &t in &tokens { b.extend((t as u32).to_le_bytes()); }
++            for &x in &lg { b.extend(x.to_le_bytes()); }
++            std::fs::write(p, b).expect("write dump");
++            println!("[check] dumped tokens + logits to {}", p.display());
++        }
++    }
++    // CHECK_EDGES_DUMP=<dir>: every 3-D [1, seq, d] edge, dequantized
++    // (row-major f32), for locating a divergence against the float model.
++    if let (Some(dir), Some(ar)) = (std::env::var_os("CHECK_EDGES_DUMP"), inst.ar.as_ref()) {
++        let dir = std::path::PathBuf::from(dir);
++        std::fs::create_dir_all(&dir).unwrap();
++        let _ = ar;
++        for e in 0..dag.num_edges() {
++            let w = &wit[e][0];
++            let n: usize = w.shape.iter().product();
++            if w.shape.len() < 2 || n > (1 << 23) || w.data.is_none() || dag.producers[e].is_none() { continue; }
++            if let Some(d) = std::env::var("CHECK_EDGES_DIM").ok().and_then(|v| v.parse::<usize>().ok()) { if *w.shape.last().unwrap() != d { continue; } }
++            // [ndim][shape][sf][row-major logical values]
++            let mut b: Vec<u8> = Vec::new();
++            b.extend((w.shape.len() as u32).to_le_bytes());
++            for &x in &w.shape { b.extend((x as u32).to_le_bytes()); }
++            b.extend((w.sf as u32).to_le_bytes());
++            let mut idx = vec![0usize; w.shape.len()];
++            for _ in 0..n {
++                b.extend((f_to_int(w.get(&idx)) as f32 / (1u64 << w.sf.min(60)) as f32).to_le_bytes());
++                for d in (0..idx.len()).rev() { idx[d] += 1; if idx[d] < w.shape[d] { break; } idx[d] = 0; }
++            }
++            std::fs::write(dir.join(format!("e{e}_{}.f32", kind(e))), b).unwrap();
++        }
++    }
++    // Range checks.
++    let mut viol = 0usize;
++    for nd in &dag.nodes {
++        let BasicBlockType::NonNegative(nn) = &nd.kind else { continue };
++        let e = nd.inputs[0];
++        let Some(_) = wit[e][0].data.as_ref() else { println!("[check] range node {} input e{e} has no data", nd.id); continue };
++        let v = crate::morpheus::piop::witness_vals(&wit[e][0]);
++        let t = 1i128 << nn.table_size_log;
++        let (bad, neg, mx) = v.par_iter().map(|&x| { let s = signed(x); (usize::from(s < 0 || s >= t), usize::from(s < 0), s.abs()) })
++            .reduce(|| (0, 0, 0), |a, b| (a.0 + b.0, a.1 + b.1, a.2.max(b.2)));
++        if bad > 0 {
++            viol += 1;
++            // The checked tensor: the Sub's first operand (integer_interval /
++            // argmax build `x - lo`, `hi - x`).
++            let src = dag.producers[e].map(|p| dag.nodes[p].inputs.iter().map(|&i| format!("e{i}:{}", kind(i))).collect::<Vec<_>>().join(",")).unwrap_or_default();
++            println!("[check] [range] VIOLATION node {} table 2^{}: {bad}/{} out of range ({neg} negative), max |value| {mx} ({} bits); input e{e} = {} of [{src}]",
++                nd.id, nn.table_size_log, v.len(), bits(mx), kind(e));
++        }
++    }
++    println!("[check] range violations: {viol} nodes");
++    // Request tensor widths (as Morpheus' request preparation declares them).
++    let mut g = crate::morpheus::piop::Graph::new(dag, wit, crate::morpheus::piop::Config::default());
++    for &e in &inst.public { g.public.entry(e).or_insert_with(|| crate::morpheus::piop::witness_vals(&wit[e][0])); }
++    g.prune_unclaimed();
++    let mut req: Vec<(usize, usize, String)> = Vec::new();
++    let mut model_b = 0usize;
++    for e in 0..dag.num_edges() {
++        if !g.committed[e] && !g.model[e] { continue; }
++        let Some(_) = wit[e][0].data.as_ref() else { continue };
++        let v = crate::morpheus::piop::witness_vals(&wit[e][0]);
++        let mb = v.par_iter().map(|&x| bits(signed(x))).max().unwrap_or(0).max(1);
++        if g.model[e] { model_b = model_b.max(mb); continue; }
++        if g.public.contains_key(&e) || crate::morpheus::piop::request_source_is_bits(&g, e) { continue; }
++        req.push((mb, e, kind(e)));
++    }
++    req.sort_by(|a, b| b.cmp(a));
++    let top: Vec<String> = req.iter().take(8).map(|(b, e, k)| format!("e{e}:{k}={b}")).collect();
++    let mb = req.first().map(|r| r.0).unwrap_or(0);
++    println!("[check] widest request tensor {mb} bits -> REQ_PLANES_LOG >= {} (top: {})", crate::util::arith::log2_ceil(mb), top.join(" "));
++    println!("[check] widest model tensor {model_b} bits");
++}
+diff --git a/zk-torch-4/src/morpheus/pcs_gpu.rs b/zk-torch-4/src/morpheus/pcs_gpu.rs
+index 1bb5e72..2e3f149 100644
+--- a/zk-torch-4/src/morpheus/pcs_gpu.rs
++++ b/zk-torch-4/src/morpheus/pcs_gpu.rs
+@@ -45,6 +45,7 @@ pub struct PcsGpu {
+ }
+ 
+ fn ternary_cpu(coins: &Coins, purpose: Purpose, owner: u64, coord: u32) -> i8 {
++    if super::coins::no_zk() { return 0; }
+     let mut a = Address::new(purpose, owner);
+     a.coordinate = coord;
+     let mut s = coins.stream(a);
+@@ -56,6 +57,7 @@ fn ternary_cpu(coins: &Coins, purpose: Purpose, owner: u64, coord: u32) -> i8 {
+ 
+ /// `n` ternary coins at coordinates [0, n) of (purpose, owner).
+ pub fn ternary_gpu(coins: &Coins, purpose: Purpose, owner: u64, n: usize) -> Vec<i8> {
++    if super::coins::no_zk() { return vec![0; n]; }
+     let base = coins.gaussian_base_lanes(owner, 0);
+     let mut d = DeviceBuffer::<i8>::new(n).unwrap();
+     let mut f = DeviceBuffer::<u8>::new(n).unwrap();
+@@ -69,6 +71,7 @@ pub fn ternary_gpu(coins: &Coins, purpose: Purpose, owner: u64, n: usize) -> Vec
+ 
+ /// `n` uniform-q coins at coordinates [c0, c0 + n) of (purpose, owner).
+ pub fn uniform_q_gpu(coins: &Coins, purpose: Purpose, owner: u64, c0: u32, n: usize) -> Vec<u64> {
++    if super::coins::no_zk() { return vec![0; n]; }
+     let base = coins.gaussian_base_lanes(owner, 0);
+     let mut d = DeviceBuffer::<u64>::new(n).unwrap();
+     let mut f = DeviceBuffer::<u8>::new(n).unwrap();
+diff --git a/zk-torch-4/src/morpheus/rejection.rs b/zk-torch-4/src/morpheus/rejection.rs
+index b531b9a..12e473e 100644
+--- a/zk-torch-4/src/morpheus/rejection.rs
++++ b/zk-torch-4/src/morpheus/rejection.rs
+@@ -137,6 +137,7 @@ fn decide_cheap(x: &Ratio, u: &BigUint) -> Option<Coin> {
+ }
+ 
+ pub fn decide(x: &Ratio, u: &BigUint) -> Coin {
++    if super::coins::no_zk() { return Coin::Accept; }
+     decide_cheap(x, u).unwrap_or_else(|| decide_exact(x, u))
+ }
+ 

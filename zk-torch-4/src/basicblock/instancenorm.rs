@@ -2,8 +2,10 @@
 //! instance normalization.
 //!
 //! Output is a packed `[2, C]` witness: row 0 = scale, row 1 = offset.
-//! Soundness comes from the downstream `Y = scale · X + offset` decomposition
-//! the DAG builder wires (Einsum + Add, both fully proven).
+//! This legacy helper does NOT prove its statistics or affine parameters.
+//! Raw nodes are rejected by `DagBuilder::compile`. The supported named
+//! InstanceNorm3D builder now emits the exact finite arithmetic graph in
+//! `dag::instancenorm`; no model path relies on this unchecked legacy advice.
 
 use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 

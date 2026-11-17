@@ -1,0 +1,12 @@
+[
+  {
+    "old": "morpheus-cnn-layout-joint-cpu4",
+    "portable": "morpheus-cnn-layout-portable-cpu",
+    "identical_rust_files": 289
+  },
+  {
+    "old": "morpheus-cnn-layout-inherited-cpu",
+    "portable": "morpheus-cnn-layout-portable-inherited",
+    "identical_rust_files": 294
+  }
+]

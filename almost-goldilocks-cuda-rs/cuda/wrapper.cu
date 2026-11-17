@@ -25,14 +25,82 @@
 #include "ajtai_tc.cuh"
 #include "ajtai_premat.cuh"
 #include "ajtai_tc_commit_probe.cuh"
+#include "morpheus_gauss.cuh"
+#include "morpheus_commit.cuh"
+#include "morpheus_auth.cuh"
+#include "morpheus_link.cuh"
+#include "morpheus_link2.cuh"
+#include "morpheus_piop.cuh"
 // We also pull in the field/extension kernel TUs so the kernels are linked
 // into this object file rather than left as external declarations.
 #include "almost_goldilocks_kernels.cu"
 #include "almost_extension_kernels.cu"
 
 #include <cstdio>
+#include <chrono>
 
 #define WRAPPER_BLOCK_SIZE 256
+
+#include <mutex>
+#include <nvtx3/nvToolsExt.h>
+#include <map>
+#include <unordered_map>
+#include <vector>
+#include <cstdlib>
+
+namespace {
+struct AglBlock { void* p; size_t sz; cudaEvent_t ev; };
+struct AglLive { int dev; size_t sz; };
+constexpr int AGL_MAX_DEV = 64;
+std::mutex g_agl_mx;
+std::unordered_map<void*, AglLive> g_agl_live;
+std::multimap<size_t, AglBlock> g_agl_free[AGL_MAX_DEV];
+size_t g_agl_cached[AGL_MAX_DEV] = {0};
+std::vector<cudaEvent_t> g_agl_evpool[AGL_MAX_DEV];
+
+int agl_cache_on() {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = std::getenv("AGL_ALLOC_CACHE");
+        on = (e && e[0] == '0') ? 0 : 1;
+    }
+    return on;
+}
+size_t agl_round(size_t n) {
+    // 512 B granules below 1 MiB, 2 MiB (the driver's own page) above.
+    if (n <= (size_t(1) << 20)) return (n + 511) & ~size_t(511);
+    const size_t g = size_t(2) << 20;
+    return (n + g - 1) / g * g;
+}
+// Release every cached block of `dev`. Caller holds g_agl_mx and has `dev`
+// current. cudaFree synchronizes, so pending events are complete afterwards.
+void agl_flush_locked(int dev) {
+    for (auto& kv : g_agl_free[dev]) {
+        cudaEventSynchronize(kv.second.ev);
+        cudaFree(kv.second.p);
+        g_agl_evpool[dev].push_back(kv.second.ev);
+    }
+    g_agl_free[dev].clear();
+    g_agl_cached[dev] = 0;
+}
+} // namespace
+
+// Wait for THIS thread's GPU work, not the whole device's. Every kernel FFI
+// entry point below used to end in agl_sync_mine(), which waits for
+// every thread's work on the device: with 6+ fold-tree workers plus the bool
+// and node provers sharing a GPU, each return waited for all of them (3,475
+// calls, 120 s of thread time in a GPT-2 2-layer profile). The library is built
+// with --default-stream per-thread, so each thread's kernels and synchronous
+// copies are on cudaStreamPerThread and this is the sync the callers need.
+// AGL_DEVICE_SYNC=1 restores device-wide syncs.
+static inline cudaError_t agl_sync_mine() {
+    static int dev_sync = -1;
+    if (dev_sync < 0) {
+        const char* e = std::getenv("AGL_DEVICE_SYNC");
+        dev_sync = (e && e[0] == '1') ? 1 : 0;
+    }
+    return dev_sync ? cudaDeviceSynchronize() : cudaStreamSynchronize(cudaStreamPerThread);
+}
 
 extern "C" {
 
@@ -47,11 +115,136 @@ int almost_goldilocks_cuda_init() {
     return (almost_goldilocks_init() == cudaSuccess) ? 0 : -1;
 }
 
+// ----------------------------------------------------------------------------
+// Caching device allocator behind cuda_malloc / cuda_free (every DeviceBuffer).
+//
+// Why: an nsys profile of GPT-2 (2 layers, seq 128, 2 GPUs) showed 12,092
+// cudaMalloc + 12,092 cudaFree per run costing 228 s + 144 s of thread time,
+// with single calls up to 1.5 s, against ~16 s of kernels per GPU. cudaMalloc
+// and cudaFree take a device-wide lock and cudaFree synchronizes the device, so
+// the fold-tree workers, bool provers and node provers serialized behind each
+// other (gpu_sp "setup" jumped from ~20 ms to ~1 s on whichever call lost).
+//
+// What: freed blocks go to a per-device free list and are handed out again to
+// a request that fits (best fit, at most 25% + 2 MiB larger). On a cudaMalloc
+// failure the device's cache is released and the allocation retried, so peak
+// memory is no worse than before when the device is actually full.
+//
+// Ordering: cudaFree used to synchronize the device, so a buffer was never
+// reused while a kernel still read it. Every kernel FFI entry point here
+// synchronizes its own stream before returning (agl_sync_mine), so by the time
+// Rust drops a DeviceBuffer the kernels that touched it have completed. As a
+// second guard each freed block records an event on the freeing thread's
+// stream, synchronized before the block is handed out again. (Recording on the
+// legacy stream instead would also cover other threads' streams, but measured
+// as a blocking call: 170 s of thread time, up to 0.87 s per record.)
+//
+// AGL_ALLOC_CACHE=0 restores plain cudaMalloc / cudaFree.
+// ----------------------------------------------------------------------------
+
 int cuda_malloc(void** ptr, size_t size) {
-    return (cudaMalloc(ptr, size) == cudaSuccess) ? 0 : -1;
+    if (!agl_cache_on()) return (cudaMalloc(ptr, size) == cudaSuccess) ? 0 : -1;
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= AGL_MAX_DEV)
+        return (cudaMalloc(ptr, size) == cudaSuccess) ? 0 : -1;
+    const size_t want = agl_round(size == 0 ? 1 : size);
+    // The stream-ordered pool behind cudaMallocAsync defaults to a release
+    // threshold of 0, so it hands memory back to the driver at every
+    // synchronization and the next cudaMallocAsync pays the driver again
+    // (1,462 such calls cost 53 s of thread time in the same profile). Let it
+    // keep what it has; cuda_pool_trim still releases it explicitly.
+    {
+        static bool thr_set[AGL_MAX_DEV] = {false};
+        std::lock_guard<std::mutex> lk(g_agl_mx);
+        if (!thr_set[dev]) {
+            thr_set[dev] = true;
+            cudaMemPool_t pool;
+            if (cudaDeviceGetDefaultMemPool(&pool, dev) == cudaSuccess) {
+                uint64_t thr = UINT64_MAX;
+                cudaMemPoolSetAttribute(pool, cudaMemPoolAttrReleaseThreshold, &thr);
+            }
+        }
+    }
+    {
+        std::unique_lock<std::mutex> lk(g_agl_mx);
+        auto& fl = g_agl_free[dev];
+        auto it = fl.lower_bound(want);
+        if (it != fl.end() && it->first <= want + want / 4 + (size_t(2) << 20)) {
+            AglBlock b = it->second;
+            fl.erase(it);
+            g_agl_cached[dev] -= b.sz;
+            g_agl_live[b.p] = AglLive{dev, b.sz};
+            lk.unlock();
+            // Previous owner's work on this block must be finished. Almost
+            // always already true, so this rarely blocks.
+            cudaEventSynchronize(b.ev);
+            std::lock_guard<std::mutex> lk2(g_agl_mx);
+            g_agl_evpool[dev].push_back(b.ev);
+            *ptr = b.p;
+            return 0;
+        }
+    }
+    void* p = nullptr;
+    cudaError_t err = cudaMalloc(&p, want);
+    if (err != cudaSuccess) {
+        cudaGetLastError();  // clear the sticky OOM before retrying
+        std::lock_guard<std::mutex> lk(g_agl_mx);
+        agl_flush_locked(dev);
+        err = cudaMalloc(&p, want);
+        if (err != cudaSuccess) { cudaGetLastError(); return -1; }
+    }
+    std::lock_guard<std::mutex> lk(g_agl_mx);
+    g_agl_live[p] = AglLive{dev, want};
+    *ptr = p;
+    return 0;
 }
+
 int cuda_free(void* ptr) {
-    return (cudaFree(ptr) == cudaSuccess) ? 0 : -1;
+    if (ptr == nullptr) return 0;
+    if (!agl_cache_on()) return (cudaFree(ptr) == cudaSuccess) ? 0 : -1;
+    AglLive info;
+    cudaEvent_t ev = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_agl_mx);
+        auto it = g_agl_live.find(ptr);
+        if (it == g_agl_live.end()) {
+            // Not ours (allocated before the cache existed, or elsewhere).
+            return (cudaFree(ptr) == cudaSuccess) ? 0 : -1;
+        }
+        info = it->second;
+        g_agl_live.erase(it);
+        auto& ep = g_agl_evpool[info.dev];
+        if (!ep.empty()) { ev = ep.back(); ep.pop_back(); }
+    }
+    int cur = 0;
+    cudaGetDevice(&cur);
+    if (cur != info.dev) cudaSetDevice(info.dev);
+    if (ev == nullptr && cudaEventCreateWithFlags(&ev, cudaEventDisableTiming) != cudaSuccess) {
+        if (cur != info.dev) cudaSetDevice(cur);
+        return (cudaFree(ptr) == cudaSuccess) ? 0 : -1;
+    }
+    cudaEventRecord(ev, cudaStreamPerThread);
+    if (cur != info.dev) cudaSetDevice(cur);
+    std::lock_guard<std::mutex> lk(g_agl_mx);
+    g_agl_free[info.dev].emplace(info.sz, AglBlock{ptr, info.sz, ev});
+    g_agl_cached[info.dev] += info.sz;
+    return 0;
+}
+
+// Release the current device's cached blocks (called by cuda_pool_trim).
+int agl_alloc_cache_flush() {
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= AGL_MAX_DEV) return -1;
+    std::lock_guard<std::mutex> lk(g_agl_mx);
+    agl_flush_locked(dev);
+    return 0;
+}
+// Bytes currently held in the current device's cache (for diagnostics).
+size_t agl_alloc_cache_bytes() {
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= AGL_MAX_DEV) return 0;
+    std::lock_guard<std::mutex> lk(g_agl_mx);
+    return g_agl_cached[dev];
 }
 int cuda_memcpy_htod(void* dst, const void* src, size_t size) {
     return (cudaMemcpy(dst, src, size, cudaMemcpyHostToDevice) == cudaSuccess) ? 0 : -1;
@@ -91,9 +284,13 @@ int cuda_memset(void* dst, int value, size_t size) {
 /// to `min_bytes_to_keep`-worth of pool-held cached blocks back to the
 /// OS. Use 0 to release everything possible. Requires CUDA 11.2+ and
 /// a driver supporting cudaMallocAsync (most A100s do).
+int agl_alloc_cache_flush();
 int cuda_pool_trim(size_t min_bytes_to_keep) {
     int device = 0;
     if (cudaGetDevice(&device) != cudaSuccess) return -1;
+    // Also release the DeviceBuffer cache (cuda_malloc above): callers trim to
+    // hand memory back before a memory-heavy phase, and that holds for both.
+    agl_alloc_cache_flush();
     cudaMemPool_t pool;
     if (cudaDeviceGetDefaultMemPool(&pool, device) != cudaSuccess) return -1;
     return (cudaMemPoolTrimTo(pool, min_bytes_to_keep) == cudaSuccess) ? 0 : -1;
@@ -120,11 +317,98 @@ int cuda_memcpy_htod_async(void* dst, const void* src, size_t size, void* stream
     return (cudaMemcpyAsync(dst, src, size, cudaMemcpyHostToDevice,
             (cudaStream_t)stream) == cudaSuccess) ? 0 : -1;
 }
+// Per-thread-stream sync for the Rust wrappers' own "my kernels are done"
+// waits (memory::sync_mine). See agl_sync_mine.
+int cuda_sync_mine() {
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -1;
+}
+// NVTX ranges for nsys timelines (zk-torch-4 phase markers). Header-only
+// NVTX v3: a no-op unless a tool (nsys) is attached.
+void agl_nvtx_push(const char* name) { nvtxRangePushA(name); }
+void agl_nvtx_pop() { nvtxRangePop(); }
 int cuda_device_synchronize() {
     return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -1;
 }
 int cuda_get_last_error() { return (int)cudaGetLastError(); }
 int cuda_peek_at_last_error() { return (int)cudaPeekAtLastError(); }
+/// Device-to-host copy through two reusable pinned 64 MB buffers per device:
+/// the DMA of chunk c+1 overlaps the host copy of chunk c (pageable copies of
+/// GB-scale buffers run at a few GB/s).
+int agl_d2h_staged(void* h_dst, const void* d_src, size_t bytes) {
+    if (bytes == 0) return 0;
+    const size_t CH = (size_t)64 << 20;
+    static std::mutex mx[AGL_MAX_DEV];   // per device: devices copy concurrently
+    static void* buf[AGL_MAX_DEV][2] = {};
+    static cudaStream_t st[AGL_MAX_DEV] = {};
+    static cudaEvent_t ev[AGL_MAX_DEV][2] = {};
+    int dev = 0; cudaGetDevice(&dev);
+    if (dev < 0 || dev >= AGL_MAX_DEV) return (cudaMemcpy(h_dst, d_src, bytes, cudaMemcpyDeviceToHost) == cudaSuccess) ? 0 : -1;
+    std::lock_guard<std::mutex> lk(mx[dev]);
+    if (!buf[dev][0]) {
+        for (int k = 0; k < 2; k++) {
+            if (cudaMallocHost(&buf[dev][k], CH) != cudaSuccess) return -1;
+            cudaEventCreateWithFlags(&ev[dev][k], cudaEventDisableTiming);
+        }
+        cudaStreamCreateWithFlags(&st[dev], cudaStreamNonBlocking);
+    }
+    const size_t n = (bytes + CH - 1) / CH;
+    auto issue = [&](size_t c) {
+        const size_t off = c * CH, len = bytes - off < CH ? bytes - off : CH;
+        cudaMemcpyAsync(buf[dev][c & 1], (const char*)d_src + off, len, cudaMemcpyDeviceToHost, st[dev]);
+        cudaEventRecord(ev[dev][c & 1], st[dev]);
+    };
+    // The caller's prior kernels on its own stream must be complete.
+    agl_sync_mine();
+    issue(0);
+    for (size_t c = 0; c < n; c++) {
+        if (c + 1 < n) issue(c + 1);
+        if (cudaEventSynchronize(ev[dev][c & 1]) != cudaSuccess) return -1;
+        const size_t off = c * CH, len = bytes - off < CH ? bytes - off : CH;
+        memcpy((char*)h_dst + off, buf[dev][c & 1], len);
+    }
+    return 0;
+}
+
+/// Host-to-device copy through two pinned 64 MB staging buffers (pageable
+/// sources otherwise copy at a fraction of the bus rate). Returns once the
+/// data is on the device.
+int agl_h2d_staged(void* d_dst, const void* h_src, size_t bytes) {
+    if (bytes == 0) return 0;
+    const size_t CH = (size_t)64 << 20;
+    static std::mutex mx[AGL_MAX_DEV];
+    static void* buf[AGL_MAX_DEV][2] = {};
+    static cudaStream_t st[AGL_MAX_DEV] = {};
+    static cudaEvent_t ev[AGL_MAX_DEV][2] = {};
+    int dev = 0; cudaGetDevice(&dev);
+    if (dev < 0 || dev >= AGL_MAX_DEV) return (cudaMemcpy(d_dst, h_src, bytes, cudaMemcpyHostToDevice) == cudaSuccess) ? 0 : -1;
+    std::lock_guard<std::mutex> lk(mx[dev]);
+    if (!buf[dev][0]) {
+        for (int k = 0; k < 2; k++) {
+            if (cudaMallocHost(&buf[dev][k], CH) != cudaSuccess) return -1;
+            cudaEventCreateWithFlags(&ev[dev][k], cudaEventDisableTiming);
+        }
+        cudaStreamCreateWithFlags(&st[dev], cudaStreamNonBlocking);
+    }
+    const size_t n = (bytes + CH - 1) / CH;
+    agl_sync_mine();
+    for (size_t c = 0; c < n; c++) {
+        const size_t off = c * CH, len = bytes - off < CH ? bytes - off : CH;
+        // Buffer c & 1 is free once its previous copy (chunk c − 2) is done.
+        if (c >= 2 && cudaEventSynchronize(ev[dev][c & 1]) != cudaSuccess) return -1;
+        memcpy(buf[dev][c & 1], (const char*)h_src + off, len);
+        cudaMemcpyAsync((char*)d_dst + off, buf[dev][c & 1], len, cudaMemcpyHostToDevice, st[dev]);
+        cudaEventRecord(ev[dev][c & 1], st[dev]);
+    }
+    return cudaStreamSynchronize(st[dev]) == cudaSuccess ? 0 : -1;
+}
+
+/// Bytes held in the caching allocator's free lists for the current device.
+size_t agl_cached_bytes() {
+    int dev = 0;
+    if (cudaGetDevice(&dev) != cudaSuccess || dev < 0 || dev >= AGL_MAX_DEV) return 0;
+    std::lock_guard<std::mutex> lk(g_agl_mx);
+    return g_agl_cached[dev];
+}
 int cuda_mem_get_info(size_t* free, size_t* total) {
     return (cudaMemGetInfo(free, total) == cudaSuccess) ? 0 : -1;
 }
@@ -493,15 +777,30 @@ int agl_fused_permute_partial_eval_ffi(
     // launch needs (Hopper allows up to ~227 KB; FUSED_MAX_N caps n at 28 →
     // <=128 KB). If the attribute can't be raised, the launch fails below and
     // the caller falls back to host.
-    cudaFuncSetAttribute(
-        (const void*)agl_fused_permute_partial_eval_kernel,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        smem_bytes
-    );
-    agl_fused_permute_partial_eval_kernel<<<grid, block, (size_t)smem_bytes>>>(
-        d_evals, d_output, d_eq_table, d_lo_lut, d_hi_lut,
-        n, m, half, output_size
-    );
+    int dev = 0, max_optin = 0;
+    cudaGetDevice(&dev);
+    cudaDeviceGetAttribute(&max_optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev);
+    if (smem_bytes <= max_optin) {
+        cudaFuncSetAttribute(
+            (const void*)agl_fused_permute_partial_eval_kernel_t<true>,
+            cudaFuncAttributeMaxDynamicSharedMemorySize,
+            smem_bytes
+        );
+        agl_fused_permute_partial_eval_kernel_t<true><<<grid, block, (size_t)smem_bytes>>>(
+            d_evals, d_output, d_eq_table, d_lo_lut, d_hi_lut,
+            n, m, half, output_size
+        );
+    } else {
+        // LUTs too large for this device's shared memory: read them from
+        // global memory instead of failing the launch (which sent the whole
+        // einsum to the host prover: ~20 s for Llama-3's 128K-vocab
+        // embedding on an A100). Only the per-warp partials need smem.
+        size_t warp_bytes = (size_t)(block / 32) * 2 * sizeof(uint64_t);
+        agl_fused_permute_partial_eval_kernel_t<false><<<grid, block, warp_bytes>>>(
+            d_evals, d_output, d_eq_table, d_lo_lut, d_hi_lut,
+            n, m, half, output_size
+        );
+    }
     return (cudaGetLastError() == cudaSuccess) ? 0 : -1;
 }
 
@@ -936,7 +1235,7 @@ int link_round_message_ffi(
     link_reduce_kernel<<<MSG_SLOTS, BLOCK>>>(
         (const E2*)d_partial, n_commit * chunks, (E2*)d_out);
     if (cudaGetLastError() != cudaSuccess) return -2;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -3;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -3;
 }
 
 extern "C"
@@ -958,7 +1257,7 @@ int link_fold_ffi(
     link_fold_kernel<<<blocks, BLOCK>>>(
         (E2*)d_w, (E2*)d_omega, stride, omega_stride, half, n_commit, r_c0, r_c1);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -974,7 +1273,7 @@ int link_eq_expand_ffi(
     if (blocks > 65535u) blocks = 65535u;
     link_eq_expand_kernel<<<blocks, BLOCK>>>((E2*)d_table, span, r_c0, r_c1);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 
@@ -993,7 +1292,7 @@ int link_round0_bits_ffi(
     link_reduce_kernel<<<MSG_SLOTS, BLOCK>>>(
         (const E2*)d_partial, n_commit * chunks, (E2*)d_out);
     if (cudaGetLastError() != cudaSuccess) return -2;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -3;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -3;
 }
 
 extern "C"
@@ -1016,7 +1315,7 @@ int link_round_interleaved_ffi(
     link_reduce_kernel<<<MSG_SLOTS, BLOCK>>>(
         (const E2*)d_partial, n_commit * chunks, (E2*)d_out);
     if (cudaGetLastError() != cudaSuccess) return -2;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -3;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -3;
 }
 
 extern "C"
@@ -1034,7 +1333,7 @@ int link_fold_w_ffi(
         d_bits, (const E2*)d_w_in, (E2*)d_w_out, in_stride, bits_stride_words,
         out_stride, half, n_commit, first_round, r_c0, r_c1);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -1053,7 +1352,7 @@ int link_round0_bits_sparse_ffi(
     link_reduce_kernel<<<MSG_SLOTS, BLOCK>>>(
         (const E2*)d_partial, n_commit * chunks, (E2*)d_out);
     if (cudaGetLastError() != cudaSuccess) return -2;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -3;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -3;
 }
 
 extern "C"
@@ -1069,7 +1368,7 @@ int link_fold0_bits_ffi(
     link_fold0_bits_kernel<<<blocks, BLOCK>>>(
         d_bits, (E2*)d_w_out, (E2*)d_omega, stride, half, n_commit, r_c0, r_c1);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -1080,7 +1379,7 @@ int link_expand_bits_ffi(const uint64_t* d_bits, uint64_t* d_out, uint64_t n_wor
     if (blocks > 65535u) blocks = 65535u;
     link_expand_bits_kernel<<<blocks, BLOCK>>>(d_bits, (E2*)d_out, n_words);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -1099,7 +1398,7 @@ int link_omega_expand_ffi(
     link_omega_expand_kernel<<<grid, BLOCK>>>(
         (E2*)d_omega, d_bases, d_rs, span);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -1113,7 +1412,7 @@ int link_eq_gather_ffi(
     if (blocks > 65535u) blocks = 65535u;
     link_eq_gather_kernel<<<blocks, BLOCK>>>(d_alpha, n_vars, d_list, (E2*)d_out, total);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 extern "C"
@@ -1134,7 +1433,7 @@ int link_round_message_sparse_ffi(
     link_reduce_kernel<<<MSG_SLOTS, BLOCK>>>(
         (const E2*)d_partial, n_commit * chunks, (E2*)d_out);
     if (cudaGetLastError() != cudaSuccess) return -2;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -3;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -3;
 }
 
 extern "C"
@@ -1149,7 +1448,7 @@ int link_fold_sparse_ffi(
         (E2*)d_w, (E2*)d_omega, d_list, d_list_off, d_list_len,
         stride, half, n_commit, r_c0, r_c1);
     if (cudaGetLastError() != cudaSuccess) return -1;
-    return (cudaDeviceSynchronize() == cudaSuccess) ? 0 : -2;
+    return (agl_sync_mine() == cudaSuccess) ? 0 : -2;
 }
 
 // --------------------------------------------------------------------------
@@ -2076,7 +2375,7 @@ int agl_conv3d_ffi(
         x_len, w_len, y_len, d_oob
     );
     if (guard) {
-        cudaError_t sync_err = cudaDeviceSynchronize();
+        cudaError_t sync_err = agl_sync_mine();
         int oob = 0;
         cudaMemcpy(&oob, d_oob, sizeof(int), cudaMemcpyDeviceToHost);
         cudaFree(d_oob);
@@ -2316,7 +2615,7 @@ int agl_conv_full_ffi(
         x_len, w_len, y_len, d_oob
     );
     if (guard) {
-        cudaError_t sync_err = cudaDeviceSynchronize();
+        cudaError_t sync_err = agl_sync_mine();
         int oob = 0;
         cudaMemcpy(&oob, d_oob, sizeof(int), cudaMemcpyDeviceToHost);
         cudaFree(d_oob);
@@ -2544,14 +2843,14 @@ int agl_bool_finish_ffi(
     if (n_terms <= 0) return 0;
     int nb = (n_terms + 255) / 256;
     agl_bool_finish_kernel<<<nb, 256>>>(d_idx, d_val, d_term_off, n_terms, n, d_out);
-    return (int)cudaDeviceSynchronize();
+    return (int)agl_sync_mine();
 }
 
 int agl_bool_init_val_ffi(uint64_t* d_val, size_t n) {
     if (n == 0) return 0;
     size_t nb = (n + AGL_BOOL_BLOCK - 1) / AGL_BOOL_BLOCK;
     agl_bool_init_val_kernel<<<nb, AGL_BOOL_BLOCK>>>(d_val, n);
-    return (int)cudaDeviceSynchronize();
+    return (int)agl_sync_mine();
 }
 
 }
@@ -2610,13 +2909,13 @@ int agl_bool_round_msg_ffi(
     agl_bool_mark_kernel<<<g, AGL_BOOL_BLOCK>>>(d_idx, d_term_off, d_flags);
     if (t_dbg) cudaEventRecord(e1);
     if (getenv("ZK4_GPU_BOOL_DBG")) {
-        cudaError_t me = cudaDeviceSynchronize();
+        cudaError_t me = agl_sync_mine();
         if (me != cudaSuccess) { fprintf(stderr, "[bool] mark failed: %d (n=%zu terms=%d gx=%d)\n", (int)me, n, n_terms, grid_x); return (int)me; }
     }
     if (agl_u32_exscan_scratch(d_flags, d_gid, n, d_scan_scratch, scan_scratch_len) != 0) return -1;
     if (t_dbg) cudaEventRecord(e2);
     if (getenv("ZK4_GPU_BOOL_DBG")) {
-        cudaError_t se = cudaDeviceSynchronize();
+        cudaError_t se = agl_sync_mine();
         if (se != cudaSuccess) { fprintf(stderr, "[bool] scan failed: %d (n=%zu scratch=%zu)\n", (int)se, n, scan_scratch_len); return (int)se; }
     }
     uint32_t two_last[2] = {0, 0};
@@ -2627,7 +2926,7 @@ int agl_bool_round_msg_ffi(
     agl_bool_msg_kernel<<<g, AGL_BOOL_BLOCK>>>(
         d_idx, d_val, d_flags, d_term_off, d_w, d_eq, d_partial);
     if (t_dbg) cudaEventRecord(e3);
-    cudaError_t e = cudaDeviceSynchronize();
+    cudaError_t e = agl_sync_mine();
     if (e != cudaSuccess) return (int)e;
     double t_red0 = 0;
     if (t_dbg) {
@@ -2678,7 +2977,982 @@ int agl_bool_fold_ffi(
         d_idx, d_val, d_flags, d_gid, d_term_off, r0, r1, d_out_idx, d_out_val);
     int tb = (n_terms + 1 + 255) / 256;
     agl_bool_newoff_kernel<<<tb, 256>>>(d_gid, d_term_off, n_terms, n, total, d_new_off);
-    return (int)cudaDeviceSynchronize();
+    return (int)agl_sync_mine();
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: GPU first pass of the certified Gaussian sampler
+// --------------------------------------------------------------------------
+// consts: sizeof(mgauss::Consts)/8 words; base: 17 Keccak rate lanes.
+// d_out/d_flag are device buffers of n entries. Returns 0 on success.
+int agl_morpheus_gauss_words() { return (int)(sizeof(mgauss::Consts) / 8); }
+
+// Samples coordinates [coord0, coord0+n) into device buffer d_out. Indices of
+// coordinates the host must replay go to h_flag_idx (capacity n); their count
+// to *h_nflag. d_out entries of flagged coordinates are 0 until scattered.
+// Optional low-priority stream for the calling thread's Gaussian sampling
+// (background presampling must not delay latency-bound work on the device).
+static thread_local cudaStream_t t_gauss_stream = 0;
+int agl_gauss_low_priority(int on) {
+    if (on && !t_gauss_stream) {
+        int lo = 0, hi = 0;
+        cudaDeviceGetStreamPriorityRange(&lo, &hi);
+        if (cudaStreamCreateWithPriority(&t_gauss_stream, cudaStreamNonBlocking, lo) != cudaSuccess) { t_gauss_stream = 0; return -1; }
+    } else if (!on && t_gauss_stream) { cudaStreamDestroy(t_gauss_stream); t_gauss_stream = 0; }
+    return 0;
+}
+
+int agl_morpheus_gauss_dev(const uint64_t* h_consts, const uint64_t* h_base, uint32_t coord0, uint32_t n,
+                           int64_t* d_out, uint32_t* h_flag_idx, uint32_t* h_nflag) {
+    cudaStream_t st = t_gauss_stream;
+    *h_nflag = 0;
+    if (n == 0) return 0;
+    void *d_c = nullptr, *d_q0 = nullptr, *d_q1 = nullptr, *d_cnt = nullptr, *d_fl = nullptr;
+    size_t qbytes = (size_t)n * 4;
+    if (cuda_malloc(&d_c, sizeof(mgauss::Consts)) || cuda_malloc(&d_q0, qbytes) || cuda_malloc(&d_q1, qbytes) ||
+        cuda_malloc(&d_fl, qbytes) || cuda_malloc(&d_cnt, 8)) return -1;
+    uint32_t* cnt = (uint32_t*)d_cnt;  // [0] queue length, [1] flagged count
+    cudaMemcpyAsync(d_c, h_consts, sizeof(mgauss::Consts), cudaMemcpyHostToDevice, st);
+    cudaMemsetAsync(cnt, 0, 8, st);
+    mgauss::CoinBase base;
+    memcpy(base.lane, h_base, sizeof(base.lane));
+    int dev = 0; cudaGetDevice(&dev);
+    int sms = 0; cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
+    const int threads = 128;
+    uint32_t in_n = n;
+    const uint32_t* in_idx = nullptr;
+    uint32_t* out_q = (uint32_t*)d_q0;
+    for (uint32_t tr = 0; in_n > 0 && tr < 8192; tr++) {
+        cudaMemsetAsync(cnt, 0, 4, st);
+        long long need = ((long long)in_n + threads - 1) / threads;
+        // Background (low-priority) sampling uses one short block per 128
+        // coordinates so that other work's blocks are scheduled in between.
+        // MORPHEUS_GAUSS_BG_BLOCKS caps the background grid (grid-stride
+        // loop) so that the other stream's kernels keep free SM slots.
+        static long long bg_cap = []{ const char* e = getenv("MORPHEUS_GAUSS_BG_BLOCKS"); return e ? atoll(e) : (1LL << 30); }();
+        long long cap = st ? bg_cap : (long long)sms * 16;
+        int blocks = (int)(need < cap ? need : cap);
+        mgauss::trial_kernel<<<blocks, threads, 0, st>>>((const mgauss::Consts*)d_c, base, coord0, tr, in_idx, in_n, out_q, cnt,
+                                                  (long long*)d_out, (uint32_t*)d_fl, cnt + 1);
+        uint32_t next = 0;
+        cudaMemcpyAsync(&next, cnt, 4, cudaMemcpyDeviceToHost, st);
+        cudaStreamSynchronize(st);
+        in_n = next;
+        in_idx = out_q;
+        out_q = (out_q == (uint32_t*)d_q0) ? (uint32_t*)d_q1 : (uint32_t*)d_q0;
+    }
+    if (in_n > 0) mgauss::flag_rest_kernel<<<sms * 4, 256, 0, st>>>(in_idx, in_n, (long long*)d_out, (uint32_t*)d_fl, cnt + 1);
+    cudaMemcpyAsync(h_nflag, cnt + 1, 4, cudaMemcpyDeviceToHost, st);
+    cudaStreamSynchronize(st);
+    if (*h_nflag) { cudaMemcpyAsync(h_flag_idx, d_fl, (size_t)*h_nflag * 4, cudaMemcpyDeviceToHost, st); cudaStreamSynchronize(st); }
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = st ? cudaStreamSynchronize(st) : agl_sync_mine();
+    cuda_free(d_c); cuda_free(d_q0); cuda_free(d_q1); cuda_free(d_fl); cuda_free(d_cnt);
+    return (int)e;
+}
+
+int agl_morpheus_gauss_scatter(int64_t* d_out, const uint32_t* h_idx, const int64_t* h_val, uint32_t m) {
+    if (m == 0) return 0;
+    void *di = nullptr, *dv = nullptr;
+    if (cuda_malloc(&di, (size_t)m * 4) || cuda_malloc(&dv, (size_t)m * 8)) return -1;
+    cudaMemcpy(di, h_idx, (size_t)m * 4, cudaMemcpyHostToDevice);
+    cudaMemcpy(dv, h_val, (size_t)m * 8, cudaMemcpyHostToDevice);
+    mgauss::scatter_kernel<<<(m + 255) / 256, 256>>>((long long*)d_out, (const uint32_t*)di, (const long long*)dv, m);
+    cudaError_t e = agl_sync_mine();
+    cuda_free(di); cuda_free(dv);
+    return (int)e;
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: exact NTT-CRT Ajtai commitment over R = F_q[Y]/(Y^4096+1)
+// --------------------------------------------------------------------------
+static uint64_t mc_pow(uint64_t b, uint64_t e, uint64_t p) {
+    uint64_t r = 1; b %= p;
+    while (e) { if (e & 1) r = (unsigned __int128)r * b % p; b = (unsigned __int128)b * b % p; e >>= 1; }
+    return r;
+}
+
+// Device tables, built once per device.
+const mcommit::Tables* agl_mcommit_tables() {
+    static std::mutex mx;
+    static const mcommit::Tables* per_dev[AGL_MAX_DEV] = {nullptr};
+    int dev = 0; cudaGetDevice(&dev);
+    std::lock_guard<std::mutex> lk(mx);
+    if (per_dev[dev]) return per_dev[dev];
+    static const uint64_t PR[5][2] = {{2147377153ULL, 1202012506ULL}, {2147352577ULL, 760495213ULL},
+                                      {2147295233ULL, 920713129ULL}, {2147205121ULL, 2061834542ULL},
+                                      {2147196929ULL, 1321772815ULL}};
+    mcommit::Tables* h = (mcommit::Tables*)calloc(1, sizeof(mcommit::Tables));
+    const int N = mcommit::N;
+    for (int i = 0; i < 5; i++) {
+        uint64_t p = PR[i][0], psi = PR[i][1], psi_inv = mc_pow(psi, p - 2, p);
+        h->p[i] = (uint32_t)p;
+        h->barrett[i] = UINT64_MAX / p;
+        uint64_t ni = mc_pow(N, p - 2, p);
+        h->ninv[i] = (uint32_t)ni; h->ninv_sh[i] = (uint32_t)((ni << 32) / p);
+        for (int k = 0; k < N; k++) {
+            int br = 0; for (int b = 0; b < 12; b++) br |= ((k >> b) & 1) << (11 - b);
+            uint64_t z = mc_pow(psi, br, p), zi = mc_pow(psi_inv, br, p);
+            h->zeta[i][k] = (uint32_t)z; h->zeta_sh[i][k] = (uint32_t)((z << 32) / p);
+            h->izeta[i][k] = (uint32_t)zi; h->izeta_sh[i][k] = (uint32_t)((zi << 32) / p);
+        }
+        for (int j = 0; j < i; j++) h->ginv[i][j] = (uint32_t)mc_pow(PR[j][0] % p, p - 2, p);
+    }
+    const uint64_t Qv = mcommit::Q;
+    for (int k = 1; k <= 5; k++) {
+        // digits of (P-1)/2 by halving the mixed-radix digits (p_i - 1) of P-1.
+        uint64_t dg[5], rem = 0;
+        for (int i = 0; i < k; i++) dg[i] = PR[i][0] - 1;
+        for (int i = k - 1; i >= 0; i--) { uint64_t cur = rem * PR[i][0] + dg[i]; dg[i] = cur / 2; rem = cur % 2; }
+        for (int i = 0; i < k; i++) h->half[k - 1][i] = (uint32_t)dg[i];
+        unsigned __int128 pm = 1;
+        for (int i = 0; i < k; i++) pm = pm * PR[i][0] % Qv;
+        h->pmodq[k - 1] = (uint64_t)pm;
+    }
+    mcommit::Tables* d = nullptr;
+    if (cudaMalloc(&d, sizeof(mcommit::Tables)) != cudaSuccess) { free(h); return nullptr; }
+    cudaMemcpy(d, h, sizeof(mcommit::Tables), cudaMemcpyHostToDevice);
+    free(h);
+    per_dev[dev] = d;
+    return d;
+}
+
+static int mc_grid(size_t work, int threads) {
+    int dev = 0; cudaGetDevice(&dev);
+    int sms = 0; cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
+    size_t need = (work + threads - 1) / threads;
+    size_t cap = (size_t)sms * 32;
+    return (int)(need < cap ? (need ? need : 1) : cap);
+}
+
+// NTT-domain key cache key[prime][c][row][4096] for columns [col0, col0+ncols).
+int agl_mcommit_keygen(const uint32_t* h_seed, uint32_t kind, int rows, uint64_t col0, int ncols, int k, uint32_t* d_key) {
+    const mcommit::Tables* T = agl_mcommit_tables();
+    if (!T || rows > mcommit::MAXROWS || k > mcommit::MAXP) return -1;
+    void* d_seed = nullptr;
+    if (cuda_malloc(&d_seed, 32)) return -1;
+    cudaMemcpy(d_seed, h_seed, 32, cudaMemcpyHostToDevice);
+    size_t work = (size_t)ncols * rows * (mcommit::N / 8);
+    mcommit::keygen_kernel<<<mc_grid(work, 128), 128>>>((const uint32_t*)d_seed, kind, rows, col0, ncols, k, T, d_key);
+    size_t transforms = (size_t)k * ncols * rows;
+    if (transforms > 0x7fffffffULL) return -2;
+    mcommit::ntt_fwd_kernel<<<(unsigned)transforms, 512>>>(d_key, ncols * rows, k, T);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(d_seed);
+    return (int)e;
+}
+
+// NTT-domain partial commitment acc[v][prime][row][4096] = sum over the C
+// input columns of key[prime][colidx[c]][row] * NTT(x[v][c]). x_bytes = 1
+// (int8) or 8 (int64). colidx may be null (identity). V in {1, 2}. Vector v
+// starts at element v * x_vstride (0 = packed, C * 4096).
+int agl_mcommit_partial(const uint32_t* d_key, int kcols, int rows, int k, const void* d_x, int x_bytes, int V, int C,
+                        uint64_t x_vstride, const uint32_t* d_colidx, uint32_t* d_acc) {
+    const mcommit::Tables* T = agl_mcommit_tables();
+    if (!T || V < 1 || V > mcommit::MV || rows > mcommit::MAXROWS) return -1;
+    const int N = mcommit::N;
+    if (C == 0) { cudaMemset(d_acc, 0, (size_t)V * k * rows * N * 4); return (int)agl_sync_mine(); }
+    void* d_xh = nullptr;
+    size_t xh_elems = (size_t)V * k * C * N;
+    if (cuda_malloc(&d_xh, xh_elems * 4)) return -1;
+    size_t xw = (size_t)V * C * N;
+    size_t vs = x_vstride ? (size_t)x_vstride : (size_t)C * N;
+    if (x_bytes == 1) mcommit::residues_kernel<int8_t><<<mc_grid(xw, 256), 256>>>((const int8_t*)d_x, vs, V, C, k, T, (uint32_t*)d_xh);
+    else mcommit::residues_kernel<int64_t><<<mc_grid(xw, 256), 256>>>((const int64_t*)d_x, vs, V, C, k, T, (uint32_t*)d_xh);
+    mcommit::ntt_fwd_kernel<<<(unsigned)((size_t)V * k * C), 512>>>((uint32_t*)d_xh, C, k, T);
+    // Column chunks so that k*N/256 x chunks blocks fill the GPU.
+    int dev = 0; cudaGetDevice(&dev);
+    int sms = 0; cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev);
+    int xblocks = (k * N + 255) / 256;
+    int chunks = (sms * 8 + xblocks - 1) / xblocks;
+    if (chunks > C) chunks = C;
+    if (chunks < 1) chunks = 1;
+    int chunk_cols = (C + chunks - 1) / chunks;
+    chunks = (C + chunk_cols - 1) / chunk_cols;
+    size_t stride = (size_t)V * k * rows * N;
+    void* d_part = nullptr;
+    if (cuda_malloc(&d_part, (size_t)chunks * stride * 4)) { cuda_free(d_xh); return -1; }
+    dim3 g(xblocks, chunks);
+    if (V == 1 && !getenv("MORPHEUS_MAC_V")) mcommit::mac_kernel<1><<<g, 256>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part);
+    else if (V == 2 && !getenv("MORPHEUS_MAC_V")) mcommit::mac_kernel<2><<<g, 256>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part);
+    else {
+        // Row groups of RPT rows; 64 positions per block.
+        dim3 gv((unsigned)(k * N / 64), (unsigned)chunks);
+        const int th = 64 * ((rows + mcommit::RPT - 1) / mcommit::RPT);
+        switch (V) {
+            case 1: mcommit::mac_v_kernel<1><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 2: mcommit::mac_v_kernel<2><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 3: mcommit::mac_v_kernel<3><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 4: mcommit::mac_v_kernel<4><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 5: mcommit::mac_v_kernel<5><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 6: mcommit::mac_v_kernel<6><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            case 7: mcommit::mac_v_kernel<7><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+            default: mcommit::mac_v_kernel<8><<<gv, th>>>(d_key, kcols, rows, (const uint32_t*)d_xh, d_colidx, C, k, chunk_cols, T, (uint32_t*)d_part); break;
+        }
+    }
+    mcommit::sum_partials_kernel<<<mc_grid(stride, 256), 256>>>((const uint32_t*)d_part, chunks, stride, k, rows, T, d_acc, stride);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(d_xh); cuda_free(d_part);
+    return (int)e;
+}
+
+// dst += src (NTT-domain accumulators, same shape), mod p.
+int agl_mcommit_add(uint32_t* d_dst, const uint32_t* d_src, int V, int k, int rows) {
+    const mcommit::Tables* T = agl_mcommit_tables();
+    size_t n = (size_t)V * k * rows * mcommit::N;
+    // Reuse sum_partials: two blocks [dst, src] are not contiguous, so copy-add.
+    void* tmp = nullptr;
+    if (cuda_malloc(&tmp, 2 * n * 4)) return -1;
+    cudaMemcpy(tmp, d_dst, n * 4, cudaMemcpyDeviceToDevice);
+    cudaMemcpy((uint32_t*)tmp + n, d_src, n * 4, cudaMemcpyDeviceToDevice);
+    mcommit::sum_partials_kernel<<<mc_grid(n, 256), 256>>>((const uint32_t*)tmp, 2, n, k, rows, T, d_dst, n);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(tmp);
+    return (int)e;
+}
+
+// out[v][row][4096] = CRT(INTT(acc)) mod q + err. acc is consumed (inverse NTT in place).
+int agl_mcommit_finish(uint32_t* d_acc, int V, int k, int rows, const int64_t* d_err, uint64_t* d_out) {
+    const mcommit::Tables* T = agl_mcommit_tables();
+    if (!T) return -1;
+    mcommit::ntt_inv_kernel<<<(unsigned)((size_t)V * k * rows), 512>>>(d_acc, rows, k, T);
+    size_t n = (size_t)V * rows * mcommit::N;
+    mcommit::crt_kernel<<<mc_grid(n, 256), 256>>>(d_acc, V, k, rows, T, d_err, (unsigned long long*)d_out);
+    cudaError_t le = cudaGetLastError();
+    if (le != cudaSuccess) return (int)le;
+    return (int)agl_sync_mine();
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: authentication data path (Ev_raw, decode, combine, norms)
+// --------------------------------------------------------------------------
+static int ma_sms() { int dev = 0; cudaGetDevice(&dev); int sms = 0; cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev); return sms; }
+
+// w[l][j] = e_l e_j (K elements, 8 canonical words each).
+int agl_mauth_wtable(const uint64_t* h_el, int cols, const uint64_t* h_ej, uint64_t* d_w) {
+    void *del = nullptr, *dej = nullptr;
+    if (cuda_malloc(&del, (size_t)cols * 64) || cuda_malloc(&dej, 64 * 64)) return -1;
+    cudaMemcpy(del, h_el, (size_t)cols * 64, cudaMemcpyHostToDevice);
+    cudaMemcpy(dej, h_ej, 64 * 64, cudaMemcpyHostToDevice);
+    size_t n = (size_t)cols * 64;
+    mauth::wtable_kernel<<<(unsigned)((n + 255) / 256), 256>>>((const mauth::K8d*)del, (const mauth::K8d*)dej, cols, (mauth::K8d*)d_w);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(del); cuda_free(dej);
+    return (int)e;
+}
+
+// h_out[64][8] = P_m = Σ_{l,j} w[l][j] W_l[j + 64 m]; W is int8 (w_bytes 1) or int64 (8).
+int agl_mauth_ev(const void* d_W, int w_bytes, int cols, const uint64_t* d_w, uint64_t* h_out) {
+    int blocks = ma_sms() * 4;
+    if (blocks > cols) blocks = cols;
+    void *part = nullptr, *out = nullptr;
+    if (cuda_malloc(&part, (size_t)blocks * 64 * 64) || cuda_malloc(&out, 64 * 64)) return -1;
+    if (w_bytes == 0) mauth::ev_partial_kernel<int8_t, true><<<blocks, 256>>>((const int8_t*)d_W, cols, (const mauth::K8d*)d_w, (mauth::K8d*)part);
+    else if (w_bytes == 1) mauth::ev_partial_kernel<int8_t><<<blocks, 256>>>((const int8_t*)d_W, cols, (const mauth::K8d*)d_w, (mauth::K8d*)part);
+    else mauth::ev_partial_kernel<int64_t><<<blocks, 256>>>((const int64_t*)d_W, cols, (const mauth::K8d*)d_w, (mauth::K8d*)part);
+    mauth::ev_reduce_kernel<<<1, 512>>>((const mauth::K8d*)part, blocks, (mauth::K8d*)out);
+    cudaMemcpy(h_out, out, 64 * 64, cudaMemcpyDeviceToHost);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(part); cuda_free(out);
+    return (int)e;
+}
+
+/// agl_mauth_ev for nsrc packed sources at d_W + s · stride bytes (cols
+/// columns each): h_out[s][64][8].
+int agl_mauth_ev_packed_batch(const uint8_t* d_W, uint64_t stride, int nsrc, int cols, const uint64_t* d_w, uint64_t* h_out) {
+    if (nsrc <= 0) return 0;
+    int blocks = (ma_sms() * 4 + nsrc - 1) / nsrc;
+    if (blocks < 1) blocks = 1;
+    if (blocks > cols) blocks = cols;
+    void *part = nullptr, *out = nullptr;
+    if (cuda_malloc(&part, (size_t)nsrc * blocks * 64 * 64) || cuda_malloc(&out, (size_t)nsrc * 64 * 64)) return -1;
+    dim3 grid(blocks, nsrc);
+    mauth::ev_partial_kernel<int8_t, true><<<grid, 256>>>((const int8_t*)d_W, cols, (const mauth::K8d*)d_w, (mauth::K8d*)part, (size_t)stride);
+    mauth::ev_reduce_kernel<<<nsrc, 512>>>((const mauth::K8d*)part, blocks, (mauth::K8d*)out);
+    cudaMemcpy(h_out, out, (size_t)nsrc * 64 * 64, cudaMemcpyDeviceToHost);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(part); cuda_free(out);
+    return (int)e;
+}
+
+// h_out[c][m] = Σ_h 2^h col_c[h + 64 m] mod q.
+int agl_mauth_decode(const int64_t* d_cols, int ncols, uint64_t* h_out) {
+    void* out = nullptr;
+    size_t n = (size_t)ncols * 64;
+    if (cuda_malloc(&out, n * 8)) return -1;
+    mauth::decode_kernel<<<(unsigned)((n + 255) / 256), 256>>>(d_cols, ncols, (unsigned long long*)out);
+    cudaMemcpy(h_out, out, n * 8, cudaMemcpyDeviceToHost);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(out);
+    return (int)e;
+}
+
+// Z0 += β0·V, Z1 += β1·V over `cols` ring columns (V int8).
+int agl_mauth_combine_multi(const int8_t* const* h_V, int nsrc, int cols, const int8_t* h_beta, int64_t* d_Z0, int64_t* d_Z1) {
+    if (nsrc <= 0 || cols <= 0) return 0;
+    void* db = nullptr;
+    const size_t pb = (size_t)nsrc * sizeof(void*), bb = (size_t)nsrc * 128;
+    if (cuda_malloc(&db, pb + bb)) return -1;
+    std::vector<uint8_t> tmp(pb + bb);
+    memcpy(tmp.data(), h_V, pb); memcpy(tmp.data() + pb, h_beta, bb);
+    cudaMemcpy(db, tmp.data(), pb + bb, cudaMemcpyHostToDevice);
+    int blocks = ma_sms() * 4;
+    if (blocks > cols) blocks = cols;
+    if (getenv("MORPHEUS_COMBINE_SCALAR")) mauth::combine_multi_kernel<<<blocks, 512>>>((const int8_t* const*)db, nsrc, cols, (const int8_t*)((char*)db + pb), d_Z0, d_Z1);
+    else mauth::combine_dp4a_kernel<false><<<blocks, 512>>>((const int8_t* const*)db, nsrc, cols, (const int8_t*)((char*)db + pb), d_Z0, d_Z1);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(db);
+    return (int)e;
+}
+
+/// agl_mauth_combine_multi over packed physical columns (1024 bytes each).
+int agl_mauth_combine_packed(const uint8_t* const* h_V, int nsrc, int cols, const int8_t* h_beta, int64_t* d_Z0, int64_t* d_Z1) {
+    if (nsrc <= 0 || cols <= 0) return 0;
+    void* db = nullptr;
+    const size_t pb = (size_t)nsrc * sizeof(void*), bb = (size_t)nsrc * 128;
+    if (cuda_malloc(&db, pb + bb)) return -1;
+    std::vector<uint8_t> tmp(pb + bb);
+    memcpy(tmp.data(), h_V, pb); memcpy(tmp.data() + pb, h_beta, bb);
+    cudaMemcpy(db, tmp.data(), pb + bb, cudaMemcpyHostToDevice);
+    int blocks = ma_sms() * 4;
+    if (blocks > cols) blocks = cols;
+    mauth::combine_dp4a_kernel<true><<<blocks, 512>>>((const int8_t* const*)db, nsrc, cols, (const int8_t*)((char*)db + pb), d_Z0, d_Z1);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(db);
+    return (int)e;
+}
+
+/// Tensor-core combine (mauth::combine_tc_kernel): packed (1024-byte) or
+/// int8 (4096-byte) physical columns; same result as agl_mauth_combine_multi.
+int agl_mauth_combine_tc(const uint8_t* const* h_V, int packed, int nsrc, int cols, const int8_t* h_beta, int64_t* d_Z0, int64_t* d_Z1) {
+    if (nsrc <= 0 || cols <= 0) return 0;
+    void *dp = nullptr, *db = nullptr, *dc = nullptr;
+    const size_t pb = (size_t)nsrc * sizeof(void*), bb = (size_t)nsrc * 128, cb = (size_t)nsrc * 8192;
+    if (cuda_malloc(&dp, pb) || cuda_malloc(&db, bb) || cuda_malloc(&dc, cb)) return -1;
+    cudaMemcpy(dp, h_V, pb, cudaMemcpyHostToDevice);
+    cudaMemcpy(db, h_beta, bb, cudaMemcpyHostToDevice);
+    mauth::build_c_kernel<<<ma_sms() * 8, 256>>>((const int8_t*)db, nsrc, (int8_t*)dc);
+    int blocks = ma_sms() * 4;
+    int need = (cols + mauth::TC_COLS - 1) / mauth::TC_COLS;
+    if (blocks > need) blocks = need;
+    if (packed) mauth::combine_tc_kernel<true><<<blocks, 256>>>((const uint8_t* const*)dp, nsrc, cols, (const int8_t*)dc, d_Z0, d_Z1);
+    else mauth::combine_tc_kernel<false><<<blocks, 256>>>((const uint8_t* const*)dp, nsrc, cols, (const int8_t*)dc, d_Z0, d_Z1);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(dp); cuda_free(db); cuda_free(dc);
+    return (int)e;
+}
+
+/// Packed logical columns -> packed physical columns.
+int agl_morpheus_permute2(const uint8_t* d_src, uint8_t* d_dst, uint64_t ncols) {
+    int grid = ma_sms() * 32;
+    mauth::permute2_kernel<<<grid, 256>>>(d_src, d_dst, ncols);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_mauth_combine(const int8_t* d_V, int cols, const int8_t* h_beta2, int64_t* d_Z0, int64_t* d_Z1) {
+    void* db = nullptr;
+    if (cuda_malloc(&db, 128)) return -1;
+    cudaMemcpy(db, h_beta2, 128, cudaMemcpyHostToDevice);
+    int blocks = ma_sms() * 8;
+    if (blocks > cols) blocks = cols;
+    mauth::combine_kernel<<<blocks, 512>>>(d_V, cols, (const int8_t*)db, d_Z0, d_Z1);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(db);
+    return (int)e;
+}
+
+// 37-bit response wire codec (n a multiple of 8; out holds n/8·37 bytes).
+int agl_mauth_pack37(const int64_t* d_z, uint64_t n, int64_t off, uint8_t* d_out) {
+    if (n % 8) return -2;
+    mauth::pack37_kernel<<<ma_sms() * 8, 256>>>(d_z, n / 8, off, d_out);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+// Returns 1 if some code exceeds umax, 0 if all decode, < 0 on error.
+int agl_mauth_unpack37(const uint8_t* d_in, uint64_t n, int64_t off, uint64_t umax, int64_t* d_z) {
+    if (n % 8) return -2;
+    void* bad = nullptr;
+    if (cuda_malloc(&bad, sizeof(int))) return -1;
+    cudaMemset(bad, 0, sizeof(int));
+    mauth::unpack37_kernel<<<ma_sms() * 8, 256>>>(d_in, n / 8, off, umax, d_z, (int*)bad);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    int hb = 0;
+    cudaMemcpy(&hb, bad, sizeof(int), cudaMemcpyDeviceToHost);
+    cuda_free(bad);
+    return e != cudaSuccess ? -(int)e : hb;
+}
+
+// h_out = {sum of squares lo, hi, max |z|}.
+int agl_mauth_norm(const int64_t* d_z, uint64_t n, uint64_t* h_out) {
+    int blocks = ma_sms() * 4;
+    void* part = nullptr;
+    if (cuda_malloc(&part, (size_t)blocks * 24)) return -1;
+    mauth::norm_kernel<<<blocks, 256>>>(d_z, n, (unsigned long long*)part);
+    uint64_t* h = (uint64_t*)malloc((size_t)blocks * 24);
+    cudaMemcpy(h, part, (size_t)blocks * 24, cudaMemcpyDeviceToHost);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    uint64_t lo = 0, hi = 0, mx = 0;
+    for (int b = 0; b < blocks; b++) { uint64_t nl = lo + h[3 * b]; hi += h[3 * b + 1] + (nl < lo); lo = nl; if (h[3 * b + 2] > mx) mx = h[3 * b + 2]; }
+    h_out[0] = lo; h_out[1] = hi; h_out[2] = mx;
+    free(h); cuda_free(part);
+    return (int)e;
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: structured Π_link, block-local rounds and block folds
+// --------------------------------------------------------------------------
+int agl_mlink_phase1(const int8_t* d_raw, uint64_t src_len, int b0, int i, int d,
+                     const void* d_blocks, uint32_t nblocks, const void* d_bterms, const void* d_ttab,
+                     const uint64_t* d_A, const uint64_t* d_B, const uint64_t* d_epre, const uint64_t* d_ealpha,
+                     const uint64_t* d_qd, uint64_t* h_out) {
+    if (d > mlink::MAXD) return -3;
+    int sms = ma_sms();
+    int grid = sms * 16;
+    if ((uint32_t)grid > nblocks) grid = nblocks ? (int)nblocks : 1;
+    size_t smem = i > 0 ? ((size_t)1 << (b0 - i)) * sizeof(mlink::K8d) : 0;
+    // Per device (and cheap): set on every call.
+    cudaFuncSetAttribute(mlink::phase1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, 96 * 1024);
+    void* part = nullptr;
+    if (cuda_malloc(&part, (size_t)grid * mlink::NACC * sizeof(mlink::K8d))) return -1;
+    if (cudaMemset(part, 0, (size_t)grid * mlink::NACC * sizeof(mlink::K8d)) != cudaSuccess) { cuda_free(part); return -1; }
+    mlink::phase1_kernel<<<grid, 32 * (d + 1), smem>>>(d_raw, src_len, b0, i, d, (const mlink::BlockDesc*)d_blocks, nblocks,
+        (const mlink::BlockTerm*)d_bterms, (const mlink::TermTab*)d_ttab, (const mlink::K8d*)d_A, (const mlink::K8d*)d_B,
+        (const mlink::K8d*)d_epre, (const mlink::K8d*)d_ealpha, (const mlink::K8d*)d_qd, (mlink::K8d*)part);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    if (e == cudaSuccess) cudaMemcpy(h_out, part, (size_t)grid * mlink::NACC * sizeof(mlink::K8d), cudaMemcpyDeviceToHost);
+    cuda_free(part);
+    return e == cudaSuccess ? grid : -(int)e;
+}
+
+int agl_mlink_fold(const int8_t* d_raw, uint64_t src_len, int b0, const void* d_blocks, uint32_t nblocks,
+                   const uint64_t* d_efull, uint64_t* d_out) {
+    int grid = ma_sms() * 8;
+    if ((uint32_t)grid > nblocks) grid = nblocks ? (int)nblocks : 1;
+    mlink::fold_kernel<<<grid, 256>>>(d_raw, src_len, b0, (const mlink::BlockDesc*)d_blocks, nblocks,
+        (const mlink::K8d*)d_efull, (mlink::K8d*)d_out);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: addressed private coins (ternary / uniform-q) on the GPU
+// --------------------------------------------------------------------------
+// mode 0: ternary (int8 out), mode 1: uniform-q (u64 out). Flags (one byte
+// per coordinate) mark coordinates the host must finish on the CPU.
+int agl_morpheus_coins(const uint64_t* h_base, int purpose, uint32_t coord0, uint32_t n, int mode,
+                       void* d_out, uint8_t* d_flag) {
+    if (n == 0) return 0;
+    mgauss::CoinBase base;
+    memcpy(base.lane, h_base, sizeof(base.lane));
+    int grid = ma_sms() * 16;
+    long long need = ((long long)n + 255) / 256;
+    if (need < grid) grid = (int)need;
+    if (mode == 0) mgauss::ternary_kernel<<<grid, 256>>>(base, purpose, coord0, n, (int8_t*)d_out, d_flag);
+    else mgauss::uniform_q_kernel<<<grid, 256>>>(base, purpose, coord0, n, (unsigned long long*)d_out, d_flag);
+    cudaError_t e = cudaGetLastError();
+    if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: structured Π_link v2 (region-organised, one-hot fast path)
+// --------------------------------------------------------------------------
+// h_consts: mlink2::Consts with device pointers. Each call returns the
+// summed NACC partial K values in h_out (8·NACC words).
+static int ml2_sum(void* part, int grid, uint64_t* h_out) {
+    std::vector<uint64_t> h((size_t)grid * mlink2::NACC * 8);
+    cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+    for (int k = 0; k < mlink2::NACC * 8; k++) h_out[k] = 0;
+    // Host accumulation of canonical words as field elements.
+    for (int g = 0; g < grid; g++)
+        for (int k = 0; k < mlink2::NACC * 8; k++) {
+            unsigned __int128 s = (unsigned __int128)h_out[k] + h[(size_t)g * mlink2::NACC * 8 + k];
+            h_out[k] = (uint64_t)(s % 18446744069414584289ULL);
+        }
+    return 0;
+}
+
+static int mp_grid(uint64_t n, int threads);
+static int mp_ret();
+int agl_mlink2_consts(const void* d_blks, uint32_t nblk, const void* h_consts, uint64_t* d_bc) {
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    mlink2::block_consts_kernel<<<mp_grid(nblk, 128), 128>>>((const mlink2::Blk*)d_blks, nblk, C, (mauth::K8d*)d_bc);
+    return mp_ret();
+}
+
+int agl_mlink2_round(const uint8_t* d_raw, uint64_t src_len, int b0, int i, int d, int reduced, const void* h_consts,
+                     const void* d_onehot, uint32_t n_onehot, const void* d_generic, const uint32_t* const* d_lists, const uint32_t* n_lists, const uint64_t* d_bc,
+                     const uint64_t* d_e1, const uint64_t* d_e2, const uint64_t* d_e3, const uint64_t* d_ealpha,
+                     int skip_range, uint64_t* h_out) {
+    if (d > mlink2::MAXD) return -3;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    int sms = ma_sms();
+    for (int k = 0; k < mlink2::NACC * 8; k++) h_out[k] = 0;
+    std::vector<uint64_t> tmp(mlink2::NACC * 8);
+    auto add_into = [&](void) { for (int k = 0; k < mlink2::NACC * 8; k++) h_out[k] = (uint64_t)(((unsigned __int128)h_out[k] + tmp[k]) % 18446744069414584289ULL); };
+    if (n_onehot > 0) {
+        int grid = sms * 8; if ((uint32_t)grid > n_onehot) grid = (int)n_onehot;
+        void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * mlink2::NACC * 64)) return -1;
+        mlink2::onehot_kernel<<<grid, 256>>>(d_raw, src_len, b0, i, d, (const mlink2::Blk*)d_onehot, n_onehot, C,
+            (const mauth::K8d*)d_e1, (const mauth::K8d*)d_e2, (const mauth::K8d*)d_e3, (const mauth::K8d*)d_ealpha, (mauth::K8d*)part);
+        cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+        if (e != cudaSuccess) { cuda_free(part); return -(int)e; }
+        ml2_sum(part, grid, tmp.data()); add_into(); cuda_free(part);
+    }
+    for (int mode = 0; mode < 4; mode++) {
+        const uint32_t n_generic = n_lists[mode];
+        if (n_generic == 0) continue;
+        int grid = sms * 16; if ((uint32_t)grid > n_generic) grid = (int)n_generic;
+        void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * mlink2::NACC * 64)) return -1;
+        cudaMemset(part, 0, (size_t)grid * mlink2::NACC * 64);
+        const auto tm0 = std::chrono::steady_clock::now();
+        const char* gd = getenv("MORPHEUS_DBG_GEN");
+        const int dbg = (gd ? atoi(gd) : 0) | (skip_range ? 1 : 0);
+        auto gk = mode == 0 ? mlink2::generic_kernel<2, 0> : mode == 1 ? mlink2::generic_kernel<2, 1> : mode == 2 ? mlink2::generic_kernel<2, 2> : mlink2::generic_kernel<2, 3>;
+        gk<<<grid, reduced ? 96 : 32 * (d + 1)>>>(d_raw, src_len, b0, i, d, (reduced ? 1 : 0) | (dbg << 1), (const mlink2::Blk*)d_generic, d_lists[mode], n_generic, C, (const mauth::K8d*)d_bc,
+            (const mauth::K8d*)d_e1, (const mauth::K8d*)d_ealpha, (mauth::K8d*)part);
+        cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+        if (e != cudaSuccess) { cuda_free(part); return -(int)e; }
+        ml2_sum(part, grid, tmp.data()); add_into(); cuda_free(part);
+        if (getenv("MORPHEUS_GEN_TIMES")) fprintf(stderr, "[gen] round %d mode %d: %u blocks %.1f ms\n", i, mode, n_generic, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tm0).count());
+    }
+    return 0;
+}
+
+int agl_mlink2_coarse_init(const uint8_t* d_raw, uint64_t src_len, int b0, const void* h_consts,
+                           const void* d_blks, uint32_t nblk, const uint32_t* d_rid, const uint32_t* d_k, uint64_t nrb,
+                           const uint64_t* d_tfold, const uint64_t* d_efull, uint64_t coarse, uint32_t nsrc,
+                           uint64_t* d_w, uint64_t* d_q, uint64_t* d_chi) {
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    size_t bytes = (size_t)nsrc * coarse * 64;
+    cudaMemset(d_w, 0, bytes); cudaMemset(d_q, 0, bytes); cudaMemset(d_chi, 0, bytes);
+    int sms = ma_sms();
+    if (nblk) mlink2::fold_kernel<<<sms * 8, 256>>>(d_raw, src_len, b0, (const mlink2::Blk*)d_blks, nblk, (const mauth::K8d*)d_efull, coarse, (mauth::K8d*)d_w);
+    if (nrb) mlink2::coarse_q_kernel<<<sms * 8, 128>>>(C, d_rid, d_k, nrb, (const mauth::K8d*)d_tfold, (const mauth::K8d*)d_efull, b0, coarse, (mauth::K8d*)d_q, (mauth::K8d*)d_chi);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// Coarse init of the sources [src_base, src_base + nsrc) into local arrays
+// (indexing stays global: the kernels see base-shifted pointers).
+int agl_mlink2_coarse_init2(const uint8_t* d_raw_virtual, uint64_t src_len, int b0, const void* h_consts,
+                            const void* d_blks, uint32_t nblk, const uint32_t* d_rid, const uint32_t* d_k, uint64_t nrb,
+                            const uint64_t* d_tfold, const uint64_t* d_efull, int qbits, uint64_t coarse, uint32_t src_base, uint32_t nsrc,
+                            uint64_t* d_w, uint64_t* d_q, uint64_t* d_chi) {
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    size_t bytes = (size_t)nsrc * coarse * 64;
+    cudaMemset(d_w, 0, bytes); cudaMemset(d_q, 0, bytes); cudaMemset(d_chi, 0, bytes);
+    mauth::K8d* w = (mauth::K8d*)d_w - (size_t)src_base * coarse;
+    mauth::K8d* q = (mauth::K8d*)d_q - (size_t)src_base * coarse;
+    mauth::K8d* x = (mauth::K8d*)d_chi - (size_t)src_base * coarse;
+    int sms = ma_sms();
+    if (nblk) mlink2::fold_kernel<<<sms * 8, 256>>>(d_raw_virtual, src_len, b0, (const mlink2::Blk*)d_blks, nblk, (const mauth::K8d*)d_efull, coarse, w);
+    if (nrb) mlink2::coarse_q_kernel<<<sms * 8, 128>>>(C, d_rid, d_k, nrb, (const mauth::K8d*)d_tfold, (const mauth::K8d*)d_efull, qbits, coarse, q, x);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_mlink2_dense_expand(const uint64_t* d_af, int afn, const uint64_t* d_pf, const uint32_t* d_pf_off, int pbits, int ybits,
+                            uint64_t ntab, uint64_t* d_out) {
+    if (ntab == 0) return 0;
+    mlink2::dense_expand_kernel<<<ma_sms() * 16, 256>>>((const mauth::K8d*)d_af, afn, (const mauth::K8d*)d_pf, d_pf_off, pbits, ybits, ntab, (mauth::K8d*)d_out);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_mlink2_range_bin1(const uint8_t* d_raw, uint64_t src_len, int b0, const void* h_consts,
+                          const void* d_blks, uint32_t nblk, const uint64_t* d_bc, const uint64_t* d_ea1, uint64_t* d_R) {
+    if (nblk == 0) return 0;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    const size_t sh = 4 * (size_t)(mlink2::RB1_C * 16 + 2 * mlink2::RB1_C * 8) * 8;
+    cudaFuncSetAttribute(mlink2::range_bin1_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)sh);
+    mlink2::range_bin1_kernel<<<ma_sms() * 2, 128, sh>>>(d_raw, src_len, b0, (const mlink2::Blk*)d_blks, nblk, C,
+        (const mauth::K8d*)d_bc, (const mauth::K8d*)d_ea1, (unsigned long long*)d_R);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_mlink2_b_build(const uint64_t* h_coords, uint64_t ncoords, const uint32_t* h_co, const uint8_t* h_nv, const uint32_t* h_off,
+                       const uint64_t* h_pre, uint32_t nseg, uint64_t total, uint64_t* d_out, uint64_t out_k) {
+    cudaMemset(d_out, 0, out_k * 64);
+    if (nseg == 0 || total == 0) return (int)agl_sync_mine();
+    void* buf = nullptr;
+    const size_t cb = (ncoords ? ncoords : 1) * 64, sb = (size_t)nseg * (4 + 4 + 8) + nseg;
+    if (cuda_malloc(&buf, cb + sb + 64)) return -1;
+    char* p = (char*)buf;
+    cudaMemcpy(p, h_coords, ncoords * 64, cudaMemcpyHostToDevice);
+    uint32_t* d_co = (uint32_t*)(p + cb); cudaMemcpy(d_co, h_co, (size_t)nseg * 4, cudaMemcpyHostToDevice);
+    uint32_t* d_off = d_co + nseg; cudaMemcpy(d_off, h_off, (size_t)nseg * 4, cudaMemcpyHostToDevice);
+    uint64_t* d_pre = (uint64_t*)(((uintptr_t)(d_off + nseg) + 7) & ~(uintptr_t)7); cudaMemcpy(d_pre, h_pre, (size_t)nseg * 8, cudaMemcpyHostToDevice);
+    uint8_t* d_nv = (uint8_t*)(d_pre + nseg); cudaMemcpy(d_nv, h_nv, nseg, cudaMemcpyHostToDevice);
+    mlink2::b_build_kernel<<<ma_sms() * 16, 256>>>((const mauth::K8d*)p, d_co, d_nv, d_off, d_pre, nseg, total, (mauth::K8d*)d_out);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    cuda_free(buf);
+    return (int)e;
+}
+
+int agl_mlink2_b_halve(const uint64_t* d_src, uint64_t* d_dst, uint64_t nk, const uint32_t* d_off, const uint64_t* d_pre, uint32_t nseg, uint64_t total) {
+    cudaMemcpyAsync(d_dst, d_src, nk * 64, cudaMemcpyDeviceToDevice, 0);
+    if (nseg && total) mlink2::b_halve_kernel<<<ma_sms() * 16, 256>>>((const mauth::K8d*)d_src, (mauth::K8d*)d_dst, d_off, d_pre, nseg, total);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_mlink2_coarse_round(const uint64_t* d_w, const uint64_t* d_q, const uint64_t* d_chi, uint32_t nsrc, uint64_t len,
+                            const uint64_t* d_grange, const uint64_t* d_gbit, const uint64_t* d_ealpha, int d, uint64_t* h_out) {
+    int sms = ma_sms();
+    uint64_t pairs = (len / 2) * nsrc;
+    int grid = sms * 16; if ((uint64_t)grid * 32 > pairs) grid = (int)((pairs + 31) / 32); if (grid < 1) grid = 1;
+    void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * mlink2::NACC * 64)) return -1;
+    cudaMemset(part, 0, (size_t)grid * mlink2::NACC * 64);
+    mlink2::coarse_round_kernel<<<grid, 32 * (d + 1)>>>((const mauth::K8d*)d_w, (const mauth::K8d*)d_q, (const mauth::K8d*)d_chi, nsrc, len,
+        (const mauth::K8d*)d_grange, (const mauth::K8d*)d_gbit, (const mauth::K8d*)d_ealpha, d, (mauth::K8d*)part);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    if (e == cudaSuccess) ml2_sum(part, grid, h_out);
+    cuda_free(part);
+    return (int)e;
+}
+
+int agl_mlink2_coarse_fold(const uint64_t* d_in, uint64_t* d_out, uint32_t nsrc, uint64_t len, const uint64_t* h_r) {
+    mauth::K8d r; memcpy(r.c, h_r, 64);
+    uint64_t total = (len / 2) * nsrc;
+    int grid = (int)((total + 255) / 256); if (grid > ma_sms() * 32) grid = ma_sms() * 32; if (grid < 1) grid = 1;
+    mlink2::coarse_fold_kernel<<<grid, 256>>>((const mauth::K8d*)d_in, (mauth::K8d*)d_out, nsrc, len, r);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// One-hot plane round (v3): returns 7 K coefficients (range c0..c3, query c0..c2).
+int agl_mlink2_onehot3(const uint8_t* d_raw, uint64_t src_len, int b0, int i, const void* h_consts,
+                       const void* d_blks, uint32_t nblk, const uint64_t* d_e1, const uint64_t* d_e2, const uint64_t* d_e3,
+                       const uint64_t* d_eai, const uint32_t* d_eai_off, const uint64_t* d_eapr, const uint32_t* d_eapr_off,
+                       uint64_t* h_out) {
+    for (int k = 0; k < 7 * 8; k++) h_out[k] = 0;
+    if (nblk == 0) return 0;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    int grid = ma_sms() * 16;
+    if ((uint32_t)grid * 4 > nblk) grid = (int)((nblk + 3) / 4);
+    void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * 7 * 64)) return -1;
+    mlink2::onehot3_kernel<<<grid, 128>>>(d_raw, src_len, b0, i, (const mlink2::Blk*)d_blks, nblk, C,
+        (const mauth::K8d*)d_e1, (const mauth::K8d*)d_e2, (const mauth::K8d*)d_e3,
+        (const mauth::K8d*)d_eai, d_eai_off, (const mauth::K8d*)d_eapr, d_eapr_off, (mauth::K8d*)part);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    if (e == cudaSuccess) {
+        std::vector<uint64_t> h((size_t)grid * 7 * 8);
+        cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+        for (int g = 0; g < grid; g++) for (int k = 0; k < 7 * 8; k++)
+            h_out[k] = (uint64_t)(((unsigned __int128)h_out[k] + h[(size_t)g * 56 + k]) % 18446744069414584289ULL);
+    }
+    cuda_free(part);
+    return (int)e;
+}
+
+int agl_mlink2_onehot_pre(const uint8_t* d_raw, uint64_t src_len, int b0, const void* h_consts,
+                          const void* d_blks, uint32_t nblk, const uint64_t* d_bc_oh,
+                          const uint64_t* d_eai, const uint32_t* d_eai_off, uint64_t* d_G, uint64_t* d_W) {
+    if (nblk == 0) return 0;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    int grid = ma_sms() * 16;
+    uint32_t warps = (uint32_t)grid * 4;
+    uint32_t per_warp = (nblk + warps - 1) / warps;
+    mlink2::onehot_pre_kernel<<<grid, 128>>>(d_raw, src_len, b0, (const mlink2::Blk*)d_blks, nblk, C, (const mauth::K8d*)d_bc_oh,
+        (const mauth::K8d*)d_eai, d_eai_off, per_warp, (unsigned long long*)d_G, (unsigned long long*)d_W);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// Sum `rep` replicas of n split (lo, hi) K8 accumulators [rep][n][16] into
+// canonical K8 words [n][8] (mod q).
+__global__ void mlink2_rep_reduce_kernel(const uint64_t* in, int rep, uint64_t n, uint64_t* out) {
+    const unsigned __int128 Q = 18446744069414584289ULL;
+    for (uint64_t t = blockIdx.x * (uint64_t)blockDim.x + threadIdx.x; t < n * 8; t += (uint64_t)gridDim.x * blockDim.x) {
+        uint64_t c = t >> 3, w = t & 7;
+        unsigned __int128 acc = 0;
+        for (int r = 0; r < rep; r++) {
+            const uint64_t* e = in + ((uint64_t)r * n + c) * 16;
+            unsigned __int128 v = ((unsigned __int128)e[2 * w] + (((unsigned __int128)(e[2 * w + 1] % 18446744069414584289ULL)) << 32)) % Q;
+            acc += v;
+        }
+        out[t] = (uint64_t)(acc % Q);
+    }
+}
+int agl_mlink2_rep_reduce(const uint64_t* d_in, int rep, uint64_t n, uint64_t* d_out) {
+    mlink2_rep_reduce_kernel<<<(unsigned)((n * 8 + 255) / 256 < 4096 ? (n * 8 + 255) / 256 : 4096), 256>>>(d_in, rep, n, d_out);
+    return (int)agl_sync_mine();
+}
+
+int agl_mlink2_onehot_bin(const uint8_t* d_raw, uint64_t src_len, int b0, const void* h_consts,
+                          const void* d_blks, uint32_t nblk, const uint64_t* d_bc_oh,
+                          const uint64_t* d_ea1, const uint64_t* d_ea5, const uint64_t* d_B5,
+                          uint64_t* d_GV, uint64_t* d_U, uint64_t* d_J, uint64_t* d_J5) {
+    if (nblk == 0) return 0;
+    if (b0 != 11) return -1;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    const size_t sh = 4 * (size_t)(mlink2::BIN_NP * mlink2::BIN_NP + 64 + 2) * sizeof(mauth::K8d);
+    cudaFuncSetAttribute(mlink2::onehot_bin_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)sh);
+    int grid = ma_sms() * 2;
+    const char* ch = getenv("MORPHEUS_BIN_CHUNK");
+    uint32_t chunk = ch ? (uint32_t)atoi(ch) : 32;
+    const bool prof = getenv("MORPHEUS_BIN_PROF") != nullptr;
+    if (prof) { unsigned long long z[8] = {0}; cudaMemcpyToSymbol(mlink2::g_bin_prof, z, sizeof(z)); }
+    mlink2::onehot_bin_kernel<<<grid, 128, sh>>>(d_raw, src_len, b0, (const mlink2::Blk*)d_blks, nblk, C, (const mauth::K8d*)d_bc_oh,
+        (const mauth::K8d*)d_ea1, (const mauth::K8d*)d_ea5, (const mauth::K8d*)d_B5, chunk, (prof ? 1 : 0) | ((getenv("MORPHEUS_DBG_BIN") ? atoi(getenv("MORPHEUS_DBG_BIN")) : 0) << 1),
+        (unsigned long long*)d_GV, (unsigned long long*)d_U, (unsigned long long*)d_J, (unsigned long long*)d_J5);
+    // Part B: query moments and round-5 bins.
+    const size_t sh5 = 4 * (size_t)(64 + 128 + 2) * sizeof(mauth::K8d);
+    cudaFuncSetAttribute(mlink2::onehot_q5_kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, (int)sh5);
+    mlink2::onehot_q5_kernel<<<ma_sms() * 3, 128, sh5>>>(d_raw, src_len, b0, (const mlink2::Blk*)d_blks, nblk, C, (const mauth::K8d*)d_bc_oh,
+        (const mauth::K8d*)d_ea5, (const mauth::K8d*)d_B5, chunk, (unsigned long long*)d_U, (unsigned long long*)d_J5);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    if (prof) {
+        unsigned long long h[8]; cudaMemcpyFromSymbol(h, mlink2::g_bin_prof, sizeof(h));
+        fprintf(stderr, "[binprof] head %.3g sel %.3g ballot %.3g loop %.3g tail %.3g skip %.3g (Gcycles, lane 0 of each warp); lane max iters %llu, non-dominant max %llu, blocks %u\n", h[0]/1e9, h[1]/1e9, h[2]/1e9, h[3]/1e9, h[4]/1e9, h[7]/1e9, h[5], h[6], nblk);
+    }
+    return (int)e;
+}
+
+/// Packed (2-bit) raw digits -> int8 (phys = 1: physical column order).
+int agl_morpheus_unpack2(const uint8_t* d_src, int8_t* d_dst, uint64_t n, int phys) {
+    int grid = ma_sms() * 32;
+    mauth::unpack2_kernel<<<grid, 256>>>(d_src, d_dst, n, phys);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+int agl_morpheus_permute(const int8_t* d_src, int8_t* d_dst, uint64_t n) {
+    int grid = ma_sms() * 32;
+    mauth::permute_kernel<<<grid, 256>>>(d_src, d_dst, n);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+
+// --------------------------------------------------------------------------
+// Morpheus: masked graph PIOP tables on the device
+// --------------------------------------------------------------------------
+static mpiop::VarMap mp_map(const int* pos, int n) { mpiop::VarMap m; m.n = n; for (int j = 0; j < n && j < mpiop::MAXV; j++) m.pos[j] = pos[j]; return m; }
+static int mp_grid(uint64_t n, int threads) { uint64_t g = (n + threads - 1) / threads; uint64_t cap = (uint64_t)ma_sms() * 32; if (g > cap) g = cap; return g < 1 ? 1 : (int)g; }
+static int mp_ret() { cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine(); return (int)e; }
+
+int agl_mpiop_pe(const uint64_t* d_vals, const int* rest_pos, int nrest_v, const int* fix_pos, int nfix_v,
+                 const uint64_t* d_e, uint64_t* d_out) {
+    mpiop::VarMap rest = mp_map(rest_pos, nrest_v), fix = mp_map(fix_pos, nfix_v);
+    uint64_t nrest = 1ULL << nrest_v, nfix = 1ULL << nfix_v;
+    if (nrest >= 4096 || nfix <= 256) {
+        mpiop::pe_kernel<<<mp_grid(nrest, 32), 256>>>((const unsigned long long*)d_vals, rest, fix, (const mauth::K8d*)d_e, nrest, nfix, (mauth::K8d*)d_out);
+        return mp_ret();
+    }
+    int gx = (int)((nfix + 255) / 256); if (gx > 64) gx = 64;
+    int gy = (int)nrest;
+    void* part = nullptr; if (cuda_malloc(&part, (size_t)gx * gy * 64)) return -1;
+    dim3 g(gx, gy);
+    mpiop::pe_wide_kernel<<<g, 256>>>((const unsigned long long*)d_vals, rest, fix, (const mauth::K8d*)d_e, nrest, nfix, (mauth::K8d*)part);
+    int rc = mp_ret();
+    if (rc == 0) {
+        std::vector<uint64_t> h((size_t)gx * gy * 8), o(gy * 8, 0);
+        cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+        for (int r = 0; r < gy; r++) for (int x = 0; x < gx; x++) for (int a = 0; a < 8; a++)
+            o[r * 8 + a] = (uint64_t)(((unsigned __int128)o[r * 8 + a] + h[((size_t)r * gx + x) * 8 + a]) % 18446744069414584289ULL);
+        cudaMemcpy(d_out, o.data(), o.size() * 8, cudaMemcpyHostToDevice);
+    }
+    cuda_free(part);
+    return rc;
+}
+
+int agl_mpiop_mle(const uint64_t* d_vals, const uint64_t* h_point, int n, uint64_t* h_out) {
+    const int nlo = n < 8 ? n : 8, nmid = n - nlo < 8 ? n - nlo : 8, nhi = n - nlo - nmid;
+    if (nhi > 8) return -2;
+    const uint64_t nrows = 1ULL << (nmid + nhi);
+    uint64_t g = (nrows + 7) / 8; if (g > (uint64_t)ma_sms() * 4) g = (uint64_t)ma_sms() * 4;
+    const int grid = (int)g;
+    void* buf = nullptr;
+    const size_t eb = (size_t)(24 + 768) * 64, pb = (size_t)grid * 64;
+    if (cuda_malloc(&buf, eb + pb)) return -1;
+    if (n > 0) cudaMemcpy(buf, h_point, (size_t)n * 64, cudaMemcpyHostToDevice);
+    mauth::K8d* tab = (mauth::K8d*)buf + 24;
+    mauth::K8d* part = (mauth::K8d*)((char*)buf + eb);
+    mpiop::eq3_kernel<<<3, 256>>>((const mauth::K8d*)buf, nlo, nmid, nhi, tab);
+    mpiop::mle2_kernel<<<grid, 256>>>((const unsigned long long*)d_vals, tab, nlo, nmid, nhi, part);
+    int rc = mp_ret();
+    if (rc == 0) {
+        std::vector<uint64_t> h((size_t)grid * 8);
+        cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+        for (int a = 0; a < 8; a++) h_out[a] = 0;
+        for (int k = 0; k < grid; k++) for (int a = 0; a < 8; a++)
+            h_out[a] = (uint64_t)(((unsigned __int128)h_out[a] + h[(size_t)k * 8 + a]) % 18446744069414584289ULL);
+    }
+    cuda_free(buf);
+    return rc;
+}
+
+int agl_mpiop_sel_lookup(const uint64_t* d_sel, uint64_t n, int shift, uint64_t mask, const uint64_t* d_table, uint64_t* d_out) {
+    mpiop::sel_lookup_kernel<<<mp_grid(n, 256), 256>>>((const mpiop::u64*)d_sel, n, shift, mask, (const mauth::K8d*)d_table, (mauth::K8d*)d_out);
+    return mp_ret();
+}
+
+int agl_mpiop_eq_outer(const uint64_t* d_lo, int nlo, const uint64_t* d_hi, int nhi, uint64_t* d_out) {
+    uint64_t n = (uint64_t)1 << (nlo + nhi);
+    mpiop::eq_outer_kernel<<<mp_grid(n, 256), 256>>>((const mauth::K8d*)d_lo, nlo, (const mauth::K8d*)d_hi, n, (mauth::K8d*)d_out);
+    return mp_ret();
+}
+
+int agl_mpiop_eq(const uint64_t* h_point, int n, uint64_t* d_out) {
+    if (n == 0) { uint64_t one[8] = {1,0,0,0,0,0,0,0}; cudaMemcpy(d_out, one, 64, cudaMemcpyHostToDevice); return 0; }
+    void* tmp = nullptr; if (cuda_malloc(&tmp, ((size_t)1 << n) * 64)) return -1;
+    uint64_t one[8] = {1,0,0,0,0,0,0,0};
+    // Ping-pong so the final level lands in d_out.
+    mauth::K8d* bufs[2] = {(mauth::K8d*)d_out, (mauth::K8d*)tmp};
+    int cur = (n % 2 == 0) ? 0 : 1;
+    cudaMemcpy(bufs[cur], one, 64, cudaMemcpyHostToDevice);
+    uint64_t half = 1;
+    for (int j = n - 1; j >= 0; j--) {
+        mauth::K8d r; memcpy(r.c, h_point + 8 * j, 64);
+        mpiop::eq_double_kernel<<<mp_grid(half, 256), 256>>>(bufs[cur], bufs[cur ^ 1], half, r);
+        cur ^= 1; half <<= 1;
+    }
+    int rc = mp_ret();
+    cuda_free(tmp);
+    return rc;
+}
+
+int agl_mpiop_gather(const uint64_t* d_in, const int* pos, int nv, uint64_t n, uint64_t* d_out) {
+    mpiop::gather_kernel<<<mp_grid(n, 256), 256>>>((const mauth::K8d*)d_in, mp_map(pos, nv), n, (mauth::K8d*)d_out);
+    return mp_ret();
+}
+
+int agl_mpiop_axpy(uint64_t* d_out, const uint64_t* d_in, uint64_t n, const uint64_t* h_c) {
+    mauth::K8d c; memcpy(c.c, h_c, 64);
+    mpiop::axpy_kernel<<<mp_grid(n, 256), 256>>>((mauth::K8d*)d_out, (const mauth::K8d*)d_in, n, c);
+    return mp_ret();
+}
+
+int agl_mpiop_lift(const uint64_t* d_in, uint64_t n, uint64_t* d_out) {
+    mpiop::lift_kernel<<<mp_grid(n, 256), 256>>>((const unsigned long long*)d_in, n, (mauth::K8d*)d_out);
+    return mp_ret();
+}
+
+int agl_mpiop_sc_round(const uint64_t* const* h_tabs, int ntab, uint64_t len, int d, uint64_t* h_out) {
+    if (ntab > mpiop::MAXTAB || d > mpiop::MAXTAB) return -3;
+    mpiop::Tabs T; T.ntab = ntab; for (int j = 0; j < ntab; j++) T.t[j] = (const mauth::K8d*)h_tabs[j];
+    int grid = mp_grid(len / 2, 256);
+    void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * (mpiop::MAXTAB + 1) * 64)) return -1;
+    mpiop::sc_round_kernel<<<grid, 256>>>(T, len, d, (mauth::K8d*)part);
+    int rc = mp_ret();
+    if (rc == 0) {
+        std::vector<uint64_t> h((size_t)grid * (mpiop::MAXTAB + 1) * 8);
+        cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+        for (int k = 0; k < (d + 1) * 8; k++) h_out[k] = 0;
+        for (int g = 0; g < grid; g++) for (int t = 0; t <= d; t++) for (int a = 0; a < 8; a++)
+            h_out[t * 8 + a] = (uint64_t)(((unsigned __int128)h_out[t * 8 + a] + h[((size_t)g * (mpiop::MAXTAB + 1) + t) * 8 + a]) % 18446744069414584289ULL);
+    }
+    cuda_free(part);
+    return rc;
+}
+
+// Fused round: fold the ntab tables with r into d_outs, and return the next
+// round's d+1 sums (reduced on the device; one small copy, one sync).
+int agl_mpiop_sc_fold_round(const uint64_t* const* h_tabs, uint64_t* const* h_outs, int ntab, uint64_t len,
+                            const uint64_t* h_r, int d, uint64_t* h_out) {
+    if (ntab > mpiop::MAXTAB || d > mpiop::MAXTAB || len < 4) return -3;
+    mpiop::Tabs T; T.ntab = ntab; mpiop::OutTabs O;
+    for (int j = 0; j < ntab; j++) { T.t[j] = (const mauth::K8d*)h_tabs[j]; O.t[j] = (mauth::K8d*)h_outs[j]; }
+    mauth::K8d r; memcpy(r.c, h_r, 64);
+    int grid = mp_grid(len / 4, 256);
+    // Persistent per-device scratch (partials of the largest grid, the sums,
+    // pinned host landing): no allocation per round.
+    static void* part_buf[64] = {nullptr}; static void* sum_buf[64] = {nullptr}; static uint64_t* host_buf[64] = {nullptr};
+    static std::mutex mx;
+    int dev = 0; cudaGetDevice(&dev); if (dev < 0 || dev >= 64) return -4;
+    std::lock_guard<std::mutex> lk(mx);   // scratch is shared per device
+    {
+        if (!part_buf[dev]) {
+            const size_t cap = (size_t)ma_sms() * 32 * (mpiop::MAXTAB + 1) * 64;
+            if (cudaMalloc(&part_buf[dev], cap) != cudaSuccess) return -1;
+            if (cudaMalloc(&sum_buf[dev], (size_t)(mpiop::MAXTAB + 1) * 64) != cudaSuccess) return -1;
+            if (cudaMallocHost((void**)&host_buf[dev], (size_t)(mpiop::MAXTAB + 1) * 64) != cudaSuccess) return -1;
+        }
+    }
+    mpiop::sc_fold_round_kernel<<<grid, 256>>>(T, O, len, r, d, (mauth::K8d*)part_buf[dev]);
+    mpiop::sc_partial_sum_kernel<<<1, 256>>>((const mauth::K8d*)part_buf[dev], grid, d, (mauth::K8d*)sum_buf[dev]);
+    int rc = (int)cudaGetLastError();
+    if (rc == 0) rc = (int)cudaMemcpy(host_buf[dev], sum_buf[dev], (size_t)(d + 1) * 64, cudaMemcpyDeviceToHost);
+    if (rc == 0) memcpy(h_out, host_buf[dev], (size_t)(d + 1) * 64);
+    return rc;
+}
+
+int agl_mpiop_sc_fold(const uint64_t* d_in, uint64_t* d_out, uint64_t len, const uint64_t* h_r) {
+    mauth::K8d r; memcpy(r.c, h_r, 64);
+    mpiop::sc_fold_kernel<<<mp_grid(len / 2, 256), 256>>>((const mauth::K8d*)d_in, (mauth::K8d*)d_out, len, r);
+    return mp_ret();
+}
+
+// Late block-local round (v2 index kernel): 7 K values (range t=0..3, query t=0..2).
+int agl_mlink2_index(const uint8_t* d_raw, uint64_t src_len, int b0, int i, const void* h_consts,
+                     const void* d_blks, uint32_t nblk, const uint64_t* d_bc, const uint64_t* d_epre,
+                     const uint64_t* d_ealpha, uint64_t* h_out) {
+    for (int k = 0; k < 7 * 8; k++) h_out[k] = 0;
+    if (nblk == 0) return 0;
+    if ((1 << (b0 - i)) > mlink2::IDX_MAXY || b0 < 9 || i < 4) return -3;
+    mlink2::Consts C; memcpy(&C, h_consts, sizeof(C));
+    int grid = ma_sms() * 16;
+    if ((uint32_t)grid * mlink2::IDX_WARPS > nblk) grid = (int)((nblk + mlink2::IDX_WARPS - 1) / mlink2::IDX_WARPS);
+    void* part = nullptr; if (cuda_malloc(&part, (size_t)grid * 7 * 64)) return -1;
+    // Per device (and cheap): set on every call.
+    const char* im = getenv("MORPHEUS_IDX_MINB");
+    const int iminb = im ? atoi(im) : 4;
+    auto ik = iminb == 1 ? mlink2::index_kernel<1> : iminb == 2 ? mlink2::index_kernel<2> : iminb == 3 ? mlink2::index_kernel<3> : mlink2::index_kernel<4>;
+    cudaFuncSetAttribute(ik, cudaFuncAttributeMaxDynamicSharedMemorySize, 100 * 1024);
+    size_t smem = (size_t)mlink2::IDX_WARPS * 2 * ((size_t)1 << (b0 - i)) * sizeof(mauth::K8d);
+    if (smem < (size_t)mlink2::IDX_WARPS * 32 * 2 * sizeof(mauth::K8d)) smem = (size_t)mlink2::IDX_WARPS * 32 * 2 * sizeof(mauth::K8d);
+    if ((1 << (b0 - i)) <= 8 && !getenv("MORPHEUS_NO_IBATCH"))
+        mlink2::index_batch_kernel<<<grid, 32 * mlink2::IDX_WARPS, smem>>>(d_raw, src_len, b0, i, (const mlink2::Blk*)d_blks, nblk, C,
+            (const mauth::K8d*)d_bc, (const mauth::K8d*)d_epre, (const mauth::K8d*)d_ealpha, (mauth::K8d*)part);
+    else
+    ik<<<grid, 32 * mlink2::IDX_WARPS, smem>>>(d_raw, src_len, b0, i, (const mlink2::Blk*)d_blks, nblk, C,
+        (const mauth::K8d*)d_bc, (const mauth::K8d*)d_epre, (const mauth::K8d*)d_ealpha, (mauth::K8d*)part);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    if (e == cudaSuccess) {
+        std::vector<uint64_t> h((size_t)grid * 7 * 8);
+        cudaMemcpy(h.data(), part, h.size() * 8, cudaMemcpyDeviceToHost);
+        for (int g = 0; g < grid; g++) for (int k = 0; k < 7 * 8; k++)
+            h_out[k] = (uint64_t)(((unsigned __int128)h_out[k] + h[(size_t)g * 56 + k]) % 18446744069414584289ULL);
+    }
+    cuda_free(part);
+    return (int)e;
 }
 
 } // extern "C"
+
+// Narrow / accumulate partial responses of the sharded authentication.
+__global__ void k_i64_to_i32(const int64_t* __restrict__ s, int32_t* __restrict__ d, uint64_t n) {
+    for (uint64_t i = blockIdx.x * (uint64_t)blockDim.x + threadIdx.x; i < n; i += (uint64_t)gridDim.x * blockDim.x) d[i] = (int32_t)s[i];
+}
+__global__ void k_add_i32_i64(int64_t* __restrict__ d, const int32_t* __restrict__ s, uint64_t n) {
+    for (uint64_t i = blockIdx.x * (uint64_t)blockDim.x + threadIdx.x; i < n; i += (uint64_t)gridDim.x * blockDim.x) d[i] += (int64_t)s[i];
+}
+extern "C" int agl_i64_to_i32(const int64_t* s, int32_t* d, uint64_t n) {
+    k_i64_to_i32<<<ma_sms() * 8, 256>>>(s, d, n);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}
+extern "C" int agl_add_i32_i64(int64_t* d, const int32_t* s, uint64_t n) {
+    k_add_i32_i64<<<ma_sms() * 8, 256>>>(d, s, n);
+    cudaError_t e = cudaGetLastError(); if (e == cudaSuccess) e = agl_sync_mine();
+    return (int)e;
+}

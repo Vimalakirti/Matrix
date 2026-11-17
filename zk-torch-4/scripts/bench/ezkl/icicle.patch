@@ -1,0 +1,22 @@
+diff --git a/wrappers/rust/icicle-cuda-runtime/build.rs b/wrappers/rust/icicle-cuda-runtime/build.rs
+index 574d2155..6f7de526 100644
+--- a/wrappers/rust/icicle-cuda-runtime/build.rs
++++ b/wrappers/rust/icicle-cuda-runtime/build.rs
+@@ -10,7 +10,7 @@ fn cuda_include_path() -> &'static str {
+ 
+     #[cfg(target_os = "linux")]
+     {
+-        "/usr/local/cuda/include"
++        concat!(env!("CUDA126"), "/targets/x86_64-linux/include")
+     }
+ }
+ 
+@@ -22,7 +22,7 @@ fn cuda_lib_path() -> &'static str {
+ 
+     #[cfg(target_os = "linux")]
+     {
+-        "/usr/local/cuda/lib64"
++        concat!(env!("CUDA126"), "/lib")
+     }
+ }
+ 

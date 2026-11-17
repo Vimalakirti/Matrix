@@ -1,0 +1,32 @@
+[
+  {
+    "path": "almost-goldilocks-cuda-rs/build.rs",
+    "original_sha256": "af24b07a422dc98afb1dee9f61f21d88e7fd5c7eaf2710a330e542e599690a80",
+    "adapted_sha256": "ec81c800b58d913075cf3fcfeed151bffb02bb700ff192fc666d59bdf549edfc"
+  },
+  {
+    "path": "almost-goldilocks-cuda-rs/src/ffi.rs",
+    "original_sha256": "3977014957f9ee72a53276dd0b6994ec14f3159d794e68a40a0e704e0d472bc9",
+    "adapted_sha256": "956cfbc75f63921612bdc40af369d2c0e699ec8b5e810cbd19f2a291364ccc31"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "original_sha256": "d866cf4f5c4b22e61cb9414229ab47fea38994489f1ca15b0ada03ce8d6712b2",
+    "adapted_sha256": "cf796b19a8cab1a4f92f31695d8e34a5c181a01c2ac07dcaf8a47f7e80b3fae7"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/cv_batch_tests.rs",
+    "original_sha256": "daefe8151998f676033fe6c50b2aa7681ea89ab34bf9482fa477452ded0c7f4c",
+    "adapted_sha256": "bf1f954b04cd066d8e40952661ca42f6d2f591ea676d8b95a666e361eeec61e5"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_conv_forward.rs",
+    "original_sha256": null,
+    "adapted_sha256": "790760abe9cf565a62b2e39ce23bc6c39c89467f7aaab5fe97ff8eeaaea33580"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_conv_replay.rs",
+    "original_sha256": null,
+    "adapted_sha256": "7e90f5ff4f69718f8fe257061d02a80ece82dc2f4cea13cc7292d1414a850076"
+  }
+]

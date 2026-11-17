@@ -1,0 +1,20 @@
+[
+  {
+    "path": "zk-torch-4/src/dag/normalization_tests.rs",
+    "original_sha256": "d910a44c98def1520d5daf9febeecf72f615124f08f2e503c26ab45d66fb2505",
+    "adapted_sha256": "80388ef03858ddda404f5b4a6dc59e826af7c026270386dcedf2552a6fffaf06",
+    "only_change": "test visibility/attributes; body identical"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "original_sha256": "0f100d5c4fe0dfdd87703159cf035c439a4ff31a413164eea187816e56bb2e26",
+    "adapted_sha256": "5cd1949f218629a07f372575bd0b07ca253a047e26ac3dd144cc607635e40f6a",
+    "only_change": "test visibility/attributes; body identical"
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm_tests.rs",
+    "original_sha256": "10de5a1d49760b518f5b6e6c17c71acdd167fe17c17466a2b13819901d5c82b0",
+    "adapted_sha256": "73b43e28b73c86902b15dc0f478098ba5a0c8c08388622ca3c2828c10681fe49",
+    "only_change": "test visibility/attributes; body identical"
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "original": "independent-review/check_maps.py",
+    "original_sha256": "892a6174bfad9aafb953d3618f6dd15c447229fe0c4b074562fb905348826a9b",
+    "executable_sha256": "892a6174bfad9aafb953d3618f6dd15c447229fe0c4b074562fb905348826a9b",
+    "only_change": "none (portable script already accepts source argument)"
+  },
+  {
+    "original": "independent-review/check_batch_wrappers.py",
+    "original_sha256": "2d4e4fb502156531ef700b482a1905ad1352110077aae6896f0b630e46be98d5",
+    "executable_sha256": "2d4e4fb502156531ef700b482a1905ad1352110077aae6896f0b630e46be98d5",
+    "only_change": "none (portable script already accepts source argument)"
+  },
+  {
+    "original": "independent-wrapper-review/check_wrapper_integration.py",
+    "original_sha256": "af9973c33005970dfedee6138d1b56c0eaeebbecc64038f078769b01ed561562",
+    "executable_sha256": "af9973c33005970dfedee6138d1b56c0eaeebbecc64038f078769b01ed561562",
+    "only_change": "none (portable script already accepts source argument)"
+  }
+]

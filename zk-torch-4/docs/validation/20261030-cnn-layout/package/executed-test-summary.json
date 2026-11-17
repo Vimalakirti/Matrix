@@ -1,0 +1,359 @@
+[
+  {
+    "sf": 0,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "9e7da5f3b98f0e2a034f9b711725727cc2b7162dc2b3c4c75e0d368a05e8675b"
+  },
+  {
+    "sf": 1,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "795bf2fba864f19fcba21cc5766529f16172ad690814c6d138551f10eb31542a"
+  },
+  {
+    "sf": 2,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "4567646ef6563b3fe6c4cc8a6a985b3e2ed6cc66e5ec1865d8c06806973984a9"
+  },
+  {
+    "sf": 3,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "c9609ffaa8c0059b24775295108106f9bbea9b67b7fa0de72bf2359ad2c6e31e"
+  },
+  {
+    "sf": 4,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "34a462d8d994c0a81895da6f4ed38794f467a1263c36547f999415790b923ab3"
+  },
+  {
+    "sf": 5,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "7bd43b14f354058a37c62d65c98690e2d0f96c406ad403e8fc41b7c8f3d69141"
+  },
+  {
+    "sf": 6,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "23fd5dc9e009fb53a1219998f3b77e498bf461825712f23288f50d455703f646"
+  },
+  {
+    "sf": 7,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "dc6d11677d9ade895b13ddcc4af1ee37a7b68f273d78e5a5b411b24243ceeee3"
+  },
+  {
+    "sf": 8,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "3be1a8d1d184baf93ff74473d254f0bc3669af4e0bc55cffad539d213114df0a"
+  },
+  {
+    "sf": 9,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "3548e360ddb026d6339f79d726eea2f1226b5da2526eb1cdbb3297e41016e6d8"
+  },
+  {
+    "sf": 10,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "24815a15821ee2c2514a2e1b2450ea3a26e70fe63610feb2cb414c1e3b67b1c6"
+  },
+  {
+    "sf": 11,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "ec07a692a0c0aabd1da7b77f3f44a451d397c599fa55411e04120c6ac1c020f0"
+  },
+  {
+    "sf": 12,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "6b4fa7f93dabc46690ac6b23aac73062cabe1837309545e5f394fde6d6a7bcb4"
+  },
+  {
+    "sf": 13,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "8a3f7f44a8410f444667c175f71e4c53f6022fcd24ed062ef2d268b32a5bcd0d"
+  },
+  {
+    "sf": 14,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "5c05c90ae3f45b155c324631704186cccb92b53ff1c597d8c7e82880bd628f31"
+  },
+  {
+    "sf": 15,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "b8c843434934578013275dd95ef47df384db9b9d3cda2562f13ed9e5278be7df"
+  },
+  {
+    "sf": 16,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "db26319b10c63a29444cfe83fce70a8bbcde69b121f8fa5eb270d97a99fc9cda"
+  },
+  {
+    "sf": 17,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "83154c5d7d3862740712d97590561ced95c7f9f8467d6adb502c80e1567aa364"
+  },
+  {
+    "sf": 18,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "a8709f3a5864e4402c16b1cd75c879305e24965b059f028bffded263544d2f36"
+  },
+  {
+    "sf": 19,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "2d73e7cb54a6817e011f3d0270b1436ae3b220ba88d698a2e0342507670619a8"
+  },
+  {
+    "sf": 20,
+    "passes": 10,
+    "names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference",
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ],
+    "log_sha256": "e66e166b7089acb508d99497391ad81276174a8d5d80275fc46e00d83f9b9bd2"
+  }
+]

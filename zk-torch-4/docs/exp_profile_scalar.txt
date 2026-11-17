@@ -1,0 +1,32 @@
+SCALAR ONLY: no Rust compiler, verifier, model, GPU, or task accuracy execution.
+PASS modular quotient regression: old remainder-only constraints accept E(0)= 9520899881114205168 with fake square quotient 595038100627783679 ; new square interval[0,8192] rejects.
+PASS padding regression: SF10 dim5 zero logits yield padded x=-1648, r=-228, output=-57; signed[-2Qs,2Qs] retains it, unsigned rejects.
+BEFORE PADDING REPAIR: SF10 dim5 logits=-2048 yield padded exp input+400, rejected by raw nonpositive helper; the following mask regression checks the repaired recipe.
+PASS authenticated-mask scalar semantics: [5], [3,3], asymmetric[3,5], [2,3,5], [4,4]; scales0/10/15/30; arbitrary positive/negative/field-residue pads; distinct logical outputs preserved and every pad0.
+PADDING PROFILE CHANGE: SF10 dim5 padded+400 inputs are zeroed before helper and admitted; all logical values unchanged. Prior zero-logit padded outputs -57 become0; downstream sum854 becomes1025. No exact softmax mass or model-equivalence claim.
+PASS: all 31 exact Ls constants independently match 100-digit Decimal and old f64 Ls.
+PASS: old SF_FLOAT powers of two remain exactly representable at every supported scale.
+PASS: all scales x all 8 widths: endpoints, unique adjacent k/r, domain rejection, no-wrap and polynomial bounds.
+largest accepted |x| = 190158715648 ; all candidate decomposition residual magnitudes <2^40<Q.
+PASS: positive/negative half ties; quotient +/-1 alternatives fail canonical residual interval.
+PASS exhaustive SF10: 181405 integer inputs; output [0,1024]; corrected-old8 mismatches=0; corrected-old4 mismatches=170400; original-unit1-old4 mismatches=177971.
+columns: x, old4_unit1, old4_unit32768, old8_unit32768, new8_unit32768, (k,r)
+0 0 1024 1024 1024 (0, 0)
+-1 -1 1023 1023 1023 (0, -1)
+-355 212 724 724 724 (1, 355)
+-710 0 512 512 512 (1, 0)
+-10650 0 0 0 0 (15, 0)
+-11360 0 1024 0 0 (16, 0)
+-102400 -148 876 0 0 (144, -160)
+-181404 -300 724 0 0 (255, -354)
+PASS exhaustive SF15: 5803172 integer inputs; output [0,32768]; corrected-old8 mismatches=0; corrected-old4 mismatches=5451120; original-unit1-old4 mismatches=5802932.
+columns: x, old4_unit1, old4_unit32768, old8_unit32768, new8_unit32768, (k,r)
+0 1 32768 32768 32768 (0, 0)
+-1 0 32767 32767 32767 (0, -1)
+-11357 6776 23160 23160 23160 (1, 11356)
+-22713 1 16384 16384 16384 (1, 0)
+-340695 0 1 1 1 (15, 0)
+-363408 1 32768 0 0 (16, 0)
+-3276800 -5590 27177 0 0 (144, -6128)
+-5803171 -9614 23153 0 0 (255, -11356)
+COMPLETE: unchanged corrected-old8 finite-domain scalar outputs; old4 silent-clamp outputs intentionally differ. No accuracy/equivalence claim outside that domain.

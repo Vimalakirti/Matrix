@@ -1,0 +1,11 @@
+{
+  "conv_original_test_body_invocations": 3,
+  "conv_contained_forward_cases": 32,
+  "conv_contained_helper_identity_cases": 8,
+  "conv_contained_source_fixtures": 3,
+  "conv_contained_rejection_cases": 2,
+  "inherited_cnn_test_body_invocations": 210,
+  "total_actual_test_body_invocations": 213,
+  "piop_test_body_invocations": 0,
+  "the_original_VALIDATION_json_is_preserved": true
+}

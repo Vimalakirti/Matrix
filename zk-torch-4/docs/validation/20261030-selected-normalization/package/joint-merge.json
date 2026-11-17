@@ -1,0 +1,42 @@
+[
+  {
+    "path": "zk-torch-4/docs/morpheus_instance_norm_profile.md",
+    "status": "new InstanceNorm file"
+  },
+  {
+    "path": "zk-torch-4/docs/morpheus_mean_rms_profile.md",
+    "status": "InstanceNorm-only edit"
+  },
+  {
+    "path": "zk-torch-4/src/basicblock/instancenorm.rs",
+    "status": "InstanceNorm-only edit"
+  },
+  {
+    "path": "zk-torch-4/src/dag/builder.rs",
+    "status": "CONFLICT"
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm.rs",
+    "status": "new InstanceNorm file"
+  },
+  {
+    "path": "zk-torch-4/src/dag/instancenorm_tests.rs",
+    "status": "new InstanceNorm file"
+  },
+  {
+    "path": "zk-torch-4/src/dag/mod.rs",
+    "status": "CONFLICT"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "status": "CONFLICT"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+    "status": "CONFLICT"
+  },
+  {
+    "path": "zk-torch-4/src/morpheus/statement.rs",
+    "status": "CONFLICT"
+  }
+]

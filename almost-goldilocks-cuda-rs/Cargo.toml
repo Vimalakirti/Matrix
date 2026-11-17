@@ -20,3 +20,7 @@ cc = "1.0"
 [lib]
 name = "almost_goldilocks_cuda"
 path = "src/lib.rs"
+
+[features]
+default = ["cuda"]
+cuda = []

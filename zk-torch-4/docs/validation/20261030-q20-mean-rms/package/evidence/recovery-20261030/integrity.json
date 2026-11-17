@@ -1,0 +1,41 @@
+{
+  "source-manifest.json": {
+    "sha256": "60b90a1c996cdb0c86becb35005563e289b0e8c2abfbf68a331d530e3de70e3a",
+    "files": 16,
+    "mismatches": []
+  },
+  "full-source-manifest.json": {
+    "sha256": "9119fd68440756e222fdbd8f1ff6814f9d1b51a9e74d241c1e160ea580c81ccb",
+    "files": 443,
+    "mismatches": []
+  },
+  "patch_sha256": "6c36b21a613c705de390ad6bc2a54f55cea15775e5de6d57bbabb43e529e2186",
+  "normalization_test_identity": {
+    "only_visibility_changed": true,
+    "test_bodies": 9
+  },
+  "cpu-scales-0-20-final.log": {
+    "run_count": 189,
+    "pass_count": 189,
+    "sha256": "0e7c8e933b5ad1c9cbbb99d5f6240d1c2f2352e3c6610938a2ae7b64094bac19"
+  },
+  "exp-regression-scales-0-30.log": {
+    "run_count": 434,
+    "pass_count": 434,
+    "sha256": "3c8a167ca34fcb23de07f4c9d35d078e7fa4538cc726893924489f9abd907ad5"
+  },
+  "cpu-partial-chunks-final.log": {
+    "run_count": 0,
+    "pass_count": 1,
+    "sha256": "16179ce08b593dbe4715b3c82b0862de6f8958b11f2b4330c3ef97018885c3fc"
+  },
+  "cpu_normalization": {
+    "sha256": "d203523dbc720eb9ca37ea2d8ccd115552a7bb5c5d0122f639d4156a73851bc3",
+    "matches_prior_audit": true
+  },
+  "cpu_partial_chunks": {
+    "sha256": "bcbab773311c464c7272c73c1a86db22e23af7229b45e85d872a87712baa3596",
+    "matches_prior_audit": true
+  },
+  "git_diff_check": 0
+}

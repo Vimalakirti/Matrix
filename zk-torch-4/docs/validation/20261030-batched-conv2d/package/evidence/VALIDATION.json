@@ -1,0 +1,56 @@
+{
+  "source_manifest_sha256": "a57be8f20529556584fef5a97d8bf24c54d77809835890bd4e2678848c227579",
+  "source_files": 455,
+  "scope": "tensor-batched Conv2D normal and PP; no deferred-proof security claim",
+  "native_all_target_check": {
+    "exit": 101,
+    "blocker": "missing /usr/local/cuda/bin/nvcc"
+  },
+  "build_only_adapted_all_target_check": {
+    "exit": 0
+  },
+  "actual_cpu_forward_and_table_tests": {
+    "build_exit": 0,
+    "run_exit": 0,
+    "forward_cases": 32,
+    "actual_helper_identity_cases": 8,
+    "kernel_source_fixtures": 3,
+    "collision_and_overflow_rejections": 2
+  },
+  "inherited_cnn_cpu_tests": {
+    "scales": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20
+    ],
+    "bodies_per_scale": 10,
+    "total_bodies_executed": 210,
+    "all_run_exits": 0
+  },
+  "authored_masked_piop_replay": {
+    "build_exit": 101,
+    "run": "not_run",
+    "executed_test_bodies": 0,
+    "blocker": "retained CUDA FFI undefined symbols"
+  },
+  "native_pcs_cuda_end_to_end_proofs": "not_run",
+  "gpu_stubs_or_runtime_substitutions": false
+}

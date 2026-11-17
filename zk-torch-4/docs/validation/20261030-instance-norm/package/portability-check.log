@@ -1,0 +1,25 @@
+python3 /workspace/shared/morpheus-instance-norm-evidence/export/reconstruct_source.py /workspace/shared/morpheus-mean-rms-q20 /workspace/shared/morpheus-instance-norm-portable-reconstruction2
+exit=0 expected=0
+PASS reconstructed446-source snapshot
+python3 /workspace/shared/morpheus-instance-norm-evidence/export/reconstruct_source.py /workspace/shared/morpheus-mean-rms-q20 /workspace/shared/morpheus-mean-rms-q20/must-not-be-created
+exit=1 expected=1
+Traceback (most recent call last):
+  File "/workspace/shared/morpheus-instance-norm-evidence/export/reconstruct_source.py", line 7, in <module>
+    assert a.destination != a.base and a.base not in a.destination.parents,'destination must be outside base tree'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: destination must be outside base tree
+python3 /workspace/shared/morpheus-instance-norm-evidence/export/prepare_harness.py /workspace/shared/morpheus-instance-norm-repair /workspace/shared/morpheus-instance-norm-repair/must-not-be-created cpu-instance
+exit=1 expected=1
+Traceback (most recent call last):
+  File "/workspace/shared/morpheus-instance-norm-evidence/export/prepare_base_harness.py", line 14, in <module>
+    assert dst != src and src not in dst.parents, 'destination must be outside source tree'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: destination must be outside source tree
+Traceback (most recent call last):
+  File "/workspace/shared/morpheus-instance-norm-evidence/export/prepare_harness.py", line 6, in <module>
+    subprocess.run([sys.executable,str(Path(__file__).with_name('prepare_base_harness.py')),str(src),str(dst), 'cpu-graph' if mode in ['cpu-instance','cpu-normalization'] else mode],check=True)
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3', '/workspace/shared/morpheus-instance-norm-evidence/export/prepare_base_harness.py', '/workspace/shared/morpheus-instance-norm-repair', '/workspace/shared/morpheus-instance-norm-repair/must-not-be-created', 'cpu-graph']' returned non-zero exit status 1.
+
+PASS guarded portable prepare_harness succeeds for fresh outside-base destination. All8 InstanceNorm test bodies unchanged.

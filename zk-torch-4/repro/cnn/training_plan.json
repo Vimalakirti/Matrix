@@ -1,0 +1,15 @@
+{
+  "dataset": "sklearn.datasets.load_digits(n_class=10), 1797 bundled public UCI rows",
+  "split": {"test_size": 0.25, "random_state": 20261030, "stratify": "target", "preserve_returned_order": true},
+  "normalization": "pixels / 16; Q10 integer input = pixel * 64",
+  "architecture": ["NCHW 1x8x8", "Conv2D 8 filters,3x3,valid,stride1,bias", "ReLU", "MaxPool2D 2x2,stride2", "Conv2D 16 filters,2x2,valid,stride1,bias", "ReLU", "MaxPool2D 2x2,stride2", "flatten NCHW 16", "Dense16to10,bias", "lowest-index argmax"],
+  "parameter_order": ["conv1.weight OIHW", "conv1.bias O", "conv2.weight OIHW", "conv2.bias O", "fc.weight OI", "fc.bias O"],
+  "trainable_parameters": 778,
+  "training": {"seed": 1729, "rng": "numpy.random.default_rng", "initialization": "independent normal weights with std sqrt(2/fan_in), zero biases", "optimizer": "scipy.optimize.minimize L-BFGS-B", "loss": "mean softmax cross entropy + 0.0001/2 * sum(weight^2), biases unregularized", "maxiter": 400, "maxfun": 50000, "maxls": 50, "ftol": 1e-10, "gtol": 1e-6, "blas_threads": 1},
+  "quantization": "floor(parameter * 1024 + 0.5); after each dot floor((integer_dot + 512)/1024), then integer bias; ties toward positive infinity",
+  "public_parameter_absolute_bound": 16383,
+  "input_interval": [0,1024],
+  "proof_examples": [1329,1379,1319,909],
+  "selection_policy": "one fixed training run; no test evaluation before frozen model and bound admission; no test tuning, retraining, clipping, or replacing examples; preserve diagnostics including nonconvergence",
+  "dataset_license": "CC BY 4.0, UCI DOI 10.24432/C50P49"
+}

@@ -346,6 +346,7 @@ impl Dag {
         let n_dev = device_pool.len();
         let transcript_ref: &Transcript = &*transcript;
         use rayon::prelude::*;
+        let _nv_pb = almost_goldilocks_cuda::nvtx("partition_backward");
         let results: Vec<(Vec<Option<NodeProof>>, Vec<Vec<Claim>>)> =
             partition_starting_claims
                 .into_par_iter()
@@ -358,6 +359,7 @@ impl Dag {
                 })
                 .collect();
         let _ = almost_goldilocks_cuda::set_device(device_pool[0]);
+        drop(_nv_pb);
 
         // ---- 5. Merge per-partition results. ----
         let mut node_proofs: Vec<Option<NodeProof>> = vec![None; self.nodes.len()];
@@ -384,9 +386,11 @@ impl Dag {
 
         // ---- 6. Lookup proofs on main transcript. ----
         let t_lk = std::time::Instant::now();
-        let two_pow_proof = self.prove_two_pow(witnesses, &mut claims, transcript);
+        let two_pow_proof = { let _nv = almost_goldilocks_cuda::nvtx("two_pow");
+            self.prove_two_pow(witnesses, &mut claims, transcript) };
         let t_tp = t_lk.elapsed();
-        let range_proof = self.prove_range(witnesses, &mut claims, transcript);
+        let range_proof = { let _nv = almost_goldilocks_cuda::nvtx("range");
+            self.prove_range(witnesses, &mut claims, transcript) };
         if timing {
             eprintln!("[prove] lookup proofs: two_pow={:?} range={:?}",
                       t_tp, t_lk.elapsed() - t_tp);
@@ -482,6 +486,7 @@ impl Dag {
                 let reducer_witness = vec![&witnesses[node.outputs[0]][0]];
                 let reducer_edge_ids = vec![node.outputs[0]];
                 let t_rd = std::time::Instant::now();
+                let _nv = almost_goldilocks_cuda::nvtx("reducer");
                 let (proofs, rc) = reducer.prove(
                     &reducer_witness, &reducer_edge_ids, &reducible, transcript,
                 );
@@ -500,9 +505,20 @@ impl Dag {
             }
 
             let t_np = std::time::Instant::now();
+            let _nv = almost_goldilocks_cuda::nvtx(&{
+                let k = format!("{:?}", node.kind);
+                let end = k.find(|c: char| c == '(' || c == '{' || c == ' ').unwrap_or(k.len());
+                format!("node {}", &k[..end])
+            });
             let (proofs, new_claims) =
                 node.kind.prove(&local_witnesses, &edge_ids, &local_claims, transcript);
             PB_NODE_PROVE_US.fetch_add(t_np.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
+            if std::env::var("ZK4_NODE_TIMING").is_ok() {
+                let k = format!("{:?}", node.kind);
+                let shapes: Vec<_> = local_witnesses.iter().map(|w| w.shape.clone()).collect();
+                eprintln!("[node_time] {:>8.2}ms {} shapes={:?}",
+                    t_np.elapsed().as_secs_f64() * 1e3, &k[..k.len().min(90)], shapes);
+            }
             PB_N_NODES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
             let mut node_claims: Vec<Claim> = new_claims.clone();

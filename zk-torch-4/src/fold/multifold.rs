@@ -524,7 +524,7 @@ fn fold_witnesses_gpu_digit_path(group: &[FoldInstance], gammas: &[RingChallenge
 /// independently and a cheap serial scatter transposes them into the
 /// chunk-major layout. The old serial loop was ~30-50 ms at arity 22
 /// (4M coefficients × 13 chunk bits on one core) — a top multifold cost.
-fn encode_wide_as_fold_data(wide: &[i16], arity: usize) -> FoldData {
+pub(crate) fn encode_wide_as_fold_data(wide: &[i16], arity: usize) -> FoldData {
     use rayon::prelude::*;
     let n_ring = if arity >= 6 { 1usize << (arity - 6) } else { 1 };
     assert_eq!(wide.len(), n_ring * 64, "wide buffer size mismatch");

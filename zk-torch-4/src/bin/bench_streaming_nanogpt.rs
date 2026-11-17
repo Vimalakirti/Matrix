@@ -135,9 +135,11 @@ fn main() {
     // The embedding selector is the only per-request input; it must never be
     // deferred as a shared weight.
     let sel: Vec<usize> = (0..dag.num_edges())
-        .filter(|&e| witnesses_template[e].first().map(|x| x.role) == Some(Role::Input))
+        .filter(|&e| witnesses_template[e].first().map_or(false, |x| x.role == Role::Input && x.shape == vec![seq_len, NANOGPT_VOCAB]))
         .collect();
-    assert_eq!(sel.len(), 1, "expected exactly one Role::Input edge (the embedding selector)");
+    // Public program literals (interval bounds, masks) are Role::Input too;
+    // the selector is the one [seq_len, vocab] input.
+    assert_eq!(sel.len(), 1, "expected exactly one [seq_len, vocab] Role::Input edge (the embedding selector)");
     let emb_sel = sel[0];
 
     if num_partitions > 1 {

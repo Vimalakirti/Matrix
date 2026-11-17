@@ -1,0 +1,53 @@
+{
+  "scope": "Independent finite-field flat virtual-kernel/source-map algebra, not production Rust execution",
+  "cases": 96,
+  "assertions": 96,
+  "same_extent_mismatched_fk": {
+    "actual": [
+      2,
+      4,
+      6,
+      8,
+      10,
+      12
+    ],
+    "bad_bypass": [
+      11,
+      16,
+      21,
+      26,
+      31,
+      36
+    ]
+  },
+  "truncate_then_restore_fk": {
+    "original_wf": [
+      2,
+      0,
+      3,
+      0
+    ],
+    "after_view": [
+      2,
+      0,
+      0,
+      0
+    ],
+    "actual": [
+      2,
+      4,
+      6,
+      8,
+      10,
+      12
+    ],
+    "bad_bypass": [
+      11,
+      16,
+      21,
+      26,
+      31,
+      36
+    ]
+  }
+}

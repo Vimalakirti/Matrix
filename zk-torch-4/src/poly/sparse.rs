@@ -29,15 +29,30 @@ pub struct SelectionPolynomial {
     pub input_num_vars: usize,
     pub table_num_vars: usize,
     pub selection: Vec<(usize, usize)>,
+    /// Compact copy of the table indices, `tidx[i] = t_i`, present only when
+    /// `selection` is exactly one entry per row in row order
+    /// (`selection[k].0 == k`) and the table fits in a byte; empty otherwise.
+    /// The lookup prover's histogram/position scan reads this (1 B per row)
+    /// instead of `selection` (16 B per row): on GPT-2 2L that scan streams
+    /// 128M rows per proof and was DRAM-bandwidth bound on the 16 B form.
+    pub tidx: Vec<u8>,
 }
 
 impl SelectionPolynomial {
     pub fn empty() -> Self {
-        Self { input_num_vars: 0, table_num_vars: 0, selection: Vec::new() }
+        Self { input_num_vars: 0, table_num_vars: 0, selection: Vec::new(), tidx: Vec::new() }
     }
 
     pub fn new(input_num_vars: usize, table_num_vars: usize, selection: Vec<(usize, usize)>) -> Self {
-        Self { input_num_vars, table_num_vars, selection }
+        let tidx = if table_num_vars <= 8
+            && selection.len() == (1usize << input_num_vars)
+            && selection.iter().enumerate().all(|(k, &(i, _))| i == k)
+        {
+            selection.iter().map(|&(_, t)| t as u8).collect()
+        } else {
+            Vec::new()
+        };
+        Self { input_num_vars, table_num_vars, selection, tidx }
     }
 
     /// Expand into the ambient [`SparseMLPoly`]: positions

@@ -39,7 +39,7 @@ pub fn partial_eval(
         )
     };
     if ret != 0 { return Err(CudaError::KernelFailed); }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let result_len = 1usize << (log_n - m);
     d_data.read_slice(0, result_len)
@@ -86,7 +86,7 @@ pub fn partial_eval_ext2(
         )
     };
     if ret != 0 { return Err(CudaError::KernelFailed); }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let result_len = 1usize << (log_n - m);
     d_output.read_slice(0, result_len)
@@ -221,13 +221,63 @@ pub fn fused_permute_partial_eval(
         )
     };
     if ret != 0 { return Err(CudaError::KernelFailed); }
-    crate::memory::synchronize()?;
+    crate::memory::sync_mine()?;
 
     let raw: Vec<u64> = d_output.read_slice(0, output_size * 2)?;
     Ok(raw
         .chunks_exact(2)
         .map(|c| AlmostGoldilocksExt2::new(AlmostGoldilocksField(c[0]), AlmostGoldilocksField(c[1])))
         .collect())
+}
+
+/// Device-resident variant of [`fused_permute_partial_eval`]: `d_evals` is
+/// already on the current device (as u64 words) and the result STAYS there,
+/// as flat (c0, c1) Ext2 pairs. Same kernel and launch, so the output words
+/// are identical; the einsum prover used to download the host result only to
+/// re-upload it.
+pub fn fused_permute_partial_eval_dev(
+    d_evals: &DeviceBuffer<u64>,
+    challenges: &[AlmostGoldilocksExt2],
+    permute_ranges: &[(usize, usize)],
+    n: usize,
+) -> Result<DeviceBuffer<u64>> {
+    let m = challenges.len();
+    assert!(m >= 1 && m <= n);
+    assert!(d_evals.len() >= (1usize << n));
+    let half = n / 2;
+    let (lo_lut, hi_lut) = build_split_luts(n, permute_ranges, half);
+    let d_lo_lut = DeviceBuffer::<u32>::from_slice(&lo_lut)?;
+    let d_hi_lut = DeviceBuffer::<u32>::from_slice(&hi_lut)?;
+    let d_challenges = DeviceBuffer::from_slice(challenges)?;
+    let (d_buf_a, d_buf_b, result_in_a) =
+        crate::eq_lagrange::ext2_eq_dp_all_device(&d_challenges, m)?;
+    let d_eq = if result_in_a { &d_buf_a } else { &d_buf_b };
+    let output_size = 1usize << (n - m);
+    let mut d_output = DeviceBuffer::<u64>::new(output_size * 2)?;
+    let lo_size = 1usize << half;
+    let hi_size = 1usize << (n - half);
+    let lut_bytes = (lo_size + hi_size) * std::mem::size_of::<u32>();
+    let aligned_lut = (lut_bytes + 7) & !7;
+    let num_warps = 256 / 32;
+    let warp_bytes = num_warps * 2 * std::mem::size_of::<u64>();
+    let smem_bytes = aligned_lut + warp_bytes;
+    let ret = unsafe {
+        ffi::agl_fused_permute_partial_eval_ffi(
+            d_evals.as_ptr(),
+            d_output.as_mut_ptr(),
+            d_eq.as_ptr() as *const u64,
+            d_lo_lut.as_ptr(),
+            d_hi_lut.as_ptr(),
+            n as i32,
+            m as i32,
+            half as i32,
+            output_size as i32,
+            smem_bytes as i32,
+        )
+    };
+    if ret != 0 { return Err(CudaError::KernelFailed); }
+    crate::memory::sync_mine()?;
+    Ok(d_output)
 }
 
 fn build_split_luts(

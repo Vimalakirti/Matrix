@@ -82,7 +82,8 @@ fn vgg_generic(
                 h = g.pad(h, 1, 1);
                 h = g.conv2d(h, cp.w, (3, 3))[0];
                 if sf_log > 0 { h = g.scale(h, 2 * sf_log, sf_log)[0]; }
-                h = g.add(h, cp.b)[0];
+                let c = g.init_values[cp.w].as_ref().unwrap().shape[0];
+                h = g.add_channel_bias_row_major(h, cp.b, c, 2);
                 h = g.relu(h);
                 g.layer_boundaries.push(h);
                 if cp.maxpool_after { h = g.maxpool2d(h, 2, 2); }

@@ -1,0 +1,19 @@
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (770) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (770) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty

@@ -1,0 +1,532 @@
+--- original/almost-goldilocks-cuda-rs/build.rs
++++ adapted/almost-goldilocks-cuda-rs/build.rs
+@@ -57,68 +57,7 @@
+     // Headers live in the sibling cuda_almost_goldilocks/ directory.
+     let cuda_dir = manifest_dir.join("../cuda_almost_goldilocks");
+ 
+-    let (nvcc, cuda_lib_path) = find_cuda_paths();
+-    if !std::path::Path::new(&nvcc).exists() {
+-        panic!("CUDA toolkit not found at {}", nvcc);
+-    }
+-
+-    let output_lib = out_dir.join("libalmost_goldilocks_cuda_wrapper.a");
+-    let obj_file = out_dir.join("wrapper.o");
+-    let compute_cap = env::var("CUDA_COMPUTE").unwrap_or_else(|_| "80".to_string());
+-    // SASS for the target plus PTX: ptxas then runs at build time, so resource
+-    // errors (e.g. > 48 KB static shared memory) fail the build instead of
+-    // surfacing as a JIT launch failure at run time.
+-    let gencode = format!(
+-        "-gencode=arch=compute_{},code=[sm_{},compute_{}]",
+-        compute_cap, compute_cap, compute_cap
+-    );
+-
+-    eprintln!("[build.rs] nvcc: {}", nvcc);
+-    eprintln!("[build.rs] compute capability: {}", compute_cap);
+-    eprintln!("[build.rs] header include path: {}", cuda_dir.display());
+-
+-    let status = Command::new(&nvcc)
+-        .args([
+-            "-O3",
+-            &gencode,
+-            "-std=c++17",
+-            "--default-stream",
+-            "per-thread",
+-            "-Xcompiler",
+-            "-fPIC",
+-            "-c",
+-            cuda_wrapper.to_str().unwrap(),
+-            "-o",
+-            obj_file.to_str().unwrap(),
+-            &format!("-I{}", cuda_dir.to_str().unwrap()),
+-        ])
+-        .status()
+-        .expect("Failed to execute nvcc");
+-    if !status.success() {
+-        panic!("Failed to compile CUDA wrapper");
+-    }
+-
+-    let status = Command::new("ar")
+-        .args([
+-            "rcs",
+-            output_lib.to_str().unwrap(),
+-            obj_file.to_str().unwrap(),
+-        ])
+-        .status()
+-        .expect("Failed to execute ar");
+-    if !status.success() {
+-        panic!("Failed to create static library");
+-    }
+-
+-    println!("cargo:rustc-link-search=native={}", out_dir.display());
+-    println!("cargo:rustc-link-lib=static=almost_goldilocks_cuda_wrapper");
+-    println!("cargo:rustc-link-search=native={}", cuda_lib_path);
+-    println!("cargo:rustc-link-lib=static=cudart_static");
+-    println!("cargo:rustc-link-lib=stdc++");
+-    println!("cargo:rustc-link-lib=dl");
+-    println!("cargo:rustc-link-lib=rt");
+-    println!("cargo:rustc-link-lib=pthread");
+-
++    // VALIDATION ONLY: CUDA compilation and linker directives omitted.
+     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE");
+     println!("cargo:rerun-if-changed=cuda/wrapper.cu");
+     // Track EVERY header wrapper.cu can include, not a hand-kept list: the
+--- original/almost-goldilocks-cuda-rs/src/ffi.rs
++++ adapted/almost-goldilocks-cuda-rs/src/ffi.rs
+@@ -7,7 +7,7 @@
+ 
+ use std::os::raw::{c_int, c_void};
+ 
+-#[link(name = "almost_goldilocks_cuda_wrapper", kind = "static")]
++// VALIDATION ONLY: no native library supplied; any reachable FFI must fail linking.
+ extern "C" {
+     // -------------------- init / memory --------------------
+     pub fn almost_goldilocks_cuda_init() -> c_int;
+--- original/zk-torch-4/src/basicblock/exp.rs
++++ adapted/zk-torch-4/src/basicblock/exp.rs
+@@ -197,8 +197,8 @@
+     }
+ }
+ 
+-#[cfg(test)]
+-mod tests {
++// VALIDATION ONLY: expose original CPU test bodies.
++pub mod tests {
+     use super::*;
+ 
+     fn agl(v: u64) -> AlmostGoldilocksField {
+@@ -210,8 +210,7 @@
+         Witness::new(shape, evals, DataType::Int, *SF_LOG, Role::Input)
+     }
+ 
+-    #[test]
+-    fn exphelper_emits_dense_r_and_sparse_k() {
++    pub fn exphelper_emits_dense_r_and_sparse_k() {
+         // x = 0 at every row → k = 0, r = 0.
+         let x = build_input(vec![4], vec![0, 0, 0, 0]);
+         let h = ExpHelper::new(K_BITS);
+@@ -235,8 +234,7 @@
+     }
+ 
+     /// `x = -k · ln2 · SF` for `k ∈ {0, 1, 5, 15}` → selection table index = k.
+-    #[test]
+-    fn exphelper_recovers_negative_k() {
++    pub fn exphelper_recovers_negative_k() {
+         let ln2 = exp_ln2(*SF_LOG);
+         let x = build_input(vec![4], vec![0, -ln2, -5 * ln2, -15 * ln2]);
+         let h = ExpHelper::new(K_BITS);
+@@ -256,8 +254,7 @@
+         assert_eq!(sel[&3], 15);
+     }
+ 
+-    #[test]
+-    fn exphelper_rejects_positive_and_out_of_domain_without_clamping() {
++    pub fn exphelper_rejects_positive_and_out_of_domain_without_clamping() {
+         let l=exp_ln2(*SF_LOG); let h=ExpHelper::new(8);
+         let bound=256*l-l/2-1;
+         for v in [1,-bound-1] {
+@@ -271,8 +268,7 @@
+         }
+     }
+ 
+-    #[test]
+-    fn exphelper_prove_passes_through() {
++    pub fn exphelper_prove_passes_through() {
+         let x = build_input(vec![4], vec![0, 0, 0, 0]);
+         let h = ExpHelper::new(K_BITS);
+         let out = h.run(&[&x]);
+@@ -288,8 +284,7 @@
+         assert_eq!(claims[0].eval, direct);
+     }
+ 
+-    #[test]
+-    fn twopow_looks_up_15_minus_k() {
++    pub fn twopow_looks_up_15_minus_k() {
+         // Build a selection polynomial with (i, k) = (0, 0), (1, 1), (2, 5), (3, 15).
+         let sel = SelectionPolynomial::new(
+             2,
+@@ -313,8 +308,7 @@
+         assert_eq!(evals[3].reduce().0, 1 << 0);
+     }
+ 
+-    #[test]
+-    fn twopow_prove_returns_empty() {
++    pub fn twopow_prove_returns_empty() {
+         // The dag-level prove_two_pow handles this; the block itself is a no-op.
+         let sel = SelectionPolynomial::new(2, K_BITS, vec![(0, 0)]).to_sparse();
+         let w = Witness {
+--- original/zk-torch-4/src/bin/cpu_basicblock_exp.rs
++++ adapted/zk-torch-4/src/bin/cpu_basicblock_exp.rs
+@@ -0,0 +1,20 @@
++fn main() {
++    println!("RUN exphelper_emits_dense_r_and_sparse_k");
++    zk_torch_4::basicblock::exp::tests::exphelper_emits_dense_r_and_sparse_k();
++    println!("PASS exphelper_emits_dense_r_and_sparse_k");
++    println!("RUN exphelper_recovers_negative_k");
++    zk_torch_4::basicblock::exp::tests::exphelper_recovers_negative_k();
++    println!("PASS exphelper_recovers_negative_k");
++    println!("RUN exphelper_rejects_positive_and_out_of_domain_without_clamping");
++    zk_torch_4::basicblock::exp::tests::exphelper_rejects_positive_and_out_of_domain_without_clamping();
++    println!("PASS exphelper_rejects_positive_and_out_of_domain_without_clamping");
++    println!("RUN exphelper_prove_passes_through");
++    zk_torch_4::basicblock::exp::tests::exphelper_prove_passes_through();
++    println!("PASS exphelper_prove_passes_through");
++    println!("RUN twopow_looks_up_15_minus_k");
++    zk_torch_4::basicblock::exp::tests::twopow_looks_up_15_minus_k();
++    println!("PASS twopow_looks_up_15_minus_k");
++    println!("RUN twopow_prove_returns_empty");
++    zk_torch_4::basicblock::exp::tests::twopow_prove_returns_empty();
++    println!("PASS twopow_prove_returns_empty");
++}
+--- original/zk-torch-4/src/bin/cpu_graph_exp.rs
++++ adapted/zk-torch-4/src/bin/cpu_graph_exp.rs
+@@ -0,0 +1,26 @@
++fn main() {
++    println!("RUN exp_zero_is_one_at_output_scale_cpu_forward");
++    zk_torch_4::dag::builder::tests::exp_zero_is_one_at_output_scale_cpu_forward();
++    println!("PASS exp_zero_is_one_at_output_scale_cpu_forward");
++    println!("RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero");
++    zk_torch_4::dag::builder::tests::exp_logical_values_ignore_padding_and_padded_outputs_are_zero();
++    println!("PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero");
++    println!("RUN eager_request_arithmetic_is_not_a_model_parameter");
++    zk_torch_4::dag::builder::tests::eager_request_arithmetic_is_not_a_model_parameter();
++    println!("PASS eager_request_arithmetic_is_not_a_model_parameter");
++    println!("RUN eager_model_only_arithmetic_remains_trusted_precomputation");
++    zk_torch_4::dag::builder::tests::eager_model_only_arithmetic_remains_trusted_precomputation();
++    println!("PASS eager_model_only_arithmetic_remains_trusted_precomputation");
++    println!("RUN test_dag_builder_simple_add");
++    zk_torch_4::dag::builder::tests::test_dag_builder_simple_add();
++    println!("PASS test_dag_builder_simple_add");
++    println!("RUN test_dag_builder_compile");
++    zk_torch_4::dag::builder::tests::test_dag_builder_compile();
++    println!("PASS test_dag_builder_compile");
++    println!("RUN test_dag_builder_chain");
++    zk_torch_4::dag::builder::tests::test_dag_builder_chain();
++    println!("PASS test_dag_builder_chain");
++    println!("RUN test_dag_builder_pipe");
++    zk_torch_4::dag::builder::tests::test_dag_builder_pipe();
++    println!("PASS test_dag_builder_pipe");
++}
+--- original/zk-torch-4/src/bin/cpu_normalization.rs
++++ adapted/zk-torch-4/src/bin/cpu_normalization.rs
+@@ -0,0 +1,11 @@
++fn main() {
++println!("RUN division_actual_graph_signed_ties_and_mutations");zk_torch_4::dag::normalization_tests::division_actual_graph_signed_ties_and_mutations();println!("PASS division_actual_graph_signed_ties_and_mutations");
++println!("RUN rms_actual_graph_zero_ties_sign_and_adjacent_mutations");zk_torch_4::dag::normalization_tests::rms_actual_graph_zero_ties_sign_and_adjacent_mutations();println!("PASS rms_actual_graph_zero_ties_sign_and_adjacent_mutations");
++println!("RUN means_ignore_poisoned_padding_and_use_logical_count");zk_torch_4::dag::normalization_tests::means_ignore_poisoned_padding_and_use_logical_count();println!("PASS means_ignore_poisoned_padding_and_use_logical_count");
++println!("RUN named_transformer_norm_paths_cpu_and_zero_extension");zk_torch_4::dag::normalization_tests::named_transformer_norm_paths_cpu_and_zero_extension();println!("PASS named_transformer_norm_paths_cpu_and_zero_extension");
++println!("RUN normalization_rejects_unsupported_scale_and_legacy_advice");zk_torch_4::dag::normalization_tests::normalization_rejects_unsupported_scale_and_legacy_advice();println!("PASS normalization_rejects_unsupported_scale_and_legacy_advice");
++println!("RUN private_rms_bucket_rejects_wrong_valid_onehot_and_padding");zk_torch_4::dag::normalization_tests::private_rms_bucket_rejects_wrong_valid_onehot_and_padding();println!("PASS private_rms_bucket_rejects_wrong_valid_onehot_and_padding");
++println!("RUN private_rms_all_dyadic_boundaries_sf16_sf20");zk_torch_4::dag::normalization_tests::private_rms_all_dyadic_boundaries_sf16_sf20();println!("PASS private_rms_all_dyadic_boundaries_sf16_sf20");
++println!("RUN lenet_average_pool_exact_signed_ties_layout_and_padding");zk_torch_4::dag::normalization_tests::lenet_average_pool_exact_signed_ties_layout_and_padding();println!("PASS lenet_average_pool_exact_signed_ties_layout_and_padding");
++println!("RUN resnet_global_mean_uses_row_major_channels_and_spatial_padding");zk_torch_4::dag::normalization_tests::resnet_global_mean_uses_row_major_channels_and_spatial_padding();println!("PASS resnet_global_mean_uses_row_major_channels_and_spatial_padding");
++}
+--- original/zk-torch-4/src/bin/cpu_partial_chunks.rs
++++ adapted/zk-torch-4/src/bin/cpu_partial_chunks.rs
+@@ -0,0 +1 @@
++fn main(){zk_torch_4::morpheus::piop::exp_tests::nonnegative_partial_chunks_preserve_61_62_63_bit_widths();println!("PASS nonnegative_partial_chunks_preserve_61_62_63_bit_widths");}
+--- original/zk-torch-4/src/dag/builder.rs
++++ adapted/zk-torch-4/src/dag/builder.rs
+@@ -2124,12 +2124,11 @@
+     }
+ }
+ 
+-#[cfg(test)]
+-mod tests {
++// VALIDATION ONLY: expose original CPU graph test bodies.
++pub mod tests {
+     use super::*;
+ 
+-    #[test]
+-    fn exp_zero_is_one_at_output_scale_cpu_forward() {
++    pub fn exp_zero_is_one_at_output_scale_cpu_forward() {
+         // Execute the actual graph's CPU operators directly, avoiding the
+         // benchmark run hook and any GPU backend environment override.
+         let mut g = DagBuilder::new();
+@@ -2154,8 +2153,7 @@
+             .all(|v| *v == AlmostGoldilocksField(1u64 << *SF_LOG)));
+     }
+ 
+-    #[test]
+-    fn exp_logical_values_ignore_padding_and_padded_outputs_are_zero() {
++    pub fn exp_logical_values_ignore_padding_and_padded_outputs_are_zero() {
+         let evaluate = |shape: Vec<usize>, values: Vec<i128>| {
+             let mut b=DagBuilder::new();
+             let x=b.committed_input(Witness::new(shape,values.into_iter().map(int_to_f).collect(),DataType::Float,*SF_LOG,Role::Input));
+@@ -2183,8 +2181,7 @@
+         }}
+     }
+ 
+-    #[test]
+-    fn eager_request_arithmetic_is_not_a_model_parameter() {
++    pub fn eager_request_arithmetic_is_not_a_model_parameter() {
+         for v in [3,19] {
+             let mut b=DagBuilder::new();
+             let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(v)],DataType::Int,0,Role::Input));
+@@ -2199,8 +2196,7 @@
+         }
+     }
+ 
+-    #[test]
+-    fn eager_model_only_arithmetic_remains_trusted_precomputation() {
++    pub fn eager_model_only_arithmetic_remains_trusted_precomputation() {
+         let mut b=DagBuilder::new();
+         let a=b.param(Witness::new(vec![1],vec![int_to_f(3)],DataType::Int,0,Role::Constant));
+         let c=b.param(Witness::new(vec![1],vec![int_to_f(7)],DataType::Int,0,Role::Constant));
+@@ -2211,8 +2207,7 @@
+         // this is not a proof of their relationship to separate weight leaves.
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_simple_add() {
++    pub fn test_dag_builder_simple_add() {
+         // Build: input_a + input_b → output
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+@@ -2224,8 +2219,7 @@
+         assert_eq!(out.len(), 1);
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_compile() {
++    pub fn test_dag_builder_compile() {
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+         let b = g.input(vec![4], DataType::Uint);
+@@ -2239,8 +2233,7 @@
+         assert!(!witnesses.is_empty());
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_chain() {
++    pub fn test_dag_builder_chain() {
+         // input → add(input, param) → einsum
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+@@ -2259,8 +2252,7 @@
+         assert_eq!(dag.topo.len(), 2); // add + einsum
+     }
+ 
+-    #[test]
+-    fn test_dag_builder_pipe() {
++    pub fn test_dag_builder_pipe() {
+         let mut g = DagBuilder::new();
+         let a = g.input(vec![4], DataType::Uint);
+ 
+--- original/zk-torch-4/src/dag/mod.rs
++++ adapted/zk-torch-4/src/dag/mod.rs
+@@ -1295,8 +1295,8 @@
+     }
+ }
+ 
+-#[cfg(test)]
+-mod normalization_tests;
++// VALIDATION ONLY: original test bodies exposed.
++pub mod normalization_tests;
+ 
+ #[cfg(test)]
+ mod instancenorm_tests;
+--- original/zk-torch-4/src/dag/normalization_tests.rs
++++ adapted/zk-torch-4/src/dag/normalization_tests.rs
+@@ -36,8 +36,7 @@
+     b.committed_input(Witness::new(shape,values.into_iter().map(int_to_f).collect(),DataType::Float,sf,Role::Input))
+ }
+ 
+-#[test]
+-fn division_actual_graph_signed_ties_and_mutations() {
++pub fn division_actual_graph_signed_ties_and_mutations() {
+     for c in [1,2,3,768,1024,8192,1<<20] {
+         for a in [-(c as i128)/2,-1,0,1,c as i128/2,(1i128<<54)-1,-((1i128<<54)-1)] {
+             let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![a],0);
+@@ -52,8 +51,7 @@
+     }
+ }
+ 
+-#[test]
+-fn rms_actual_graph_zero_ties_sign_and_adjacent_mutations() {
++pub fn rms_actual_graph_zero_ties_sign_and_adjacent_mutations() {
+     for sf in [0,1,10,15,16,20] {
+         let q=1i128<<sf;
+         for m in [0,1,2,q,4*(1i128<<(3*sf)),RMS_MEAN_MAX] {
+@@ -70,8 +68,7 @@
+     }
+ }
+ 
+-#[test]
+-fn means_ignore_poisoned_padding_and_use_logical_count() {
++pub fn means_ignore_poisoned_padding_and_use_logical_count() {
+     for pad in [-100000,777777] {
+         let mut b=DagBuilder::new();
+         // Col-major [3,3]: axis0 varies fastest, both axes have padding.
+@@ -88,8 +85,7 @@
+     }
+ }
+ 
+-#[test]
+-fn named_transformer_norm_paths_cpu_and_zero_extension() {
++pub fn named_transformer_norm_paths_cpu_and_zero_extension() {
+     for n in [3usize,768,1024,4096,8192] {
+         let sf=*crate::SF_LOG;if sf>20 {return;}
+         let q=1i128<<sf;
+@@ -114,8 +110,7 @@
+     }
+ }
+ 
+-#[test]
+-fn normalization_rejects_unsupported_scale_and_legacy_advice() {
++pub fn normalization_rejects_unsupported_scale_and_legacy_advice() {
+     let bad_scale=std::panic::catch_unwind(|| {let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![1],21);b.rms_reciprocal_from_mean(x);b.compile();});
+     assert!(bad_scale.is_err());
+     let legacy=std::panic::catch_unwind(|| {let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![1],10);let _=b.add_gkr_node(vec![x],BasicBlockType::RMSReciprocal(RMSReciprocal{dim:1}));b.init_values.push(Some(Witness::new_wo_data(vec![1],DataType::Float,10,Role::Output)));b.compile();});
+@@ -126,8 +121,7 @@
+     b.div_const(x,2);let (d,mut w)=b.compile();assert!(!forward(&d,&mut w,None));
+ }
+ 
+-#[test]
+-fn private_rms_bucket_rejects_wrong_valid_onehot_and_padding() {
++pub fn private_rms_bucket_rejects_wrong_valid_onehot_and_padding() {
+     for m in [0,1,2,3,127,128,RMS_MEAN_MAX] {
+         let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![m],20);
+         b.rms_reciprocal_from_mean(x);let (d,w)=b.compile();
+@@ -150,8 +144,7 @@
+     }
+ }
+ 
+-#[test]
+-fn private_rms_all_dyadic_boundaries_sf16_sf20() {
++pub fn private_rms_all_dyadic_boundaries_sf16_sf20() {
+     let mut means=vec![0];
+     for j in 0..28 {let lo=1i128<<j;means.extend([lo-1,lo,2*lo-1]);}
+     means.resize(128,0);
+@@ -169,8 +162,7 @@
+     }
+ }
+ 
+-#[test]
+-fn lenet_average_pool_exact_signed_ties_layout_and_padding() {
++pub fn lenet_average_pool_exact_signed_ties_layout_and_padding() {
+     for (c,h,w) in [(6usize,28usize,28usize),(16,10,10),(3,4,6)] {
+         for batch in [1usize,3] {
+             let cp=c.next_power_of_two();let hp=h.next_power_of_two();let wp=w.next_power_of_two();
+@@ -196,8 +188,7 @@
+     }
+ }
+ 
+-#[test]
+-fn resnet_global_mean_uses_row_major_channels_and_spatial_padding() {
++pub fn resnet_global_mean_uses_row_major_channels_and_spatial_padding() {
+     for shape in [vec![2usize,2,2],vec![3,3,5],vec![3,7,7],vec![2,3,3,5]] {
+         let ndim=shape.len();let c=shape[ndim-3];let h=shape[ndim-2];let w=shape[ndim-1];
+         let batch=if ndim==4 {shape[0]}else{1};
+--- original/zk-torch-4/src/morpheus/piop/exp_tests.rs
++++ adapted/zk-torch-4/src/morpheus/piop/exp_tests.rs
+@@ -54,8 +54,7 @@
+     vc.ok && vc.consumed() && rows_hold(&vc.rows,&raw)
+ }
+ 
+-#[test]
+-fn standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r() {
++pub fn standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r() {
+     let (d,w) = standalone();
+     assert_eq!(d.exp_guard_nodes.len(),1);
+     let mut g = Graph::new(&d,&w,Config {tcl:4,slots_log:10,req_planes_log:6});
+@@ -77,8 +76,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn immutable_literal_source_mutation_fails_verifier_rows() {
++pub fn immutable_literal_source_mutation_fails_verifier_rows() {
+     let (d,w)=standalone();
+     let g=Graph::new(&d,&w,Config {tcl:4,slots_log:10,req_planes_log:6});
+     let mut pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<10]);
+@@ -88,8 +86,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn verifier_statement_rejects_removed_guard_or_changed_literal() {
++pub fn verifier_statement_rejects_removed_guard_or_changed_literal() {
+     let (mut d,w)=standalone();
+     let guard=d.exp_guard_nodes[&0][2];
+     d.exp_guard_nodes.remove(&0);
+@@ -109,8 +106,7 @@
+     assert!(statement::words(&g,&Profile::toy(),&KeySeed([1;8]),11,false,4).is_err());
+ }
+ 
+-#[test]
+-fn finite_exp_rejects_modular_scaled_quotient_counterfeit() {
++pub fn finite_exp_rejects_modular_scaled_quotient_counterfeit() {
+     let mut b=DagBuilder::new();
+     let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(0)],DataType::Float,*crate::SF_LOG,Role::Input));
+     let out=b.exp(x)[0]; let (d,mut w)=b.compile();
+@@ -164,8 +160,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn padded_exp_verifier_rejects_nonzero_claimed_padding() {
++pub fn padded_exp_verifier_rejects_nonzero_claimed_padding() {
+     let mut b=DagBuilder::new();
+     // Positive padding must be masked BEFORE the nonpositive helper guard.
+     let mut values=vec![int_to_f(0);5]; values.extend(vec![int_to_f(400);3]);
+@@ -241,8 +236,7 @@
+     replay(&g,&pd)
+ }
+ 
+-#[test]
+-fn exact_mean_piop_rejects_both_old_half_tie_counterexamples() {
++pub fn exact_mean_piop_rejects_both_old_half_tie_counterexamples() {
+     for (input,correct,wrong) in [(1,1,0),(-1,0,-1)] {
+         assert!(normalization_case(false,input,None));
+         assert!(normalization_case(false,input,Some(correct)));
+@@ -250,24 +244,21 @@
+     }
+ }
+ 
+-#[test]
+-fn exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples() {
++pub fn exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples() {
+     assert!(normalization_case(true,1024,None));
+     for bad in [-1024,0,1023,1025] {assert!(!normalization_case(true,1024,Some(bad)));}
+     assert!(normalization_case(true,0,None));
+     assert!(!normalization_case(true,0,Some(1)));
+ }
+ 
+-#[test]
+-fn exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding() {
++pub fn exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding() {
+     assert!(normalization_case_with_bucket(true,1024,None,None));
+     for wrong in [0,1,10,12,29,31] {
+         assert!(!normalization_case_with_bucket(true,1024,None,Some(wrong)));
+     }
+ }
+ 
+-#[test]
+-fn nonnegative_partial_chunks_preserve_61_62_63_bit_widths() {
++pub fn nonnegative_partial_chunks_preserve_61_62_63_bit_widths() {
+     for bits in [61,62,63] {
+         let mut b=DagBuilder::new();
+         let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(0)],DataType::Int,0,Role::Input));
+@@ -287,8 +278,7 @@
+ 
+ /// Actual PIOP replay authored for InstanceNorm. Native CUDA linkage is still
+ /// required by this crate; a typecheck/CPU predicate test is NOT its execution.
+-#[test]
+-fn instance_norm_piop_defines_statistics_affine_parameters_and_epsilon() {
++pub fn instance_norm_piop_defines_statistics_affine_parameters_and_epsilon() {
+     let sf=10;let mut b=DagBuilder::new();
+     let x=b.committed_input(Witness::new(vec![1,1,1,2],vec![int_to_f(-1024),int_to_f(1024)],DataType::Float,sf,Role::Input));
+     let gamma=b.param(Witness::new(vec![1],vec![int_to_f(1024)],DataType::Float,sf,Role::Constant));
+--- original/zk-torch-4/src/morpheus/piop/mod.rs
++++ adapted/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -30,8 +30,8 @@
+ pub mod gpu;
+ pub mod layout;
+ pub mod tensor;
+-#[cfg(test)]
+-mod exp_tests;
++// VALIDATION ONLY: expose original partial-chunk test.
++pub mod exp_tests;
+ 
+ use crate::basicblock::BasicBlockType;
+ use crate::dag::{Dag, PolyType, Role, Witness};

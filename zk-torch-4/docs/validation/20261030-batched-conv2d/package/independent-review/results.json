@@ -1,0 +1,68 @@
+{
+  "scope": "Independent CPU field/index equations, not native Rust PIOP execution",
+  "seed": "0xBADC0FFEE",
+  "prime": 18446744069414584289,
+  "cases": 80,
+  "assertions": 147192,
+  "padded_output_slots": 3750,
+  "batches": [
+    1,
+    2,
+    3,
+    5
+  ],
+  "channels": [
+    1,
+    3
+  ],
+  "alpha_cases": [
+    0,
+    1,
+    "non-Boolean random"
+  ],
+  "stride_cases": [
+    1,
+    2,
+    3
+  ],
+  "dilation_cases": [
+    1,
+    2
+  ],
+  "mismatched_flatten_kernel_counterexample": {
+    "X": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "W": [
+      2,
+      3
+    ],
+    "FlattenKernel_dilation_w": 2,
+    "Conv2D_dilation_w": 1,
+    "actual_output": [
+      2,
+      4,
+      6,
+      8,
+      10,
+      12,
+      14
+    ],
+    "normal_unflatten_output": [
+      8,
+      13,
+      18,
+      23,
+      28,
+      33,
+      38
+    ]
+  }
+}

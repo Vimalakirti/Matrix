@@ -203,7 +203,7 @@ pub fn range_health_check(witnesses: &[Vec<Witness>], table_size_log: usize) -> 
     for (eid, ws) in witnesses.iter().enumerate() {
         for w in ws {
             let Some(d) = w.data.as_ref() else { continue };
-            for &f in d.evaluations_ref() {
+            for &f in d.evaluations().iter() {
                 let a = f_to_int(f).abs();
                 if a > rep.max_abs {
                     rep.max_abs = a;

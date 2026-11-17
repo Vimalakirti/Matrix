@@ -1,0 +1,65 @@
+   Compiling proc-macro2 v1.0.106
+   Compiling unicode-ident v1.0.24
+   Compiling autocfg v1.5.1
+   Compiling quote v1.0.45
+   Compiling libc v0.2.186
+   Compiling serde_core v1.0.228
+   Compiling version_check v0.9.5
+   Compiling serde v1.0.228
+   Compiling crossbeam-utils v0.8.21
+    Checking typenum v1.20.0
+    Checking memchr v2.8.0
+   Compiling zerocopy v0.8.48
+    Checking cfg-if v1.0.4
+   Compiling generic-array v0.14.7
+   Compiling find-msvc-tools v0.1.9
+   Compiling num-traits v0.2.19
+   Compiling matrixmultiply v0.3.10
+    Checking regex-syntax v0.8.10
+   Compiling shlex v1.3.0
+    Checking aho-corasick v1.1.4
+    Checking crossbeam-epoch v0.9.18
+   Compiling cc v1.2.62
+   Compiling syn v2.0.117
+    Checking getrandom v0.2.17
+    Checking rawpointer v0.2.1
+   Compiling thiserror v1.0.69
+    Checking num-integer v0.1.46
+   Compiling rayon-core v1.13.0
+   Compiling crunchy v0.2.4
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking approx v0.4.0
+    Checking num-complex v0.4.6
+    Checking digest v0.10.7
+    Checking rand_core v0.6.4
+    Checking crossbeam-deque v0.8.6
+    Checking hashbrown v0.16.1
+    Checking equivalent v1.0.2
+    Checking is-terminal v0.4.17
+    Checking lazy_static v1.5.0
+    Checking humantime v2.3.0
+    Checking ryu v1.0.23
+    Checking itoa v1.0.18
+    Checking static_assertions v1.1.0
+    Checking hex v0.4.3
+    Checking byteorder v1.5.0
+    Checking cpufeatures v0.2.17
+    Checking keccak v0.1.6
+    Checking unsafe-libyaml v0.2.11
+    Checking termcolor v1.4.1
+   Compiling almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-selected-normalization-joint/almost-goldilocks-cuda-rs)
+    Checking indexmap v2.13.0
+    Checking either v1.16.0
+    Checking regex-automata v0.4.14
+    Checking log v0.4.29
+error: failed to run custom build command for `almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-selected-normalization-joint/almost-goldilocks-cuda-rs)`
+
+Caused by:
+  process didn't exit successfully: `/workspace/shared/morpheus-causal-softmax-production-target/debug/build/almost-goldilocks-cuda-8b65cbd85dcd74e9/build-script-build` (exit status: 101)
+  --- stderr
+
+  thread 'main' (609) panicked at /workspace/shared/morpheus-selected-normalization-joint/almost-goldilocks-cuda-rs/build.rs:62:9:
+  CUDA toolkit not found at /usr/local/cuda/bin/nvcc
+  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+warning: build failed, waiting for other jobs to finish...

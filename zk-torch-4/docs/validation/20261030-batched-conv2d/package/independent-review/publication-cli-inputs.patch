@@ -1,0 +1,28 @@
+--- before/check_wrapper_integration.py
++++ after/check_wrapper_integration.py
+@@ -5,7 +5,7 @@
+ 
+ def pad(n):return 1<<(n-1).bit_length()
+ parser=argparse.ArgumentParser(description=__doc__)
+-parser.add_argument('--root',type=Path,default=Path('/workspace/shared/morpheus-cnn-layout-q20'),help='CNN source repository root')
++parser.add_argument('--root',type=Path,required=True,help='CNN source repository root')
+ args=parser.parse_args()
+ checks=0;cases=0
+ for B,C,H,W in itertools.product([1,3,5],[1,3,5],[2,3],[4,5]):
+--- before/check_joint_overlay.py
++++ after/check_joint_overlay.py
+@@ -4,10 +4,10 @@
+ import argparse,hashlib,json,re
+ out=Path(__file__).parent
+ parser=argparse.ArgumentParser(description=__doc__)
+-parser.add_argument('--base',type=Path,default=Path('/workspace/shared/morpheus-cnn-layout-joint'),help='Frozen CNN base repository root')
+-parser.add_argument('--root',type=Path,default=Path('/workspace/shared/morpheus-batched-convolution-joint'),help='Combined convolution repository root')
+-parser.add_argument('--supplement',type=Path,default=Path('/workspace/shared/morpheus-cnn-layout-q20'),help='Previously reviewed CNN wrapper source root; frozen base also works if those bodies are identical')
+-parser.add_argument('--manifest',type=Path,default=Path('/workspace/shared/morpheus-cnn-layout-q20-evidence/joint-source-manifest.json'),help='Frozen 454-source base manifest JSON')
++parser.add_argument('--base',type=Path,required=True,help='Frozen CNN base repository root')
++parser.add_argument('--root',type=Path,required=True,help='Combined convolution repository root')
++parser.add_argument('--supplement',type=Path,required=True,help='Previously reviewed CNN wrapper source root; frozen base also works if those bodies are identical')
++parser.add_argument('--manifest',type=Path,required=True,help='Frozen 454-source base manifest JSON')
+ parser.add_argument('--reviewed-hashes',type=Path,default=out / 'reviewed-source-hashes.json',help='Previously recorded reviewed source hashes JSON')
+ args=parser.parse_args()
+ base=args.base

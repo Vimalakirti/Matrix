@@ -130,6 +130,36 @@ impl DenseMLPoly {
         if m == 0 {
             return AlmostGoldilocksExt2::from_base(self.evaluations[0]);
         }
+        // Split-eq evaluation for large polys:
+        //   f(r) = sum_hi eq(r_hi, hi) * sum_lo eq(r_lo, lo) * f[hi * 2^lo + lo].
+        // Two eq tables of 2^(m/2) and a rayon-parallel inner loop of
+        // Ext2 x base multiply-adds, instead of materializing a 2^m Ext2 copy
+        // and folding it on one thread with Ext2 x Ext2 multiplies. Host field
+        // ops return canonical values, so the result is bit-identical. This
+        // evaluator sits under every Add/Sub/ScaleDown/boundary claim in the
+        // backward pass (2-5 ms per node at 2^20 before).
+        if m >= 14 && self.evaluations.len() >= (1usize << m) {
+            use rayon::prelude::*;
+            let lo = m / 2;
+            let eq_lo = crate::poly::evaluate_lagrange_basis_ext2(&point[..lo]);
+            let eq_hi = crate::poly::evaluate_lagrange_basis_ext2(&point[lo..m]);
+            let l = 1usize << lo;
+            let evals = &self.evaluations;
+            return eq_hi
+                .par_iter()
+                .enumerate()
+                .map(|(h, &eh)| {
+                    let row = &evals[h * l..(h + 1) * l];
+                    let mut c0 = AlmostGoldilocksField(0);
+                    let mut c1 = AlmostGoldilocksField(0);
+                    for (e, &f) in eq_lo.iter().zip(row.iter()) {
+                        c0 = c0 + e.c0 * f;
+                        c1 = c1 + e.c1 * f;
+                    }
+                    ext2_mul(eh, AlmostGoldilocksExt2::new(c0, c1))
+                })
+                .reduce(AlmostGoldilocksExt2::zero, ext2_add);
+        }
         let mut data: Vec<AlmostGoldilocksExt2> = self
             .evaluations
             .iter()
@@ -537,5 +567,33 @@ mod tests {
         assert_eq!(scaled.evaluations(), vec![agl(3), agl(6), agl(9), agl(12)]);
         let added = boxed.add(&*boxed.clone_box());
         assert_eq!(added.evaluations(), vec![agl(2), agl(4), agl(6), agl(8)]);
+    }
+
+    #[test]
+    fn evaluate_ext2_split_matches_fold_bitwise() {
+        // The split-eq path (m >= 14) must give the same canonical value as the
+        // sequential fold it replaced.
+        let mut x: u64 = 0x1234_5678_9abc_def1;
+        let mut next = || { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x };
+        for m in [14usize, 15, 17, 18] {
+            let evals: Vec<AlmostGoldilocksField> =
+                (0..1usize << m).map(|_| AlmostGoldilocksField(next() % 0xFFFF_FFFE_FFFF_FFE1)).collect();
+            let point: Vec<AlmostGoldilocksExt2> = (0..m)
+                .map(|_| AlmostGoldilocksExt2::new(AlmostGoldilocksField(next() >> 1), AlmostGoldilocksField(next() >> 1)))
+                .collect();
+            let p = DenseMLPoly::new(m, evals.clone());
+            let got = p.evaluate_ext2(&point);
+            let mut data: Vec<AlmostGoldilocksExt2> = evals.iter().map(|&v| AlmostGoldilocksExt2::from_base(v)).collect();
+            let mut size = 1usize << m;
+            for i in 0..m {
+                let half = size / 2;
+                for j in 0..half {
+                    let a = data[2 * j]; let b = data[2 * j + 1];
+                    data[j] = ext2_add(a, ext2_mul(point[i], ext2_sub(b, a)));
+                }
+                size = half;
+            }
+            assert_eq!(got, data[0], "m={}", m);
+        }
     }
 }

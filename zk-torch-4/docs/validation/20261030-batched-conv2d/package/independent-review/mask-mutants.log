@@ -1,0 +1,12 @@
+{
+  "reference": 8538200,
+  "rejected_mutants": {
+    "drop_B_mask": 18446744068539277989,
+    "drop_C_mask": 34833663128,
+    "drop_D_mask": 18446744068399386399,
+    "drop_all_masks": 104486714306
+  },
+  "equal_opposite_batch_detected": true,
+  "padded_full_advice_delta": 323323,
+  "scope": "Independent arithmetic mutants only, not production proof acceptance"
+}

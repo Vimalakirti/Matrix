@@ -1,0 +1,22 @@
+{
+  "softmax": {
+    "pass_invocations": 186,
+    "log_files": 31
+  },
+  "exp": {
+    "pass_invocations": 434,
+    "log_files": 62
+  },
+  "mean_rms": {
+    "pass_invocations": 189,
+    "log_files": 21
+  },
+  "instance_norm": {
+    "pass_invocations": 168,
+    "log_files": 21
+  },
+  "partial_chunks": {
+    "pass_invocations": 1,
+    "log_files": 1
+  }
+}

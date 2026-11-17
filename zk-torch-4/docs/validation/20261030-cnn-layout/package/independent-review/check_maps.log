@@ -1,0 +1,6 @@
+{
+  "flatten_shapes": 158,
+  "non_boolean_mle_stage_checks": 428,
+  "channel_bias_shapes": 36,
+  "claim": "independent Python algebra/index checks only; no Rust PIOP or PCS execution"
+}

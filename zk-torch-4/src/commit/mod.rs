@@ -538,14 +538,35 @@ fn commit_sparse_witness_with_planes(key: &AjtaiKey, witness: &Witness) -> (Edge
     let native_k = sparse.selection.input_num_vars + sparse.selection.table_num_vars;
     let k_commit = native_k.max(6);
 
-    let positions: Vec<u64> = sparse
-        .selection
-        .selection
-        .iter()
-        .map(|&(input_idx, table_idx)| {
-            (input_idx + table_idx * (1usize << sparse.selection.input_num_vars)) as u64
-        })
-        .collect();
+    // Positions SORTED. The commitment is an order-independent sum (and the
+    // GPU reduction canonicalizes, so the result is bit-identical), but the
+    // sparse kernel regenerates a PRG column only when consecutive positions
+    // change column: in row order a one-hot chunk with spread-out table
+    // indices changes column at nearly every position. Sorted, a 2^20-row
+    // chunk commits 26 -> 8 ms (with the kernel's lazy accumulation). With
+    // the compact `tidx` (row-ordered, one entry per row) the sort is a
+    // counting sort by table index; otherwise a plain sort.
+    let sel = &sparse.selection;
+    let in_n = sel.input_num_vars;
+    let positions: Vec<u64> = if !sel.tidx.is_empty() {
+        let tsize = 1usize << sel.table_num_vars;
+        let mut start = vec![0usize; tsize + 1];
+        for &t in &sel.tidx { start[t as usize + 1] += 1; }
+        for t in 0..tsize { start[t + 1] += start[t]; }
+        let mut out = vec![0u64; sel.tidx.len()];
+        for (i, &t) in sel.tidx.iter().enumerate() {
+            let t = t as usize;
+            out[start[t]] = (i + (t << in_n)) as u64;
+            start[t] += 1;
+        }
+        out
+    } else {
+        let mut v: Vec<u64> = sel.selection.iter()
+            .map(|&(input_idx, table_idx)| (input_idx + table_idx * (1usize << in_n)) as u64)
+            .collect();
+        v.sort_unstable();
+        v
+    };
 
     let n_ring: u64 = 1u64 << (k_commit - 6);
     let _ = n_ring;

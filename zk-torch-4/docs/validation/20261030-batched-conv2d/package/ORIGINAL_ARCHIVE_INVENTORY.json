@@ -1,0 +1,25 @@
+{
+  "archive_basename": "morpheus-batched-convolution-bundle.tar.gz",
+  "sha256": "47bfbf050cf7283ac0b017c004a7865d5c5cc56f6c792114a7ac920c67525511",
+  "preserved_locally_unchanged": true,
+  "compressed_bytes": 4863841,
+  "regular_file_counts_by_prefix": {
+    "README.md": 1,
+    "artifact-manifest.json": 1,
+    "base": 454,
+    "evidence": 55,
+    "independent-review": 24,
+    "source": 455
+  },
+  "uncompressed_bytes_by_prefix": {
+    "README.md": 4021,
+    "artifact-manifest.json": 145437,
+    "base": 9433099,
+    "evidence": 558899,
+    "independent-review": 137825,
+    "source": 9454690
+  },
+  "actual_regular_files": 990,
+  "entries_listed_by_artifact_manifest": 989,
+  "explanation": "989 is the manifest entry count; the manifest itself is one additional regular file. 909 entries are duplicate base454 plus final455 source snapshots; this publication export omits both trees."
+}

@@ -22,6 +22,7 @@
 
 #include "almost_goldilocks.cuh"
 #include "ajtai_chacha8.cuh"
+#include <cstdlib>
 
 namespace ajtai {
 
@@ -406,22 +407,40 @@ __global__ void commit_sparse_partial_kernel(
 
     if (t < 8) key_sh[t] = chacha_key[t];
 
-    uint64_t acc[KAPPA];
+    // Lazy accumulation (lo + 2^64 * hi, one reduction at the end; a negacyclic
+    // wrap adds q - v), as in commit_ternary_rows_kernel. With sorted positions
+    // (the online commit sorts them) a one-hot 2^20-row chunk went 13.7 ->
+    // 7.9 ms; the canonicalized commitment is identical. hi counts carries:
+    // at most CHUNK adds per accumulator.
+    uint64_t lo[KAPPA];
+    uint32_t hi[KAPPA];
     #pragma unroll
-    for (int i = 0; i < KAPPA; i++) acc[i] = 0;
+    for (int i = 0; i < KAPPA; i++) { lo[i] = 0; hi[i] = 0; }
 
     uint64_t p_lo = (uint64_t)chunk * CHUNK;
     uint64_t p_hi = (p_lo + CHUNK < K) ? (p_lo + CHUNK) : K;
 
     __syncthreads();
 
+    // Regenerate column j only when it changes. Positions are sorted, so all
+    // set bits of one ring column arrive together, and the previous version
+    // re-ran the 336-block ChaCha8 fill for every one of them. One-hot lookup
+    // chunks are the extreme case: a column is 64 consecutive rows of ONE
+    // table entry, and in the high chunks of real activations most rows share
+    // an entry, so a column can hold up to 64 set bits. The accumulation order
+    // is unchanged, so the commitment is bit-identical.
+    uint64_t prev_j = ~(uint64_t)0;
     for (uint64_t k = p_lo; k < p_hi; k++) {
         uint64_t p   = positions[k];
         uint64_t j   = p >> 6;
         int      ell = (int)(p & 63);
 
-        prg_fill_column(key_sh, j, M_sh, t, (int)blockDim.x);
-        __syncthreads();
+        if (j != prev_j) {          // uniform across the block (same k)
+            __syncthreads();        // previous column's reads are done
+            prg_fill_column(key_sh, j, M_sh, t, (int)blockDim.x);
+            __syncthreads();
+            prev_j = j;
+        }
 
         int  idx_ = t - ell;
         bool wrap = idx_ < 0;
@@ -429,16 +448,19 @@ __global__ void commit_sparse_partial_kernel(
 
         #pragma unroll
         for (int i = 0; i < KAPPA; i++) {
-            uint64_t v = M_sh[i * D + idx_];
-            acc[i] = add_signed(acc[i], v, wrap);
+            const uint64_t v = M_sh[i * D + idx_];
+            const uint64_t x = wrap ? (ALMOST_GOLDILOCKS_PRIME - v) : v;
+            const uint64_t s2 = lo[i] + x;
+            hi[i] += (s2 < x) ? 1u : 0u;
+            lo[i] = s2;
         }
-        __syncthreads();
     }
 
     uint64_t base = ((uint64_t)chunk * KAPPA) * D + t;
     #pragma unroll
     for (int i = 0; i < KAPPA; i++) {
-        partial[base + i * D] = acc[i];
+        agl_uint128_t x; x.lo = lo[i]; x.hi = hi[i];
+        partial[base + i * D] = agl_reduce128(x);
     }
 }
 
@@ -1347,6 +1369,322 @@ commit_ternary_kernel(
     }
 }
 
+// ============================================================================
+// Row-split ternary commit kernel (default; AGL_TERNARY_ROWS=0 for the above).
+//
+// commit_ternary_kernel keeps all KAPPA = 42 u64 accumulators per thread at
+// 832 threads per block, i.e. 84 registers of accumulators against a 72-register
+// cap: ptxas spills 920 B per thread and every add round-trips local memory.
+// Measured 1017 ms for N_ring = 2^18 (log_n 24), ~0.16 T modular adds/s.
+//
+// Here blockIdx.y selects a group of TROWS output rows, so a thread holds
+// TROWS lazy accumulators (no spill) and a block fills only its rows of the PRG
+// column (TROWS * 8 ChaCha8 blocks instead of KAPPA * 8: total PRG work is
+// KAPPA rounded up to TROWS, ~14% more). The 4 KB tile lets several blocks
+// share an SM, which also hides the idle warps of digits with few set bits.
+//
+// Output layout and the reduction are unchanged. The reduction canonicalizes,
+// so the different association of the (mod q) additions gives a bit-identical
+// commitment.
+// ============================================================================
+constexpr int TROWS   = 8;
+constexpr int TGROUPS = (KAPPA + TROWS - 1) / TROWS;
+
+template <int CHUNK>
+__global__ void
+__launch_bounds__(SPLIT_K * D, 1)
+commit_ternary_rows_kernel(
+    const uint32_t* __restrict__ chacha_key,
+    const uint64_t* __restrict__ pos_packed,        // [SPLIT_K * N_ring]
+    const uint64_t* __restrict__ neg_packed,        // [SPLIT_K * N_ring]
+    uint64_t*       __restrict__ partial,           // [num_chunks_j][SPLIT_K][KAPPA][D]
+    uint64_t                     N_ring
+) {
+    const int chunk = blockIdx.x;
+    const int i0    = blockIdx.y * TROWS;
+    const int nrows = (KAPPA - i0 < TROWS) ? (KAPPA - i0) : TROWS;
+    const int t     = threadIdx.x;
+    const int b     = t / D;
+    const int r     = t & (D - 1);
+
+    __shared__ uint32_t key_sh[8];
+    __shared__ uint64_t M_sh[TROWS * D];
+    __shared__ uint64_t pos_sh[SPLIT_K];
+    __shared__ uint64_t neg_sh[SPLIT_K];
+
+    if (t < 8) key_sh[t] = chacha_key[t];
+
+    // Lazy accumulation: lo + 2^64 * hi, reduced once at the end. A signed
+    // term -v is added as q - v (M entries are canonical, so q - v is in
+    // (0, q]), which removes both the per-add modular corrections and the
+    // lane-divergent add/sub branch of add_signed. hi counts carries out of
+    // lo; a thread performs at most CHUNK * 64 adds per row, far below 2^32.
+    // Microbenchmark (N_ring = 2^18, 128 nonzeros/column): 294 -> 210 ms, and
+    // the canonicalized partials are identical.
+    uint64_t lo[TROWS];
+    uint32_t hi[TROWS];
+    #pragma unroll
+    for (int i = 0; i < TROWS; i++) { lo[i] = 0; hi[i] = 0; }
+
+    const uint64_t j_lo = (uint64_t)chunk * CHUNK;
+    const uint64_t j_hi = (j_lo + CHUNK < N_ring) ? (j_lo + CHUNK) : N_ring;
+
+    __syncthreads();
+
+    for (uint64_t j = j_lo; j < j_hi; j++) {
+        if (t < SPLIT_K) {
+            pos_sh[t] = pos_packed[(uint64_t)t * N_ring + j];
+            neg_sh[t] = neg_packed[(uint64_t)t * N_ring + j];
+        }
+        for (int task = t; task < nrows * 8; task += (int)blockDim.x) {
+            const int lr = task >> 3;
+            const int bi = task & 7;
+            uint64_t buf[8];
+            prg_ring_block_chacha8(key_sh, (uint32_t)(i0 + lr), j, (uint32_t)bi, buf);
+            #pragma unroll
+            for (int k = 0; k < 8; k++) M_sh[lr * D + 8 * bi + k] = buf[k];
+        }
+        __syncthreads();
+
+        // One pass over pos | neg (disjoint): the sign of a term is its
+        // negative-digit bit XOR the negacyclic wrap.
+        const uint64_t mn = neg_sh[b];
+        uint64_t m = pos_sh[b] | mn;
+        while (m) {
+            const int ell = __ffsll((long long)m) - 1;
+            m &= m - 1;
+            int  idx_ = r - ell;
+            const bool wrap = idx_ < 0;
+            idx_ += wrap ? D : 0;
+            const bool neg = (((mn >> ell) & 1ull) != 0) ^ wrap;
+            #pragma unroll
+            for (int i = 0; i < TROWS; i++) {
+                if (i < nrows) {
+                    const uint64_t v = M_sh[i * D + idx_];
+                    const uint64_t x = neg ? (ALMOST_GOLDILOCKS_PRIME - v) : v;
+                    const uint64_t s2 = lo[i] + x;
+                    hi[i] += (s2 < x) ? 1u : 0u;
+                    lo[i] = s2;
+                }
+            }
+        }
+        __syncthreads();
+    }
+
+    const uint64_t base = ((uint64_t)chunk * SPLIT_K + b) * (KAPPA * D) + r;
+    #pragma unroll
+    for (int i = 0; i < TROWS; i++) {
+        if (i < nrows) {
+            agl_uint128_t x; x.lo = lo[i]; x.hi = hi[i];
+            partial[base + (uint64_t)(i0 + i) * D] = agl_reduce128(x);
+        }
+    }
+}
+
+// ============================================================================
+// Tensor-core ternary commit (default; AGL_TERNARY_TC=0 restores the lazy
+// row-split kernel above).
+//
+// For one matrix column j, the 13 digit commitments are one integer GEMM:
+//   C[(i, r), b] += sum_ell A_j[(i, r), ell] * Z_j[ell, b],
+// A_j = the negacyclic Toeplitz expansion of the column's KAPPA ring elements
+// (A[r][ell] = M_i[r - ell], negated on wrap), Z_j = the ternary digits as s8.
+// A's 64-bit field entries are split into 8 byte planes; each plane is an
+// exact u8 x s8 -> s32 m16n8k32 MMA, and the planes recombine exactly as
+// sum_p 2^(8p) C_p before one reduction mod q. Exact integer arithmetic, so
+// the commitment is bit-identical after the final canonicalization.
+// s32 accumulators: |C_p| <= 255 * 64 * cols < 2^31 for cols <= 131072 columns per block.
+//
+// Microbenchmark (A100, N_ring = 2^18): 50.6 ms vs 210-331 ms for the lazy
+// kernel, independent of digit density.
+// ============================================================================
+constexpr int TC_ROWS = 2;                 // KAPPA rows per block (42 = 21 groups)
+static_assert(KAPPA % TC_ROWS == 0, "tensor-core commit assumes KAPPA divisible by TC_ROWS");
+constexpr int TC_WARPS = TC_ROWS * 4;      // one m-tile (16 coeffs) per warp
+constexpr int TC_FLEN = 136;               // bytes per plane row of the Toeplitz array (127 used + pad)
+
+__device__ __forceinline__ void mma_u8s8(int (&d)[4], const uint32_t (&a)[4], const uint32_t (&b)[2]) {
+    asm volatile("mma.sync.aligned.m16n8k32.row.col.s32.u8.s8.s32 "
+                 "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+                 : "+r"(d[0]), "+r"(d[1]), "+r"(d[2]), "+r"(d[3])
+                 : "r"(a[0]), "r"(a[1]), "r"(a[2]), "r"(a[3]), "r"(b[0]), "r"(b[1]));
+}
+// 4 consecutive bytes starting at byte offset o (any alignment) of a 4-byte-aligned buffer.
+__device__ __forceinline__ uint32_t ld4u(const uint32_t* w, int o) {
+    uint32_t lo = w[o >> 2], hi = w[(o >> 2) + 1];
+    return __funnelshift_r(lo, hi, (o & 3) * 8);
+}
+// 4 signed digits {-1,0,1} as s8 bytes from 4 bits of pos/neg.
+__device__ __forceinline__ uint32_t spread4(uint32_t x) {
+    // bit k of a nibble -> byte k (0x01). The shifted copies x << 7m land on
+    // distinct bit positions, so the multiply has no carries.
+    return (x * 0x00204081u) & 0x01010101u;
+}
+__device__ __forceinline__ uint32_t digits4(uint64_t pos, uint64_t neg, int ell) {
+    const uint32_t p = (uint32_t)(pos >> ell) & 0xF, n = (uint32_t)(neg >> ell) & 0xF;
+    return spread4(p) | (spread4(n) * 0xFFu);   // +1 -> 0x01, -1 -> 0xFF (s8)
+}
+
+// v2: warp = (local row li, plane pair pp); covers all 4 m-tiles of its row.
+// A lane's Toeplitz offsets across m-tiles differ by exactly 16 bytes, so one
+// window of WINW words per plane serves 4 m-tiles x 2 k-steps, with
+// compile-time word indices (only the funnel shift amount is per-lane).
+constexpr int TC2_PPW = 2;                     // planes per warp
+constexpr int TC2_WARPS = TC_ROWS * (8 / TC2_PPW);
+constexpr int TC2_FLEN = 192;                  // bytes per plane row (window may start below 0: offset 56)
+constexpr int TC2_OFF = 56;                    // F index u' is stored at byte u' + TC2_OFF
+template <int CB>
+__global__ void __launch_bounds__(TC2_WARPS * 32)
+commit_ternary_tc2_kernel(const uint32_t* __restrict__ chacha_key, const uint64_t* __restrict__ pos_packed,
+                          const uint64_t* __restrict__ neg_packed, uint64_t* __restrict__ partial, uint64_t N_ring,
+                          uint64_t cols) {
+    const int chunk = blockIdx.x, i0 = blockIdx.y * TC_ROWS;
+    const int t = threadIdx.x, warp = t >> 5, lane = t & 31, gid = lane >> 2, tig = lane & 3;
+    const int li = warp / (8 / TC2_PPW);
+    const int p0 = (warp % (8 / TC2_PPW)) * TC2_PPW;
+    constexpr int NT = TC2_WARPS * 32;
+    __shared__ uint32_t key_sh[8];
+    __shared__ uint64_t M_sh[CB][TC_ROWS * D];
+    __shared__ uint64_t pos_sh[CB][SPLIT_K], neg_sh[CB][SPLIT_K];
+    __shared__ __align__(16) uint32_t F_sh[CB][TC_ROWS][8][TC2_FLEN / 4];
+    if (t < 8) key_sh[t] = chacha_key[t];
+    int acc[TC2_PPW][4][2][4];   // [plane][m-tile][n-tile][c]
+    #pragma unroll
+    for (int q = 0; q < TC2_PPW; q++)
+      #pragma unroll
+      for (int mt = 0; mt < 4; mt++)
+        #pragma unroll
+        for (int nt = 0; nt < 2; nt++)
+          #pragma unroll
+          for (int c = 0; c < 4; c++) acc[q][mt][nt][c] = 0;
+    const uint64_t j_lo = (uint64_t)chunk * cols, j_hi = (j_lo + cols < N_ring) ? (j_lo + cols) : N_ring;
+    // Lane window: o_mt,ks,delta = ks*32 + tig*4 - (16mt + gid) + 63 + delta, delta in {-8,0,8,16};
+    // smallest = tig*4 - gid + 63 - 48 - 8 = tig*4 - gid + 7 (>= 0). Stored at +TC2_OFF.
+    const int wbase_b = tig * 4 - gid + 7 + TC2_OFF;      // byte offset of window start
+    const int sh = (wbase_b & 3) * 8;
+    const int w0 = wbase_b >> 2;
+    // zero the whole F (pad region) once
+    for (int x = t; x < CB * TC_ROWS * 8 * (TC2_FLEN / 4); x += NT) ((uint32_t*)F_sh)[x] = 0;
+    __syncthreads();
+    for (uint64_t jb = j_lo; jb < j_hi; jb += CB) {
+        const int nb = (int)((j_hi - jb < (uint64_t)CB) ? (j_hi - jb) : CB);
+        for (int x = t; x < nb * SPLIT_K; x += NT) {
+            const int c = x / SPLIT_K, d = x % SPLIT_K;
+            pos_sh[c][d] = pos_packed[(uint64_t)d * N_ring + jb + c];
+            neg_sh[c][d] = neg_packed[(uint64_t)d * N_ring + jb + c];
+        }
+        for (int x = t; x < nb * TC_ROWS * 8; x += NT) {
+            const int c = x / (TC_ROWS * 8), lr = (x >> 3) % TC_ROWS, bi = x & 7; uint64_t buf[8];
+            prg_ring_block_chacha8(key_sh, (uint32_t)(i0 + lr), jb + c, (uint32_t)bi, buf);
+            #pragma unroll
+            for (int k = 0; k < 8; k++) M_sh[c][lr * D + 8 * bi + k] = buf[k];
+        }
+        __syncthreads();
+        for (int x = t; x < nb * TC_ROWS * 128; x += NT) {
+            const int c = x / (TC_ROWS * 128), lr = (x >> 7) % TC_ROWS, u = x & 127;
+            uint64_t v = 0;
+            if (u < 127) {
+                const int k = 63 - u;
+                if (k >= 0) v = M_sh[c][lr * D + k];
+                else { uint64_t m = M_sh[c][lr * D + k + 64]; v = m ? (ALMOST_GOLDILOCKS_PRIME - m) : 0; }
+            }
+            unsigned char* Fb = (unsigned char*)&F_sh[c][lr][0][0];
+            #pragma unroll
+            for (int p = 0; p < 8; p++) Fb[p * TC2_FLEN + TC2_OFF + u] = (unsigned char)(v >> (8 * p));
+        }
+        __syncthreads();
+        for (int c = 0; c < nb; c++) {
+            uint32_t bf[2][2][2];
+            #pragma unroll
+            for (int nt = 0; nt < 2; nt++) {
+                const int b = nt * 8 + gid;
+                const uint64_t P = (b < SPLIT_K) ? pos_sh[c][b] : 0, N = (b < SPLIT_K) ? neg_sh[c][b] : 0;
+                #pragma unroll
+                for (int ks = 0; ks < 2; ks++) {
+                    bf[nt][ks][0] = digits4(P, N, ks * 32 + tig * 4);
+                    bf[nt][ks][1] = digits4(P, N, ks * 32 + 16 + tig * 4);
+                }
+            }
+            #pragma unroll
+            for (int q = 0; q < TC2_PPW; q++) {
+                const uint32_t* Fw = F_sh[c][li][p0 + q];
+                // window words w0 .. w0+28 (byte span 107 + funnel lookahead)
+                uint32_t win[29];
+                #pragma unroll
+                for (int k = 0; k < 29; k++) win[k] = Fw[w0 + k];
+                #pragma unroll
+                for (int mt = 0; mt < 4; mt++) {
+                    #pragma unroll
+                    for (int ks = 0; ks < 2; ks++) {
+                        // o_mt,ks (delta 0) sits 56 - 16mt + 32ks bytes past the window
+                        // start (plus the lane's sub-word shift `sh`): word `base`.
+                        const int base = (56 - 16 * mt + 32 * ks) / 4;   // compile-time
+                        uint32_t a[4];
+                        a[0] = __funnelshift_r(win[base + 0], win[base + 1], sh);   // row r,   cols ell..   (delta 0)
+                        a[1] = __funnelshift_r(win[base - 2], win[base - 1], sh);   // row r+8           (delta -8)
+                        a[2] = __funnelshift_r(win[base + 4], win[base + 5], sh);   // row r,   cols +16 (delta +16)
+                        a[3] = __funnelshift_r(win[base + 2], win[base + 3], sh);   // row r+8, cols +16 (delta +8)
+                        mma_u8s8(acc[q][mt][0], a, bf[0][ks]);
+                        mma_u8s8(acc[q][mt][1], a, bf[1][ks]);
+                    }
+                }
+            }
+        }
+        __syncthreads();
+    }
+    // Each warp writes its plane group's signed partial (mod q) as its own
+    // "chunk" (index chunk * 4 + pg); reduce_partials sums them with the
+    // column chunks, which is just more terms of the same sum mod q.
+    const int pg = p0 / TC2_PPW;
+    const int i = i0 + li;
+    #pragma unroll
+    for (int mt = 0; mt < 4; mt++)
+      #pragma unroll
+      for (int nt = 0; nt < 2; nt++)
+        #pragma unroll
+        for (int c = 0; c < 4; c++) {
+            const int rr = 16 * mt + gid + ((c >= 2) ? 8 : 0);
+            const int b = nt * 8 + tig * 2 + (c & 1);
+            if (b >= SPLIT_K || i >= KAPPA) continue;
+            uint64_t ulo = 0; int64_t uhi = 0;
+            #pragma unroll
+            for (int q = 0; q < TC2_PPW; q++) {
+                const int p = p0 + q;
+                const int64_t a = acc[q][mt][nt][c];
+                uint64_t tlo; int64_t thi;
+                if (p == 0) { tlo = (uint64_t)a; thi = (a < 0) ? -1 : 0; }
+                else { tlo = (uint64_t)a << (8 * p); thi = a >> (64 - 8 * p); }
+                const uint64_t s2 = ulo + tlo; uhi += thi + (s2 < ulo ? 1 : 0); ulo = s2;
+            }
+            uint64_t v;
+            if (uhi >= 0) { agl_uint128_t X; X.lo = ulo; X.hi = (uint64_t)uhi; v = agl_reduce128(X); }
+            else {
+                const uint64_t nlo = ~ulo + 1; const uint64_t nhi = ~(uint64_t)uhi + (nlo == 0 ? 1 : 0);
+                agl_uint128_t X; X.lo = nlo; X.hi = nhi;
+                v = agl_sub_no_canonicalize(0, agl_reduce128(X));
+            }
+            partial[((((uint64_t)chunk * 4 + pg) * SPLIT_K + b) * KAPPA + i) * D + rr] = v;
+        }
+}
+
+inline bool agl_ternary_tc_on() {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("AGL_TERNARY_TC");
+        on = (e && e[0] == '0') ? 0 : 1;
+    }
+    return on == 1;
+}
+
+inline bool agl_ternary_rows_on() {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("AGL_TERNARY_ROWS");
+        on = (e && e[0] == '0') ? 0 : 1;
+    }
+    return on == 1;
+}
+
 template <int CHUNK>
 inline cudaError_t commit_ternary_run(
     const uint32_t* d_chacha_key,
@@ -1360,16 +1698,52 @@ inline cudaError_t commit_ternary_run(
 
     uint64_t num_chunks = (N_ring + CHUNK - 1) / CHUNK;
 
+    if (agl_ternary_tc_on()) {
+        // Column blocks: at most 256 (4 partial slots each, one per
+        // plane-pair warp group), so partials stay <= ~290 MB even at
+        // arity 29 (N_ring 2^23), where one slot set per caller CHUNK came to
+        // 2.3 GB and failed to allocate in the memory-heavy finalization.
+        // Each block may then take more columns, up to 131072 (the s32
+        // accumulator bound).
+        uint64_t gx = num_chunks < 256 ? num_chunks : 256;
+        const uint64_t need = (N_ring + 131071) / 131072;
+        if (gx < need) gx = need;
+        const uint64_t cols = (N_ring + gx - 1) / gx;
+        const uint64_t slots = gx * 4;
+        uint64_t* d_partial = nullptr;
+        cudaError_t err = cudaMallocAsync(&d_partial, slots * (uint64_t)SPLIT_K * KAPPA * D * sizeof(uint64_t), stream);
+        if (err != cudaSuccess) {
+            cudaGetLastError();   // clear, and fall through to the lazy kernel
+            goto lazy_path;
+        }
+        dim3 g((unsigned)gx, (unsigned)(KAPPA / TC_ROWS));
+        commit_ternary_tc2_kernel<4><<<g, TC2_WARPS * 32, 0, stream>>>(
+            d_chacha_key, d_pos_packed, d_neg_packed, d_partial, N_ring, cols);
+        dim3 grid2((unsigned)SPLIT_K, (unsigned)KAPPA, (unsigned)D);
+        reduce_partials_kernel<<<grid2, 256, 256 * sizeof(uint64_t), stream>>>(
+            d_partial, d_out, SPLIT_K, slots);
+        cudaError_t free_err = cudaFreeAsync(d_partial, stream);
+        if (free_err != cudaSuccess) return free_err;
+        return cudaGetLastError();
+    }
+lazy_path:
     uint64_t partial_count = num_chunks * (uint64_t)SPLIT_K * KAPPA * D;
     uint64_t* d_partial = nullptr;
     cudaError_t err = cudaMallocAsync(&d_partial, partial_count * sizeof(uint64_t), stream);
     if (err != cudaSuccess) return err;
 
-    dim3 grid1((unsigned)num_chunks);
     dim3 block1((unsigned)(SPLIT_K * D));
-    commit_ternary_kernel<CHUNK><<<grid1, block1, 0, stream>>>(
-        d_chacha_key, d_pos_packed, d_neg_packed, d_partial, N_ring
-    );
+    if (agl_ternary_rows_on()) {
+        dim3 grid1((unsigned)num_chunks, (unsigned)TGROUPS);
+        commit_ternary_rows_kernel<CHUNK><<<grid1, block1, 0, stream>>>(
+            d_chacha_key, d_pos_packed, d_neg_packed, d_partial, N_ring
+        );
+    } else {
+        dim3 grid1((unsigned)num_chunks);
+        commit_ternary_kernel<CHUNK><<<grid1, block1, 0, stream>>>(
+            d_chacha_key, d_pos_packed, d_neg_packed, d_partial, N_ring
+        );
+    }
 
     dim3 grid2((unsigned)SPLIT_K, (unsigned)KAPPA, (unsigned)D);
     int block2 = 256;

@@ -26,7 +26,8 @@ fn conv3x3_bn_relu(
         g.conv2d(h, w, (3, 3))[0]
     };
     let h = rescale_conv(g, h, w);
-    let h = g.add(h, bias)[0];
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    let h = g.add_channel_bias_row_major(h, bias, c, 2);
     g.relu(h)
 }
 
@@ -40,7 +41,8 @@ fn conv1x1_bn_relu(
 ) -> EdgeId {
     let h = g.conv2d(x, w, (1, 1))[0];
     let h = rescale_conv(g, h, w);
-    let h = g.add(h, bias)[0];
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    let h = g.add_channel_bias_row_major(h, bias, c, 2);
     g.relu(h)
 }
 
@@ -55,7 +57,8 @@ fn deconv_bn_relu(
 ) -> EdgeId {
     let h = g.conv_transpose2d(x, w, kernel, stride)[0];
     let h = rescale_conv(g, h, w);
-    let h = g.add(h, bias)[0];
+    let c = g.init_values[h].as_ref().unwrap().shape[0];
+    let h = g.add_channel_bias_row_major(h, bias, c, 2);
     g.relu(h)
 }
 

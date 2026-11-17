@@ -95,6 +95,11 @@ pub struct Einsum {
 }
 
 impl Einsum {
+    /// Public cached index schedule (never tensor payloads).
+    pub(crate) fn public_schedule(&self) -> (&[Vec<(usize, usize)>], usize) {
+        (&self.permute_vecs, self.summation_round)
+    }
+
     pub fn new(equation: &str, input_shapes: Vec<Vec<usize>>, output_shape: Vec<usize>) -> Self {
         let mut all_shapes = input_shapes.clone();
         all_shapes.push(output_shape.clone());
@@ -263,6 +268,63 @@ fn compute_perm_map(n: usize, ranges: &[(usize, usize)]) -> Vec<i32> {
 
 fn is_identity_perm(perm_map: &[i32]) -> bool {
     perm_map.iter().enumerate().all(|(i, &v)| v == i as i32)
+}
+
+/// Device copies of einsum operands that are model weights (`Role::Constant`):
+/// identical across proofs, but the GPU einsum prover re-uploaded them every
+/// proof (the 2^26-word GPT-2 embedding table cost ~100 ms per proof in a
+/// host copy + pageable upload). Keyed by (device, host data pointer, length);
+/// a strided sample of 64 words is re-checked on every hit, so a buffer whose
+/// contents changed is never served (it is re-uploaded instead). Capped per
+/// device by ZK4_EINSUM_WCACHE_GB (default 16); allocation failure just skips
+/// caching. ZK4_EINSUM_WCACHE=0 disables.
+struct WCacheEntry { sample: u64, buf: Arc<DeviceBuffer<u64>> }
+static WCACHE: OnceLock<std::sync::Mutex<(HashMap<(i32, usize, usize), WCacheEntry>, HashMap<i32, usize>)>> =
+    OnceLock::new();
+
+fn evals_as_u64(evals: &[AlmostGoldilocksField]) -> &[u64] {
+    // SAFETY: AlmostGoldilocksField is #[repr(transparent)] over u64.
+    unsafe { std::slice::from_raw_parts(evals.as_ptr() as *const u64, evals.len()) }
+}
+
+fn sample_words(w: &[u64]) -> u64 {
+    if w.is_empty() { return 0; }
+    let mut h: u64 = 0x9E37_79B9_7F4A_7C15 ^ (w.len() as u64);
+    let step = (w.len() / 64).max(1);
+    let mut k = 0usize;
+    while k < w.len() { h = (h ^ w[k]).wrapping_mul(0x100_0000_01B3).rotate_left(17); k += step; }
+    h ^ w[w.len() - 1]
+}
+
+/// Device buffer holding `evals` on the current device: cached when the
+/// witness is a weight, else a fresh upload (no intermediate host copy).
+fn device_operand(witness: &Witness, evals: &[AlmostGoldilocksField]) -> Arc<DeviceBuffer<u64>> {
+    let words = evals_as_u64(evals);
+    let on = std::env::var("ZK4_EINSUM_WCACHE").ok().as_deref() != Some("0");
+    if std::env::var("ZK4_EINSUM_TIMING").is_ok() && words.len() >= (1 << 24) {
+        eprintln!("[wcache] words={} role={:?} ptr={:p}", words.len(), witness.role, words.as_ptr());
+    }
+    if !(on && witness.role == Role::Constant) {
+        return Arc::new(DeviceBuffer::<u64>::from_slice(words).expect("upload"));
+    }
+    let dev = almost_goldilocks_cuda::current_device();
+    let key = (dev, words.as_ptr() as usize, words.len());
+    let sample = sample_words(words);
+    let cache = WCACHE.get_or_init(|| std::sync::Mutex::new((HashMap::new(), HashMap::new())));
+    if let Some(e) = cache.lock().unwrap().0.get(&key) {
+        if e.sample == sample { return e.buf.clone(); }
+    }
+    let buf = Arc::new(DeviceBuffer::<u64>::from_slice(words).expect("upload"));
+    let cap = std::env::var("ZK4_EINSUM_WCACHE_GB").ok().and_then(|s| s.parse::<f64>().ok()).unwrap_or(16.0);
+    let bytes = words.len() * 8;
+    let mut g = cache.lock().unwrap();
+    let used = *g.1.get(&dev).unwrap_or(&0);
+    let replacing = g.0.get(&key).map(|e| e.buf.len() * 8).unwrap_or(0);
+    if (used - replacing + bytes) as f64 <= cap * 1e9 {
+        g.0.insert(key, WCacheEntry { sample, buf: buf.clone() });
+        *g.1.entry(dev).or_insert(0) = used - replacing + bytes;
+    }
+    buf
 }
 
 pub fn permute_evals_by_ranges(
@@ -550,11 +612,119 @@ fn try_run_gpu(equation: &str, inputs: &[&Witness]) -> Option<Vec<Witness>> {
 // CPU forward einsum
 // ============================================================================
 
+/// Opt-in fast CPU forward for two-input contractions over exactly one
+/// summation index (the matmuls, attention products, embedding lookup and LM
+/// head): each operand is repacked with the summation axis contiguous, sparse
+/// rows (one-hot selectors) are contracted over their nonzeros only. Equal
+/// field VALUES to the generic path (canonical words; the generic path's words
+/// may be non-canonical), so it is off by default and on for WEIGHTS=real
+/// (where the Jacobi generation runs ~100 forward passes) or
+/// ZK4_FAST_EINSUM=1; ZK4_FAST_EINSUM=0 forces the generic path.
+fn fast_einsum_enabled() -> bool {
+    static F: OnceLock<bool> = OnceLock::new();
+    *F.get_or_init(|| match std::env::var("ZK4_FAST_EINSUM").ok().as_deref() {
+        Some("1") => true,
+        Some("0") => false,
+        _ => std::env::var("WEIGHTS").ok().as_deref() == Some("real"),
+    })
+}
+
+fn einsum_compute_fast(
+    equation: &str,
+    inputs: &[&[AlmostGoldilocksField]],
+    input_shapes: &[Vec<usize>],
+) -> Option<Vec<AlmostGoldilocksField>> {
+    if inputs.len() != 2 { return None; }
+    let (lhs, rhs) = equation.split_once("->")?;
+    let terms: Vec<Vec<char>> = lhs.split(',').map(|t| t.chars().collect()).collect();
+    let out: Vec<char> = rhs.chars().collect();
+    for (t, sh) in terms.iter().zip(input_shapes) {
+        if t.len() != sh.len() { return None; }
+        let mut seen = HashSet::new();
+        if !t.iter().all(|c| seen.insert(*c)) { return None; }
+    }
+    let mut dim: HashMap<char, usize> = HashMap::new();
+    for (t, sh) in terms.iter().zip(input_shapes) {
+        for (&c, &d) in t.iter().zip(sh) { dim.insert(c, d.next_power_of_two()); }
+    }
+    let sums: Vec<char> = dim.keys().copied().filter(|c| !out.contains(c)).collect();
+    if sums.len() != 1 { return None; }
+    let k = sums[0];
+    if !terms.iter().all(|t| t.contains(&k)) { return None; }
+    if !out.iter().all(|c| dim.contains_key(c)) { return None; }
+    let kd = dim[&k];
+    let out_dims: Vec<usize> = out.iter().map(|c| dim[c]).collect();
+    let out_size: usize = out_dims.iter().product::<usize>().max(1);
+    // Pack operand t as rows over its free chars (in term order), the
+    // summation axis contiguous: packed[row * kd + kk].
+    struct Packed { rows: Vec<AlmostGoldilocksField>, nz: Vec<Option<Vec<(u32, AlmostGoldilocksField)>>>, free: Vec<char>, free_dims: Vec<usize> }
+    let pack = |t: usize| -> Packed {
+        let chars = &terms[t];
+        let pd: Vec<usize> = chars.iter().map(|c| dim[c]).collect();
+        let mut strides = Vec::with_capacity(pd.len());
+        let mut st = 1usize;
+        for &d in &pd { strides.push(st); st *= d; }
+        let kpos = chars.iter().position(|&c| c == k).unwrap();
+        let free: Vec<char> = chars.iter().copied().filter(|&c| c != k).collect();
+        let free_pos: Vec<usize> = (0..chars.len()).filter(|&i| i != kpos).collect();
+        let free_dims: Vec<usize> = free_pos.iter().map(|&i| pd[i]).collect();
+        let nrows: usize = free_dims.iter().product::<usize>().max(1);
+        let src = inputs[t];
+        let kstride = strides[kpos];
+        let mut rows = vec![AlmostGoldilocksField(0); nrows * kd];
+        rows.par_chunks_mut(kd).enumerate().for_each(|(r, row)| {
+            let mut rem = r;
+            let mut base = 0usize;
+            for (j, &i) in free_pos.iter().enumerate() { base += (rem % free_dims[j]) * strides[i]; rem /= free_dims[j]; }
+            for (kk, x) in row.iter_mut().enumerate() {
+                let li = base + kk * kstride;
+                *x = if li < src.len() { src[li].reduce() } else { AlmostGoldilocksField(0) };
+            }
+        });
+        let nz = rows.par_chunks(kd).map(|row| {
+            let n = row.iter().filter(|x| x.0 != 0).count();
+            if n * 8 <= kd { Some(row.iter().enumerate().filter(|(_, x)| x.0 != 0).map(|(i, &x)| (i as u32, x)).collect()) } else { None }
+        }).collect();
+        Packed { rows, nz, free, free_dims }
+    };
+    let (a, b) = (pack(0), pack(1));
+    // Output position -> packed row of each operand.
+    let opos: HashMap<char, usize> = out.iter().enumerate().map(|(i, &c)| (c, i)).collect();
+    let row_map = |p: &Packed| -> Vec<(usize, usize)> {
+        let mut m = Vec::new();
+        let mut st = 1usize;
+        for (c, &d) in p.free.iter().zip(&p.free_dims) { m.push((opos[c], st)); st *= d; }
+        m
+    };
+    let (ma, mb) = (row_map(&a), row_map(&b));
+    let res: Vec<AlmostGoldilocksField> = (0..out_size).into_par_iter().with_min_len(64).map(|o| {
+        let mut multi = [0usize; 16];
+        let mut rem = o;
+        for (p, &d) in out_dims.iter().enumerate() { multi[p] = rem % d; rem /= d; }
+        let ra: usize = ma.iter().map(|&(p, st)| multi[p] * st).sum();
+        let rb: usize = mb.iter().map(|&(p, st)| multi[p] * st).sum();
+        let (xa, xb) = (&a.rows[ra * kd..(ra + 1) * kd], &b.rows[rb * kd..(rb + 1) * kd]);
+        let mut acc = AlmostGoldilocksField(0);
+        if let Some(nz) = &a.nz[ra] {
+            for &(i, v) in nz { acc = acc + v * xb[i as usize]; }
+        } else if let Some(nz) = &b.nz[rb] {
+            for &(i, v) in nz { acc = acc + xa[i as usize] * v; }
+        } else {
+            for i in 0..kd { acc = acc + xa[i] * xb[i]; }
+        }
+        acc.reduce()
+    }).collect();
+    Some(res)
+}
+
 fn einsum_compute(
     equation: &str,
     inputs: &[&[AlmostGoldilocksField]],
     input_shapes: &[Vec<usize>],
 ) -> Vec<AlmostGoldilocksField> {
+    if fast_einsum_enabled() {
+        if let Some(r) = einsum_compute_fast(equation, inputs, input_shapes) { return r; }
+    }
     let (lhs, rhs) = equation.split_once("->").expect("Einsum equation must have ->");
     let input_terms: Vec<&str> = lhs.split(',').collect();
     let output_indices: Vec<char> = rhs.chars().collect();
@@ -795,11 +965,48 @@ impl BasicBlock for Einsum {
             )
         }));
         match gpu {
-            Ok(r) => r,
+            Ok(r) => {
+                // ZK4_EINSUM_CHECK=1: re-prove on the CPU from the same
+                // transcript state and require every round message, final
+                // eval and claim to agree in the field, and the two
+                // transcripts to yield the same next challenge. The GPU path's
+                // words may be non-canonical, so bytes can differ while values
+                // cannot.
+                if std::env::var("ZK4_EINSUM_CHECK").ok().as_deref() == Some("1") {
+                    let mut tc = snapshot.clone();
+                    let (cp, cc) = self.prove_cpu(
+                        witnesses, edge_ids, &degree_one_challenges, &high_degree_challenge,
+                        total_rounds, num_second_rounds, sumcheck_size, false, &mut tc);
+                    let (gp, gc) = &r;
+                    assert_eq!(cp.len(), gp.len(), "einsum check: proof count");
+                    for (a, b) in cp.iter().zip(gp.iter()) {
+                        assert_eq!(a.round_messages.len(), b.round_messages.len());
+                        for (ra, rb) in a.round_messages.iter().zip(b.round_messages.iter()) {
+                            assert_eq!(ra.len(), rb.len());
+                            for (x, y) in ra.iter().zip(rb.iter()) {
+                                assert!(ext2_field_eq(*x, *y), "einsum check: round message differs ({})", self.equation);
+                            }
+                        }
+                        assert!(ext2_field_eq(a.final_eval, b.final_eval), "einsum check: final eval ({})", self.equation);
+                    }
+                    assert_eq!(cc.len(), gc.len());
+                    for (a, b) in cc.iter().zip(gc.iter()) {
+                        assert_eq!(a.edge_id, b.edge_id);
+                        assert!(ext2_field_eq(a.eval, b.eval), "einsum check: claim eval ({})", self.equation);
+                        assert_eq!(a.point.len(), b.point.len());
+                        for (x, y) in a.point.iter().zip(b.point.iter()) { assert!(ext2_field_eq(*x, *y)); }
+                    }
+                    let mut tg = transcript.clone();
+                    assert!(ext2_field_eq(tc.challenge_ext2(b"einsum_check"), tg.challenge_ext2(b"einsum_check")),
+                        "einsum check: transcripts diverge ({})", self.equation);
+                }
+                r
+            }
             Err(_) => {
+                let shapes: Vec<_> = witnesses.iter().map(|w| w.shape.clone()).collect();
                 eprintln!(
-                    "[einsum] GPU sumcheck prove failed (likely GPU OOM under memory pressure) — host fallback"
-                );
+                    "[einsum] GPU sumcheck prove failed (likely GPU OOM under memory pressure) — host fallback: {} {:?}",
+                    self.equation, shapes);
                 *transcript = snapshot;
                 self.prove_cpu(
                     witnesses,
@@ -894,6 +1101,7 @@ impl Einsum {
                 &permute_vecs[i],
                 &degree_one_challenges[i],
                 force_host,
+                Some(witness),
             );
             let result_len = ext2_poly.len();
             let result_n = result_len.trailing_zeros() as usize;
@@ -970,8 +1178,11 @@ impl Einsum {
     ) -> (Vec<SumcheckProof>, Vec<Claim>) {
         let permute_vecs = &self.permute_vecs;
         let num_inputs = permute_vecs.len();
+        let etime = std::env::var("ZK4_EINSUM_TIMING").is_ok();
+        let t_all = std::time::Instant::now();
         let mut gpu_buffers: Vec<DeviceBuffer<u64>> = Vec::with_capacity(num_inputs + 1);
         for i in 0..num_inputs {
+            let _t_op = std::time::Instant::now();
             let witness = witnesses[i];
             let n = get_n(&witness.shape);
             let poly_size = 1usize << n;
@@ -981,17 +1192,19 @@ impl Einsum {
             let witness_evals_ref = witness.data.as_ref().unwrap().evaluations_ref();
 
             if needs_permute && m > 0 && n > gpu_fused_threshold() {
-                let ext2_poly = fused_permute_partial_eval(
-                    witness_evals_ref,
+                // Device in, device out: the operand comes from the weight
+                // cache (or one direct upload) and the partial evaluation stays
+                // on the device. The previous path downloaded the result and
+                // re-uploaded the same words.
+                let d_evals = device_operand(witness, witness_evals_ref);
+                let d_result = almost_goldilocks_cuda::partial_eval::fused_permute_partial_eval_dev(
+                    &d_evals,
                     &degree_one_challenges[i],
                     &permute_vecs[i],
                     n,
                 )
                 .expect("fused_permute_partial_eval failed");
-                let result_ext2_count = ext2_poly.len();
-                let ext2_u64: Vec<u64> =
-                    ext2_poly.iter().flat_map(|v| [v.c0.0, v.c1.0]).collect();
-                let d_result = DeviceBuffer::<u64>::from_slice(&ext2_u64).expect("upload");
+                let result_ext2_count = d_result.len() / 2;
                 let fixed_n = result_ext2_count.trailing_zeros() as usize;
                 if fixed_n < total_rounds {
                     let add_dims = total_rounds - fixed_n;
@@ -1000,15 +1213,15 @@ impl Einsum {
                     gpu_buffers.push(d_result);
                 }
             } else {
-                let permuted_owned;
-                let permuted: &[AlmostGoldilocksField] = if needs_permute {
-                    permuted_owned = permute_evals_by_ranges(witness_evals_ref, n, &permute_vecs[i]);
-                    &permuted_owned
+                // No intermediate Vec<u64>: AlmostGoldilocksField is a
+                // transparent u64, and an unpermuted weight comes from the
+                // device cache.
+                let d_permuted: Arc<DeviceBuffer<u64>> = if needs_permute {
+                    let permuted = permute_evals_by_ranges(witness_evals_ref, n, &permute_vecs[i]);
+                    Arc::new(DeviceBuffer::<u64>::from_slice(evals_as_u64(&permuted)).expect("upload"))
                 } else {
-                    witness_evals_ref
+                    device_operand(witness, witness_evals_ref)
                 };
-                let permuted_u64: Vec<u64> = permuted.iter().map(|v| v.0).collect();
-                let d_permuted = DeviceBuffer::<u64>::from_slice(&permuted_u64).expect("upload");
                 if m > 0 {
                     let output_half = poly_size >> 1;
                     let mut d_output = DeviceBuffer::<AlmostGoldilocksExt2>::new(output_half)
@@ -1055,6 +1268,7 @@ impl Einsum {
             }
         }
 
+        let t_ops = t_all.elapsed();
         if high_degree_challenge.is_empty() {
             let one = AlmostGoldilocksExt2::one();
             let raw = [one.c0.0, one.c1.0];
@@ -1084,13 +1298,21 @@ impl Einsum {
             }
         }
 
+        let t_eq = t_all.elapsed();
         let buf_refs: Vec<&DeviceBuffer<u64>> = gpu_buffers.iter().collect();
         let gpu_state = GpuSumcheckStateExt2::from_device_buffers(&buf_refs, sumcheck_size)
             .expect("from_device_buffers failed");
+        let t_state = t_all.elapsed();
         let mut gpu_prover =
             GpuLinearSumcheckProver::new(total_rounds, gpu_buffers.len(), transcript);
         let proof = gpu_prover.prove_gpu_resident(gpu_state, transcript);
         let challenges = gpu_prover.challenges.clone();
+        if etime && t_all.elapsed().as_millis() >= 20 {
+            let sizes: Vec<usize> = witnesses.iter().map(|w| get_n(&w.shape)).collect();
+            eprintln!("[einsum_t] {} n={:?} rounds={} size={} | operands {:?} eq {:?} state {:?} sumcheck {:?}",
+                self.equation, sizes, total_rounds, sumcheck_size,
+                t_ops, t_eq - t_ops, t_state - t_eq, t_all.elapsed() - t_state);
+        }
 
         let mut claims = Vec::new();
         for i in 0..num_inputs {
@@ -1133,6 +1355,11 @@ fn prepare_input_poly_cpu(
     // When set, never touch the GPU — used as the host fallback after a GPU
     // OOM/KernelFailed, where re-attempting any device op would just fail again.
     force_host: bool,
+    // The operand's witness, when known: lets a model weight come from the
+    // device cache (`device_operand`) instead of a fresh upload per proof.
+    // Llama-3's lm_head shards (2^27 words, 12-round sumchecks that take this
+    // small-sumcheck path) re-uploaded ~1 GB each per proof.
+    witness: Option<&Witness>,
 ) -> Vec<AlmostGoldilocksExt2> {
     let perm_map = compute_perm_map(n, permute_vec);
     let needs_permute = !is_identity_perm(&perm_map);
@@ -1145,12 +1372,40 @@ fn prepare_input_poly_cpu(
     // (e.g. real 6B/8B + full vocab + many concurrent partitions).
     let mut force_host = force_host;
     if !force_host && needs_permute && m > 0 && n > gpu_fused_threshold() && n <= FUSED_MAX_N {
+        if let Some(w) = witness.filter(|w| w.role == Role::Constant) {
+            let d = device_operand(w, witness_evals);
+            let r = almost_goldilocks_cuda::partial_eval::fused_permute_partial_eval_dev(&d, challenges, permute_vec, n)
+                .and_then(|d_out| d_out.read_slice(0, d_out.len()));
+            match r {
+                Ok(raw) => return raw.chunks_exact(2)
+                    .map(|c| AlmostGoldilocksExt2::new(AlmostGoldilocksField(c[0]), AlmostGoldilocksField(c[1])))
+                    .collect(),
+                Err(e) => {
+                    eprintln!("[einsum] fused_permute_partial_eval OOM ({:?}) — host fallback", e);
+                    force_host = true;
+                }
+            }
+        } else {
         match fused_permute_partial_eval(witness_evals, challenges, permute_vec, n) {
             Ok(out) => return out,
             Err(e) => {
                 eprintln!("[einsum] fused_permute_partial_eval OOM ({:?}) — host fallback", e);
                 force_host = true;
             }
+        }
+        }
+    }
+    if !force_host && !needs_permute && m > 0 && n > gpu_partial_eval_threshold() {
+        if let Some(w) = witness.filter(|w| w.role == Role::Constant) {
+            let d = device_operand(w, witness_evals);
+            let r = (|| -> almost_goldilocks_cuda::error::Result<Vec<AlmostGoldilocksExt2>> {
+                let mut d_out = DeviceBuffer::<AlmostGoldilocksExt2>::new(1usize << (n - 1))?;
+                let d_r = DeviceBuffer::<AlmostGoldilocksExt2>::from_slice(challenges)?;
+                partial_eval_ext2_device_u64(&d, &mut d_out, &d_r, n, m)?;
+                almost_goldilocks_cuda::memory::sync_mine()?;
+                d_out.read_slice(0, 1usize << (n - m))
+            })();
+            if let Ok(out) = r { return out; }
         }
     }
     let permuted_owned;

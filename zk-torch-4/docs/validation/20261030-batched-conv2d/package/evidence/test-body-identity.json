@@ -1,0 +1,6 @@
+{
+  "normalization": "remove only exact #[test] attribute lines; every function body preserved",
+  "production_test_file_sha256": "daefe8151998f676033fe6c50b2aa7681ea89ab34bf9482fa477452ded0c7f4c",
+  "exposed_unchanged_bodies_sha256": "bf1f954b04cd066d8e40952661ca42f6d2f591ea676d8b95a666e361eeec61e5",
+  "all_ffi_declarations_unchanged": true
+}

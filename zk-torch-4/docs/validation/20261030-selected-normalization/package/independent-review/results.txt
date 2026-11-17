@@ -1,0 +1,6 @@
+PASS exhaustive small-field modular division/lift tuples: 20100
+PASS actual-prime profiles/endpoints/random modular tuples; combined: 1319088
+PASS exact32769 remainder polynomial bounds and SF30/context9 wrap attack; total checks: 1351857
+SHA256 src/basicblock/normalization.rs b2aea13b3e878ec538053f888db32ae35c0b705478539fcddb85689a1769c68a
+SHA256 src/dag/softmax.rs 25ab153de789d32698c9db4588ae9eced2b80f1f4f9ea76a16caf7f489ae0365
+SHA256 docs/morpheus_selected_normalization.md 408e7d569dacfc07ea04675d9e7fd1c2839da6ce36f091ff6fa6f1116246edc5

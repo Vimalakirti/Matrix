@@ -14,7 +14,13 @@
 #define AGL_FUSED_BLOCK_SIZE 256
 #endif
 
-__global__ void agl_fused_permute_partial_eval_kernel(
+// SMEM_LUT = true: the two permutation LUTs are staged in shared memory.
+// SMEM_LUT = false: they are read from global memory (L2-resident; used when
+// the LUTs exceed the device's opt-in shared-memory limit, e.g. n = 29 needs
+// ~196 KB vs an A100's 163 KB, which used to fail the launch and push the
+// whole einsum onto the host prover). Same arithmetic either way.
+template <bool SMEM_LUT>
+__global__ void agl_fused_permute_partial_eval_kernel_t(
     const uint64_t* __restrict__ d_evals,
     uint64_t* __restrict__ d_output,
     const uint64_t* __restrict__ d_eq_table,
@@ -27,19 +33,25 @@ __global__ void agl_fused_permute_partial_eval_kernel(
     int lo_size = 1 << half;
     int hi_size = 1 << (n - half);
 
-    uint32_t* s_lo = (uint32_t*)s_bytes;
-    uint32_t* s_hi = s_lo + lo_size;
-
-    size_t lut_bytes = (size_t)(lo_size + hi_size) * sizeof(uint32_t);
-    size_t aligned_lut = (lut_bytes + 7) & ~(size_t)7;
-    uint64_t* s_warp = (uint64_t*)(s_bytes + aligned_lut);
-
+    const uint32_t* s_lo;
+    const uint32_t* s_hi;
+    uint64_t* s_warp;
     int tid = threadIdx.x;
-
-    for (int i = tid; i < lo_size; i += blockDim.x)
-        s_lo[i] = d_lo_lut[i];
-    for (int i = tid; i < hi_size; i += blockDim.x)
-        s_hi[i] = d_hi_lut[i];
+    if (SMEM_LUT) {
+        uint32_t* lo_w = (uint32_t*)s_bytes;
+        uint32_t* hi_w = lo_w + lo_size;
+        size_t lut_bytes = (size_t)(lo_size + hi_size) * sizeof(uint32_t);
+        size_t aligned_lut = (lut_bytes + 7) & ~(size_t)7;
+        s_warp = (uint64_t*)(s_bytes + aligned_lut);
+        for (int i = tid; i < lo_size; i += blockDim.x)
+            lo_w[i] = d_lo_lut[i];
+        for (int i = tid; i < hi_size; i += blockDim.x)
+            hi_w[i] = d_hi_lut[i];
+        s_lo = lo_w; s_hi = hi_w;
+    } else {
+        s_warp = (uint64_t*)s_bytes;
+        s_lo = d_lo_lut; s_hi = d_hi_lut;
+    }
     __syncthreads();
 
     int inner_size = 1 << m;

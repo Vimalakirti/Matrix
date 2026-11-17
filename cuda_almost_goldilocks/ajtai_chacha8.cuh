@@ -129,6 +129,29 @@ void prg_ring_block_chacha8(
     // 16 retries reject (P ≈ 2^-496), the unfilled slots stay at 0 instead
     // of uninitialized — turns a latent UB into deterministic-but-biased
     // output for that single coefficient, which is still safe to use.
+    // Fast path: the first ChaCha block yields all 8 coefficients unless one of
+    // its words is >= q (probability ~2^-28 per block). Writing them with
+    // static indices keeps out_coeffs in registers; the general loop below
+    // indexes it with the runtime counter `written`, which forces the array
+    // into local memory in every commit kernel that fills PRG columns. Same
+    // values in the same slots, so the matrix is bit-identical.
+    {
+        uint32_t buf[16];
+        chacha8_block(key, block_idx, nonce, buf);
+        bool all_ok = true;
+        uint64_t s[8];
+        #pragma unroll
+        for (int k = 0; k < 8; k++) {
+            s[k] = ((uint64_t)buf[2*k + 1] << 32) | (uint64_t)buf[2*k];
+            all_ok = all_ok && (s[k] < ALMOST_GOLDILOCKS_PRIME);
+        }
+        if (all_ok) {
+            #pragma unroll
+            for (int k = 0; k < 8; k++) out_coeffs[k] = s[k];
+            return;
+        }
+    }
+
     #pragma unroll
     for (int k = 0; k < 8; k++) out_coeffs[k] = 0;
 

@@ -238,8 +238,18 @@ fn main() {
     let mut breakdown: Option<String> = None;
 
     println!("Streaming {} proofs:", n_proofs);
+    // Weights (Role::Constant) keep one allocation across proofs; only
+    // per-proof edges are reset from the template (see the AR benches).
+    let mut witnesses = witnesses_template.clone();
+    let const_edge: Vec<bool> = witnesses_template.iter()
+        .map(|ws| !ws.is_empty() && ws.iter().all(|w| w.role == zk_torch_4::dag::Role::Constant))
+        .collect();
     for i in 0..n_proofs {
-        let mut witnesses = witnesses_template.clone();
+        if i > 0 {
+            for (e, c) in const_edge.iter().enumerate() {
+                if !*c { witnesses[e] = witnesses_template[e].clone(); }
+            }
+        }
         let input = Witness::new(
             vec![1, seq_len, hidden_dim],
             small_varied_input(pad, i as u64),
@@ -294,13 +304,18 @@ fn main() {
 
         let s4 = Instant::now();
         let chunk = prover_acc.add_proof(&r, &witnesses);
+        // Stop the acc-update timer HERE. The proof-size bookkeeping below
+        // bincode-serializes the whole proof (several times, ~100 MB on GPT-2)
+        // and used to land inside this timer: ~330 ms per proof billed as
+        // acc-update on GPT-2 2L. The AR benches for Llama/GPT-J already
+        // stopped it here.
+        let d_acc_update = s4.elapsed();
         proof_bytes += ser_len(&dp) + ser_len(&fp) + ser_len(&chunk);
         // Keep one proof's component split; every iteration has the
         // same shape, so the last is representative.
         breakdown = Some(zk_torch_4::proof_size_report(
             &dp.node_proofs, &dp.edge_proofs, &dp.range_proof,
             &dp.two_pow_proof, &dp.output_claims, &dp, &fp));
-        let d_acc_update = s4.elapsed();
         t_acc_update += d_acc_update;
 
         let s5 = Instant::now();

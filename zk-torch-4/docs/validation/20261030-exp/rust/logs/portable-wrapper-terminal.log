@@ -1,0 +1,2 @@
+PASS: 441 source files and 19 original test bodies match recorded SHA-256s
+PASS: modified-build all-target typecheck; 434 original CPU test-body invocations. Not a production/CUDA build or PIOP replay.

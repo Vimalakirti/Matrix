@@ -1,0 +1,31 @@
+{
+  "scope": "Exact overlay and scoped Conv2D/wrapper source recheck only; not whole-project acceptance",
+  "base_manifest_sha256": "da3f4f1bae5927b06547d61bd061725a46634db1cb944df469da532084770113",
+  "canonical_source_files": 455,
+  "combined_manifest_sha256": "a57be8f20529556584fef5a97d8bf24c54d77809835890bd4e2678848c227579",
+  "changed_paths": [
+    "zk-torch-4/src/morpheus/piop/cv.rs",
+    "zk-torch-4/src/morpheus/piop/cv_batch_tests.rs",
+    "zk-torch-4/src/morpheus/piop/mod.rs"
+  ],
+  "cv_byte_identical_to_review": true,
+  "test_file_byte_identical_to_review": true,
+  "mod_exact_two_edits_and_preserves_existing_test_modules": true,
+  "builder_byte_identical_to_frozen_joint": true,
+  "previously_reviewed_wrapper_and_conv_function_bodies_identical": {
+    "mask": "a6f361312d05ba3b3e6ea3776fed28373ec9c675804d3dcce8d5ffdeb251a7a9",
+    "fold_per_channel2d_input": "ae907b4619debe6864ec6cbf3cb3c58b6e53d77c79be1ed615182ab790310eda",
+    "restore_per_channel2d_output": "de94da6194c21bfc3d652fa8422632903039d160ff47fc8d26dd519a36a83212",
+    "conv2d": "cd3707a8dfb4f915c53e66d3a00220806bf33829484ea65790f58ce92a64933c",
+    "conv2d_strided": "da669565a08e676154bf56e76cfbe31f337c38136489a5848d6cf918335eb27a",
+    "conv2d_dilated": "05c4c5e34bc8b688607e786902546cc06fca6d9f168eef947e48f270330e44f3"
+  },
+  "inherited_nonsource_bytecode_excluded": {
+    "zk-torch-4/scripts/bench/morpheus/__pycache__/evidence_admission.cpython-312.pyc": "ab33ee18ad745e68ed4901c7d3844535048db5e6af2429898a828c9099551d86",
+    "zk-torch-4/scripts/bench/morpheus/__pycache__/paper_tables.cpython-312.pyc": "10d5108daf9781c8b9a048aa4bf33bce82b71c729babf5bffdfff95713a23ad2",
+    "zk-torch-4/scripts/bench/morpheus/__pycache__/summarize.cpython-312.pyc": "4d7ae1632ee7246f89fdc5b06408ea286c02df6c6d5d3987efcebe77f5726649",
+    "zk-torch-4/scripts/bench/morpheus/__pycache__/test_evidence_admission.cpython-312.pyc": "58df2324265aab747bb3af3c2d1f6615f7377f5881651feb4bfa02c7cd46dc17",
+    "zk-torch-4/scripts/bench/morpheus/__pycache__/test_exp_profile.cpython-312.pyc": "cd23689b9690cf21f262eb3a4f396d1a73f97ab4bcff2256fbcbcabe35ee36eb"
+  },
+  "native_piop_status": "Linker blocked; no native PIOP execution inferred by this audit"
+}

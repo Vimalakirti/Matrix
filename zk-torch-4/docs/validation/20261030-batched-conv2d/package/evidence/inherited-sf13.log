@@ -1,0 +1,87 @@
+RUN cnn_layout_tests::flatten_row_major_actual_graph_matches_logical_reference_with_poison
+PASS cnn_layout_tests::flatten_row_major_actual_graph_matches_logical_reference_with_poison
+RUN cnn_layout_tests::lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding
+PASS cnn_layout_tests::lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding
+RUN cnn_layout_tests::resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference
+PASS cnn_layout_tests::resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference
+RUN cnn_layout_tests::flatten_maps_are_immutable_public_program_data_not_private_sources
+PASS cnn_layout_tests::flatten_maps_are_immutable_public_program_data_not_private_sources
+RUN cnn_layout_tests::row_major_channel_bias_distinct_channels_basis_and_poisoned_padding
+PASS cnn_layout_tests::row_major_channel_bias_distinct_channels_basis_and_poisoned_padding
+RUN cnn_layout_tests::resnet_head_rejects_same_padded_size_but_wrong_logical_extents
+
+thread 'main' (134) panicked at src/dag/resnet.rs:252:50:
+assertion `left == right` failed
+  left: 3
+ right: 4
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (134) panicked at src/dag/resnet.rs:252:27:
+assertion `left == right` failed
+  left: 3
+ right: 4
+
+thread 'main' (134) panicked at src/dag/resnet.rs:253:36:
+assertion `left == right` failed
+  left: 3
+ right: 4
+
+thread 'main' (134) panicked at src/dag/resnet.rs:254:25:
+folded GAP channels do not match the declared logical batch/features
+PASS cnn_layout_tests::resnet_head_rejects_same_padded_size_but_wrong_logical_extents
+RUN cnn_layout_tests::cnn_public_literal_source_census_representative_graphs
+CENSUS LeNet5_full_graph edge=11 shape=[28, 28, 6, 1] field_slots=8192 planes=1 bit_typed=true raw_coordinates=8192
+CENSUS LeNet5_full_graph edge=18 shape=[8192] field_slots=8192 planes=1 bit_typed=true raw_coordinates=8192
+CENSUS LeNet5_full_graph edge=22 shape=[6, 28, 28] field_slots=8192 planes=32 bit_typed=false raw_coordinates=262144
+CENSUS LeNet5_full_graph edge=23 shape=[6, 28, 28] field_slots=8192 planes=32 bit_typed=false raw_coordinates=262144
+CENSUS LeNet5_full_graph edge=46 shape=[10, 10, 16, 1] field_slots=4096 planes=1 bit_typed=true raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=53 shape=[4096] field_slots=4096 planes=1 bit_typed=true raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=57 shape=[16, 10, 10] field_slots=4096 planes=32 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=58 shape=[16, 10, 10] field_slots=4096 planes=32 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=72 shape=[400, 5] field_slots=4096 planes=1 bit_typed=true raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=74 shape=[400, 5] field_slots=4096 planes=1 bit_typed=true raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=76 shape=[400, 16] field_slots=8192 planes=1 bit_typed=true raw_coordinates=8192
+CENSUS LeNet5_full_graph edge=79 shape=[400] field_slots=512 planes=1 bit_typed=true raw_coordinates=512
+CENSUS LeNet5_full_graph edge=86 shape=[120] field_slots=128 planes=1 bit_typed=true raw_coordinates=128
+CENSUS LeNet5_full_graph edge=89 shape=[120] field_slots=128 planes=1 bit_typed=true raw_coordinates=128
+CENSUS LeNet5_full_graph edge=96 shape=[84] field_slots=128 planes=1 bit_typed=true raw_coordinates=128
+CENSUS LeNet5_full_graph edge=99 shape=[84] field_slots=128 planes=1 bit_typed=true raw_coordinates=128
+CENSUS LeNet5_full_graph edge=106 shape=[10] field_slots=16 planes=1 bit_typed=true raw_coordinates=16
+CENSUS LeNet5_full_graph edge=108 shape=[6, 14, 14] field_slots=2048 planes=64 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=109 shape=[6, 14, 14] field_slots=2048 planes=64 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=114 shape=[6, 14, 14] field_slots=2048 planes=64 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=115 shape=[6, 14, 14] field_slots=2048 planes=64 bit_typed=false raw_coordinates=131072
+CENSUS LeNet5_full_graph edge=122 shape=[2048] field_slots=2048 planes=4 bit_typed=false raw_coordinates=8192
+CENSUS LeNet5_full_graph edge=125 shape=[2048] field_slots=2048 planes=2 bit_typed=false raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=127 shape=[2048] field_slots=2048 planes=1 bit_typed=true raw_coordinates=2048
+CENSUS LeNet5_full_graph edge=128 shape=[2048] field_slots=2048 planes=2 bit_typed=false raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=133 shape=[16, 5, 5] field_slots=1024 planes=64 bit_typed=false raw_coordinates=65536
+CENSUS LeNet5_full_graph edge=134 shape=[16, 5, 5] field_slots=1024 planes=64 bit_typed=false raw_coordinates=65536
+CENSUS LeNet5_full_graph edge=139 shape=[16, 5, 5] field_slots=1024 planes=64 bit_typed=false raw_coordinates=65536
+CENSUS LeNet5_full_graph edge=140 shape=[16, 5, 5] field_slots=1024 planes=64 bit_typed=false raw_coordinates=65536
+CENSUS LeNet5_full_graph edge=147 shape=[1024] field_slots=1024 planes=4 bit_typed=false raw_coordinates=4096
+CENSUS LeNet5_full_graph edge=150 shape=[1024] field_slots=1024 planes=2 bit_typed=false raw_coordinates=2048
+CENSUS LeNet5_full_graph edge=152 shape=[1024] field_slots=1024 planes=1 bit_typed=true raw_coordinates=1024
+CENSUS LeNet5_full_graph edge=153 shape=[1024] field_slots=1024 planes=2 bit_typed=false raw_coordinates=2048
+CENSUS_TOTAL LeNet5_full_graph literals=33 field_slots=91152 raw_coordinates=1642512 public_only_sources=1 source_payload_cap=131497984 n_max=262144 energy_cap_log2=38 whole_workload_compatibility=UNVERIFIED
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=4 shape=[7, 7, 2048, 3] field_slots=524288 planes=1 bit_typed=true raw_coordinates=524288
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=6 shape=[7, 7, 2048, 3] field_slots=524288 planes=32 bit_typed=false raw_coordinates=16777216
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=7 shape=[7, 7, 2048, 3] field_slots=524288 planes=32 bit_typed=false raw_coordinates=16777216
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=16 shape=[2048, 3] field_slots=8192 planes=1 bit_typed=true raw_coordinates=8192
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=23 shape=[1000, 3] field_slots=4096 planes=1 bit_typed=true raw_coordinates=4096
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=25 shape=[2048, 3] field_slots=8192 planes=64 bit_typed=false raw_coordinates=524288
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=26 shape=[2048, 3] field_slots=8192 planes=64 bit_typed=false raw_coordinates=524288
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=31 shape=[2048, 3] field_slots=8192 planes=64 bit_typed=false raw_coordinates=524288
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=32 shape=[2048, 3] field_slots=8192 planes=64 bit_typed=false raw_coordinates=524288
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=39 shape=[8192] field_slots=8192 planes=8 bit_typed=false raw_coordinates=65536
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=42 shape=[8192] field_slots=8192 planes=8 bit_typed=false raw_coordinates=65536
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=44 shape=[8192] field_slots=8192 planes=1 bit_typed=true raw_coordinates=8192
+CENSUS ResNet_head_B3_C2048_7x7_O1000 edge=45 shape=[8192] field_slots=8192 planes=8 bit_typed=false raw_coordinates=65536
+CENSUS_TOTAL ResNet_head_B3_C2048_7x7_O1000 literals=13 field_slots=1650688 raw_coordinates=36392960 public_only_sources=1 source_payload_cap=131497984 n_max=262144 energy_cap_log2=38 whole_workload_compatibility=UNVERIFIED
+PASS cnn_layout_tests::cnn_public_literal_source_census_representative_graphs
+RUN cnn_layout_tests::explicit_nonpower_batch_survives_pad_and_pool_registered_views
+PASS cnn_layout_tests::explicit_nonpower_batch_survives_pad_and_pool_registered_views
+RUN cnn_layout_tests::explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference
+PASS cnn_layout_tests::explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference
+RUN cnn_finite_activation_tests::cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference
+PASS cnn_finite_activation_tests::cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference

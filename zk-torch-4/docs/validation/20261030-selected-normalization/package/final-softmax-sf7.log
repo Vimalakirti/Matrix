@@ -1,0 +1,65 @@
+RUN normalized_ratio_actual_roots_ties_and_modular_mutations
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^13) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 14 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^13) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 14 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 18014398509481983). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 54 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^13) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 14 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^13) (0 negative, max overflow value = 36028797018963966). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 55 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^11) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 12 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^23) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 24 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^23) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 24 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^11) (0 negative, max overflow value = 18014398509481983). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 54 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^11) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 12 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^23) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 24 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^23) (0 negative, max overflow value = 8589933629). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 33 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^17) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 18 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^29) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 30 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^29) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 30 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^17) (0 negative, max overflow value = 18014398509481983). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 54 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^17) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 18 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^29) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 30 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^29) (0 negative, max overflow value = 549755752319). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 39 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^21) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 22 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^33) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 34 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^33) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 34 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^21) (0 negative, max overflow value = 18014398509481983). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 54 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^21) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 22 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^33) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 34 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^33) (0 negative, max overflow value = 8796092037119). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 43 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^31) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 32 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^32) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 33 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^32) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 33 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^31) (0 negative, max overflow value = 18014398509481983). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 54 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^31) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 32 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^32) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 33 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^32) (0 negative, max overflow value = 9007198246010879). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 53 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+PASS normalized_ratio_actual_roots_ties_and_modular_mutations
+RUN causal_softmax_future_and_padding_are_structurally_excluded
+PASS causal_softmax_future_and_padding_are_structurally_excluded
+RUN selected_max_onehot_and_all_masked_mutations
+
+thread 'main' (154) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/4 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+
+thread 'main' (154) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+
+thread 'main' (154) panicked at src/dag/softmax.rs:84:13:
+assertion `left == right` failed: all-masked logical row is unsupported
+  left: false
+ right: true
+PASS selected_max_onehot_and_all_masked_mutations
+RUN sigmoid_two_logits_and_padding_are_exact
+PASS sigmoid_two_logits_and_padding_are_exact
+RUN practical_contexts_and_sf30_wrap_profile_fail_closed
+
+thread 'main' (154) panicked at src/basicblock/normalization.rs:23:5:
+ratio residual can wrap; use a smaller public profile or linked limbs
+PASS practical_contexts_and_sf30_wrap_profile_fail_closed
+RUN whisper_decoder_encoder_cross_attention_selection_and_dependency
+PASS whisper_decoder_encoder_cross_attention_selection_and_dependency

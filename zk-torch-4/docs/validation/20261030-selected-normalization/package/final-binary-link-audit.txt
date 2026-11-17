@@ -1,0 +1,35 @@
+BINARY:cpu_basicblock_exp
+	linux-vdso.so.1 (0x00007f307acf0000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f307aa9f000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f307a8ab000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f307acf2000)
+BINARY:cpu_graph_exp
+	linux-vdso.so.1 (0x00007f8b6f65a000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f8b6f262000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f8b6f172000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f8b6ef7e000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f8b6f65c000)
+BINARY:cpu_normalization
+	linux-vdso.so.1 (0x00007ff359fcf000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007ff359bbb000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007ff359acb000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007ff3598d7000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007ff359fd1000)
+BINARY:cpu_instance_norm
+	linux-vdso.so.1 (0x00007fc3b7a96000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fc3b7689000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fc3b7599000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fc3b73a5000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007fc3b7a98000)
+BINARY:cpu_softmax
+	linux-vdso.so.1 (0x00007f71894e8000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f7189102000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f7189012000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f7188e1e000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f71894ea000)
+BINARY:cpu_partial_chunks
+	linux-vdso.so.1 (0x00007f7194517000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f719414b000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f719405b000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f7193e67000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f7194519000)

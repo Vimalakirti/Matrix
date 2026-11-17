@@ -1,0 +1,30 @@
+[
+  {
+    "path": "README.md",
+    "raw_original": "raw/README.md",
+    "original_sha256": "fe0d6d6c37f2d0ec8a57e9442654492f5376cc5fa2f18eb20ecfd5e22f229048",
+    "portable_sha256": "218e5710302ad2fb393cdaae5e0af14c87bdfffb17771b4eb40b887786a16820",
+    "change": "path-only prose portability"
+  },
+  {
+    "path": "independent-review/REPORT.md",
+    "raw_original": "independent-review/raw/REPORT.md",
+    "original_sha256": "c93bd77ba695ab711f9c69250765942d6753ef845f360c46a092bd7234139775",
+    "portable_sha256": "0aab14d096b553c99f9fe828b1308433ccfb06947ccc13b6ee0854dc33cbaead",
+    "change": "path-only prose portability"
+  },
+  {
+    "path": "independent-wrapper-review/REPORT.md",
+    "raw_original": "independent-wrapper-review/raw/REPORT.md",
+    "original_sha256": "8953e6fab51c68e867b22be477b8fbcde001b1b152a347c820b264ed21584804",
+    "portable_sha256": "8953e6fab51c68e867b22be477b8fbcde001b1b152a347c820b264ed21584804",
+    "change": "path-only prose portability"
+  },
+  {
+    "path": "independent-wrapper-review/check_wrapper_integration.py",
+    "raw_original": "independent-wrapper-review/raw/check_wrapper_integration.py",
+    "original_sha256": "fde8081ed9907bf700e815c9edc7f697cfede87ff5eff30da7e32c686233500a",
+    "portable_sha256": "af9973c33005970dfedee6138d1b56c0eaeebbecc64038f078769b01ed561562",
+    "change": "source path CLI parameter only; arithmetic untouched"
+  }
+]

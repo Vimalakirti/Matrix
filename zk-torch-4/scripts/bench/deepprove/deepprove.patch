@@ -1,0 +1,113 @@
+diff --git a/zkml/src/bin/bench/cnn.rs b/zkml/src/bin/bench/cnn.rs
+index 53307d87..ee63877d 100644
+--- a/zkml/src/bin/bench/cnn.rs
++++ b/zkml/src/bin/bench/cnn.rs
+@@ -219,7 +219,8 @@ fn run_float_model(raw_inputs: &InputJSON, model: &Model<f32>) -> Result<f32> {
+         // Run the model in float mode
+         let inputs = model.load_input_flat(vec![input.clone()])?;
+         let outputs = model.run_float(inputs, &mut GenStore::default())?;
+-        let accuracy = argmax_compare(expected, outputs[0].tensor()?.data());
++        let out0 = outputs[0].clone().tensor_variant()?;
++        let accuracy = argmax_compare(expected, out0.tensor()?.data());
+         accuracies.push(accuracy);
+         debug!(
+             "Float Run {}/{}: Accuracy: {}",
+@@ -369,7 +370,8 @@ fn run(args: Args) -> anyhow::Result<()> {
+         //}
+ 
+         let output = trace.outputs().first().context("Trace with no outputs")?;
+-        let accuracy = argmax_compare(&given_output, output.tensor()?.data());
++        let out0 = output.clone().tensor_variant()?;
++        let accuracy = argmax_compare(&given_output, out0.tensor()?.data());
+         accuracies.push(accuracy);
+ 
+         info!(
+diff --git a/zkml/src/bin/bench/llm.rs b/zkml/src/bin/bench/llm.rs
+index 7726eee9..409b339e 100644
+--- a/zkml/src/bin/bench/llm.rs
++++ b/zkml/src/bin/bench/llm.rs
+@@ -338,9 +338,12 @@ fn main() -> anyhow::Result<()> {
+ 
+         verifier_ctx = verifier_ctx.with_max_context(max_ctx);
+         info!("Verifying proof...");
+-        verifier_ctx
+-            .verify(proof, user_tokens, io)
+-            .expect("invalid proof");
++        // [morpheus-bench] time verification; upstream does not record it.
++        measure::r("verify_time", || {
++            verifier_ctx
++                .verify(proof, user_tokens, io)
++                .expect("invalid proof")
++        });
+         if !args.distributed {
+             measure::post_process(|metrics| {
+                 let Ok(proof_time) = metrics.get("prove_full").unwrap().parse::<usize>() else {
+diff --git a/zkml/src/parser/llm/models/gpt2/mod.rs b/zkml/src/parser/llm/models/gpt2/mod.rs
+index 5723aca9..b6dfb7b6 100644
+--- a/zkml/src/parser/llm/models/gpt2/mod.rs
++++ b/zkml/src/parser/llm/models/gpt2/mod.rs
+@@ -29,6 +29,7 @@ use crate::{
+     },
+ };
+ use anyhow::Context;
++use tenstore::StorageKey;
+ 
+ pub mod decoder;
+ 
+@@ -253,7 +254,11 @@ impl ModelLoader<RawSafeTensors> for GPT2 {
+             "O(sv)"
+         };
+         let equation = format!("{input_terms}->{output_terms}");
+-        let proj_weights = KeyedTensor::try_from(&embeddings.mat)?;
++        let mut proj_weights = KeyedTensor::try_from(&embeddings.mat)?;
++        // [morpheus-bench] same key split the GGUF loader (parser/llm/mod.rs) does:
++        // the embeddings are scaled after parsing and the final projection is
++        // not, so they are different tensors and need different commitment ids.
++        proj_weights.key = StorageKey::from(format!("{}_final_proj", proj_weights.storage_key()));
+         let final_proj = EinSum::<f32>::new(
+             equation,
+             vec![Some(proj_weights.into())],
+diff --git a/zkml/src/parser/llm/models/llama2/decoder/attention.rs b/zkml/src/parser/llm/models/llama2/decoder/attention.rs
+index c8af2c77..30b47d60 100644
+--- a/zkml/src/parser/llm/models/llama2/decoder/attention.rs
++++ b/zkml/src/parser/llm/models/llama2/decoder/attention.rs
+@@ -162,10 +162,23 @@ impl Load<SafeLoader> for Llama2Attention {
+         //   Q[7, 3, :, :] = head 3*8 + 7 = head 31
+         // ===================================================================================
+         // Llama2 always uses GQA, so we use grouped shapes directly
+-        let wq_reshape = vec![embedding_size, num_groups, heads_per_group, head_size];
+         let wk_wv_reshape = vec![embedding_size, num_groups, head_size];
+-        // WO final shape is [g, h, d, e] to match attention output O's layout
+-        let wo_reshape = vec![heads_per_group, num_groups, head_size, embedding_size];
++        // [morpheus-bench] Llama-2-7B has num_key_value_heads == num_attention_heads,
++        // so heads_per_group == 1 and `form_einsum_equations` picks the MHA
++        // equations WQ(ehd) / WO(hde). Drop the size-1 g axis to match; with
++        // g == 1 this is a pure reshape and the WO permutation below is the identity.
++        let (wq_reshape, wo_reshape) = if heads_per_group == 1 {
++            (
++                vec![embedding_size, num_groups, head_size],
++                vec![num_groups, head_size, embedding_size],
++            )
++        } else {
++            (
++                vec![embedding_size, num_groups, heads_per_group, head_size],
++                // WO final shape is [g, h, d, e] to match attention output O's layout
++                vec![heads_per_group, num_groups, head_size, embedding_size],
++            )
++        };
+ 
+         let wq = loader
+             .get_tensor("self_attn.q_proj.weight")?
+diff --git a/zkml/src/tensor/handle.rs b/zkml/src/tensor/handle.rs
+index 3b30325f..97f7c9f5 100644
+--- a/zkml/src/tensor/handle.rs
++++ b/zkml/src/tensor/handle.rs
+@@ -229,7 +229,7 @@ where
+     /// Ensures this is a [Tensor] variant.
+     ///
+     /// NOTE: For external GPU this will perform an download of the data.
+-    pub(crate) fn tensor_variant(self) -> anyhow::Result<Self> {
++    pub fn tensor_variant(self) -> anyhow::Result<Self> {
+         match self {
+             TensorHandle::WrappedTensor(InnerWrappedTensor {
+                 storage_key,

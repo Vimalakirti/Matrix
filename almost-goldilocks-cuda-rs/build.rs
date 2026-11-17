@@ -50,6 +50,7 @@ fn find_cuda_paths() -> (String, String) {
 }
 
 fn main() {
+    if std::env::var_os("CARGO_FEATURE_CUDA").is_none() { return; }
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
@@ -65,9 +66,12 @@ fn main() {
     let output_lib = out_dir.join("libalmost_goldilocks_cuda_wrapper.a");
     let obj_file = out_dir.join("wrapper.o");
     let compute_cap = env::var("CUDA_COMPUTE").unwrap_or_else(|_| "80".to_string());
+    // SASS for the target plus PTX: ptxas then runs at build time, so resource
+    // errors (e.g. > 48 KB static shared memory) fail the build instead of
+    // surfacing as a JIT launch failure at run time.
     let gencode = format!(
-        "-gencode=arch=compute_{},code=compute_{}",
-        compute_cap, compute_cap
+        "-gencode=arch=compute_{},code=[sm_{},compute_{}]",
+        compute_cap, compute_cap, compute_cap
     );
 
     eprintln!("[build.rs] nvcc: {}", nvcc);
@@ -118,20 +122,15 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE");
     println!("cargo:rerun-if-changed=cuda/wrapper.cu");
-    for header in [
-        "almost_goldilocks.cuh",
-        "almost_extension.cuh",
-        "almost_eq_lagrange.cuh",
-        "almost_partial_eval.cuh",
-        "almost_fused_permute_peval.cuh",
-        "almost_sumcheck_prover.cuh",
-        "ajtai.cuh",
-            "link_sumcheck.cuh",
-        "ajtai_chacha8.cuh",
-    ] {
-        println!(
-            "cargo:rerun-if-changed={}",
-            cuda_dir.join(header).display()
-        );
+    // Track EVERY header wrapper.cu can include, not a hand-kept list: the
+    // list had drifted (ajtai_tc.cuh, ajtai_premat.cuh, ... were missing), and a
+    // missing entry means an edited kernel is silently NOT rebuilt.
+    if let Ok(rd) = std::fs::read_dir(&cuda_dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.extension().map(|x| x == "cuh" || x == "h").unwrap_or(false) {
+                println!("cargo:rerun-if-changed={}", p.display());
+            }
+        }
     }
 }

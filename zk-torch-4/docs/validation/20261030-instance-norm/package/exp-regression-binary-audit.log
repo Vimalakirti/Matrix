@@ -1,0 +1,13 @@
+BINARY=cpu_basicblock_exp
+0de67ea4496f8c93e6aa659dcc55c8b58e59342c04ef3301b5a4e0f1d7cf152a  /workspace/shared/morpheus-instance-norm-cpu-target/debug/cpu_basicblock_exp
+	linux-vdso.so.1 (0x00007f97c3167000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f97c2f17000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f97c2d23000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f97c3169000)
+BINARY=cpu_graph_exp
+397ea323ac2f467539539dade29ee137c32076bf817d30ee257fd79ff93a22fa  /workspace/shared/morpheus-instance-norm-cpu-target/debug/cpu_graph_exp
+	linux-vdso.so.1 (0x00007f45a13df000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f45a0ff3000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f45a0f03000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f45a0d0f000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f45a13e1000)

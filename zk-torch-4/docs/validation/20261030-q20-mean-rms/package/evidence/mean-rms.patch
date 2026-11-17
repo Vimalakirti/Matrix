@@ -1,0 +1,1631 @@
+--- /dev/null
++++ b/zk-torch-4/docs/morpheus_mean_rms_profile.md
+@@ -0,0 +1,196 @@
++# Exact bounded mean and RMS profile (new numerical program)
++
++This increment follows the frozen exp candidate, not the old benchmark numerical
++relation. It makes all `DivConst` and mean-input `RMSReciprocal(dim=0)` nodes
++created by `DagBuilder::compile` acquire real arithmetic/range roots. Legacy
++row-f64 `RMSReciprocal(dim>0)` graphs fail compilation. There is no optional
++weak tolerance mode: `ZK4_EXACT_RMS` and `WHISPER_RECIP_TOL` no longer select the
++named models' semantics. This is not an end-to-end inference or performance claim.
++
++## Scope and exact public rules
++
++Activation scale is **Qs=2^s**, separate from exp's internal Qe=2^15.
++Scalar RMS accepts s=0..20, including the reported SF16 and configurable Q20;
++s=21..30 explicitly rejects pending wider linked arithmetic. Mean division is scale-independent. Epsilon in the current named
++transformer paths was absent and remains **exactly zero**; no positive epsilon
++is silently inserted. A zero statistic yields r=0. This is a deterministic
++extension, not IEEE division by zero and not standard positive-epsilon RMSNorm.
++
++* `div_const(a,c)` returns floor((a+floor(c/2))/c), with Euclidean division.
++  Thus nearest ties go toward positive infinity, for negative inputs too.
++* Logical means first authenticate/mask padding, then sum logical coordinates,
++  and divide by the actual logical count (not its next power of two).
++* RMS squares each logical input and rounds each square by Qs, then rounds the
++  logical sum by the logical last-axis count. Its resulting integer statistic
++  is m. No real-valued mean or variance is substituted.
++* r is the nearest nonnegative integer sqrt(Qs^3/m), ties upward, with m=0 ->0.
++* Gain/output order remains h=RoundDiv(x*r,Qs), out=RoundDiv(h*gain,Qs).
++  Both local rescale quotients and the gain are now explicitly ranged.
++* LayerNorm first computes its rounded logical mean, subtracts it, masks the
++  centered tensor, and invokes the same RMS path, then adds its bias.
++
++Covered current call sites: `gpt2_layer_norm`, `gptj_layer_norm`,
++`bert_layer_norm`, `whisper_layer_norm`/`whisper_rms_norm`, `llama_rms_norm`,
++`llama3_rms_norm`, generic `reduce_mean` (including ResNet global average pooling), and LeNet
++2x2 average pooling. Thus shared transformer families
++and all seven former duplicated inclusive-mean blocks are covered, rather than
++one toy site. ResNet CNN buffers are row-major, unlike Einsum: its head now
++reinterprets [C,H,W] as [W,H,C] (and explicit[B,C,H,W] as[W,H,C,B]) before
++spatial reduction. This repairs a genuine channel-mixing error, not merely an
++axis-label change. For row-major[2,2,2] values[0,1,2,3,100,101,102,103],
++the correct outputs are[2,102]; the old column-major reduction gave[51,52].
++This substantive output change also requires fresh accuracy evidence.
++LeNet pooling uses four explicitly sized gathers and exact
++division by4; its authenticated mask uses the CNN ROW-MAJOR layout and covers
++logical channel/spatial padding and explicit4D batch padding. A folded3D
++[b_pad*c_pad,H,W] shape has lost its original logical batch count: as in the
++previous convolution convention, all represented folded batches are logical.
++No hidden original batch count is inferred or claimed to be masked. Its sum bound is4*(2^30-1)<2^32.
++Explicit output sizes avoid the old offset-one gather truncation; no mutable
++quarter-kernel model parameter remains. For s>=2 this preserves the old exact
++quarter-kernel arithmetic on valid nonwrapping inputs; s0/1 gains defined mean
++semantics instead of the old shift-underflow failure. Other LeNet quadratic/conv
++operations are not certified by repairing this mean. InstanceNorm3D/UNet's unrelated affine advice, SoftmaxConst,
++SigmoidConst, whole-graph ScaleDown, attention causality, and full-model numerical
++translation are NOT certified by this increment.
++
++## Enforced domains and source encoding
++
++The actual field modulus is p=18446744069414584289. `integer_interval(v,l,h)`
++adds two real NonNegative roots on v-l and h-v, both with
++k=max(1,bit_length(h-l)). Require h-l<2^62. Their integer sum is at most
++2(2^k-1)<2^63<p, hence equals h-l, proving the interval non-circularly.
++All constants use `program_literals`, not mutable `Role::Constant` weights.
++
++Division: 1<=c<=2^20, |a|<=B=2^54-1, |y|<=floor(B/c)+1.
++Mean inputs: |x|<=2^30-1 and reduction count<=2^20; padded coordinates are
++masked before summation. Hence every sum has magnitude<2^50<p/2. Checked
++axis-count multiplication rejects overflow and duplicate ReduceMean axes.
++
++RMS: M=2^28-1, 0<=m<=M. Define integer public bounds
++R=max_j R_j and U=max_j U_j from the fixed dyadic table below.
++Input squares additionally enforce |x|<=floor(sqrt(M*Qs)) and square-rounding
++outputs in [0,M]. Each raw square<=M*Qs<2^48; the sum of <=2^20 such rounded
++squares is<2^48. The square's bounded ScaleDown quotient and bounded selector
++therefore lift to its unique integer rounding equation. This is a local repair,
++not an assumption that arbitrary field multiplication is integer multiplication.
++
++The source codec uses ternary signed digit planes: value=sum(2^b*d_b),
++d_b in {-1,0,1}. Default `req_planes_log=4` means16 planes and magnitude at most
++65535, NOT a sign bit plus15 magnitude bits. **Full RMS-domain completeness
++requires public req_planes_log=5 (32 planes) at every scale**, since m itself is
++committed DivConst advice, not merely because SF15 r can exceed65535. Default16
++retains a smaller declared-source intersection. The larger general DivConst
++numerical bound does not promise all its values fit the default source layout.
++No request widths are inferred from secret values or silently enlarged. All
++finite-domain claims are intersected with declared source bounds. Public literal
++widths remain public, and u/t/bracket intermediates are derived arithmetic,
++not newly committed wide advice.
++
++Wide NonNegative witnesses require the existing split sparse representation
++when row bits plus table bits do not fit a machine index. The constructor
++explicitly rejects the incompatible `NO_SPARSE_SPLIT`/table-width configuration;
++there is no enormous 2^62 dense table allocation.
++
++## Defining equations and integer lifting
++
++Division enforces rho=a-c*y+floor(c/2) in [0,c-1]. Thus
++c*y-floor(c/2)<=a<c*y+c-floor(c/2), selecting exactly one y. Independent bounds
++make the entire residual equation magnitude<2^56<p, excluding modular aliases.
++In particular c=2,a=1 accepts only y=1, and a=-1 accepts only y=0.
++
++For RMS, use C=Qs^3 and fixed private one-hot bucket advice with32 positions:
++zero [0,0], the28 intervals [L_j,H_j]=[2^j,2^(j+1)-1], and3 forbidden
++padding positions [-1,-1]. Every row, including zero/padding rows, has exactly
++the same public source shape and widths. Prove all32 flags in [0,1], their
++row sum exactly1, and selected L<=m<=H. Since m>=0, the three forbidden
++positions cannot be selected. The selector is private committed bit advice,
++not a public group id or a secret-dependent source shape.
++
++For each positive bucket use authenticated public bounds
++
++    R_j=floor(sqrt(C/L_j))+1
++    U_j=floor(sqrt(C*H_j))+1+ceil(H_j/2).
++
++The zero bucket has R=U=0. Prove independently 0<=r<=R_selected,
++u=m*r, and 0<=u<=U_selected (with public global caps too), before t=u*r.
++The first product lifts globally: M*Rmax=288230375346405375<2^59 at SF20.
++Once one-hot selection and its input bounds are established, the second
++product satisfies t<=R_j*U_j in that unique bucket. This is a conditional
++integer lifting argument, NOT an assumed unproved correlation between m/r/u
++and NOT an inference from the final reciprocal bracket.
++
++Use z=[m=0], b=[r=0]. ReLUHelper(v-1) only supplies a hint; each flag is defined
++by 0<=flag<=1, flag*v=0, and1<=v+flag<=max(M,Rmax)+1. Enforce z*r=0 too.
++Define one extra exact division h=RoundDiv(m-3,4)=floor((m-1)/4).
++Then ceil(m/4)=h+1 even when m=0. The live compile-time guard queue ensures
++this newly created DivConst and the newly created RMSBucket are also defined.
++Require
++
++    0 <= (1-b)*(C-t+u-h-1) <= Dmax
++    0 <= (1-z)*(t+u+h-C)   <= Dmax
++    Dmax=max(C+Umax+1, max_j(R_j*U_j+U_j+floor(H_j/4))) <2^61.
++
++At SF20, Rmax=1073741825, Umax=17592320229376, and
++Dmax=1630510897461400881<2^61. Both signed residuals have magnitude<2^61;
++the residual-plus-range-representative envelope is<2^62<p. The PIOP uses
++`min(tcl,remaining_bits)` for each lookup chunk, so a61-bit range ends with
++one actual bit at tcl4; it is not silently widened to64 bits. Actual table
++sizes, source regions, and reconstruction shifts use those partial widths.
++
++For m=0, z=1 forces r=0. For positive m and r=0, the upper bracket becomes
++floor((m-1)/4)>=C, i.e. m>4C, exactly the valid nearest rounding case.
++Otherwise the reduced brackets are exactly equivalent to
++m(2r-1)^2<=4C<m(2r+1)^2. The upper endpoint is strict, so ties select the
++larger reciprocal. Honest mr<=sqrt(m*C)+m/2<=U_j proves completeness of the
++selected U bound independently. Witness generation binary-searches the exact
++integer predicate, never f64. All bucket constants/budgets are computed with
++checked supported-scale i128 arithmetic.
++
++The local output uses Hmax=min(ceil(Xmax*Rmax/Qs),2^31-1), gain bound2^30-1,
++and output bound ceil(Hmax*(2^30-1)/Qs). The cap2^31-1 is complete, not an
++unadvertised accuracy restriction: zi=RD(xi²/Qs)>=0, S=sum zi, m=RD(S,n)
++give xi²<Qs*m*(3n/2+1/2) when m>=1. Since r<=sqrt(Qs³/m)+1/2,
++
++    |xi*r/Qs| < Qs*sqrt(3n/2+1/2)+|xi|/(2Qs)
++               <=2^20*1255+8192.
++
++After nearest rounding, a conservative integer cap1315971073<2^31-1
++suffices, using n<=2^20 and |xi|<=sqrt(M*Qs). If m=0, r=0 and h=0.
++Thus the final gain product is<2^61, and its full rounded residual is<2^62<p.
++The first x*r product is globally<2^55, even without bucket correlation.
++These local quotient bounds exclude modular aliases in the RMS output path.
++
++## Authenticity and remaining verification boundary
++
++A live compile-time scan attaches guards even to raw `add_gkr_node` division,
++mean-reciprocal and bucket nodes, including advice newly introduced by guards. Every range node is included in `dag.range`, consumed by
++the existing PIOP lookup walk; every arithmetic operand is traversed rather than
++silently treated as model precomputation. The full node graph, literal arrays,
++range-node list, model identity and layout are included in the registered public
++statement. As elsewhere in the repository, the intended DAG must be independently
++pinned: this is not a claim that an arbitrarily edited post-compile DAG describes
++a trusted model. The special exp-only structural validator remains exp-only.
++
++CPU forward/range-predicate tests are not cryptographic verifier execution.
++The PIOP replay tests in `morpheus/piop/exp_tests.rs` include the old mean ties,
++negative reciprocal, zero, neighboring-value and private-bucket mutants, but require genuine
++native linkage to execute. No missing GPU operation may be stubbed into success.
++
++## Numerical changes and required evidence
++
++Old DivConst used f64 rounding away from zero: negative exact half ties change;
++large integers also no longer suffer f64 precision loss. The old default RMS
++helper computed unrounded real squares/mean and used a nonunique tolerance gate.
++The new program uses its explicitly rounded in-circuit statistic instead. At
++SF10, row [23,23] has rounded squares1, mean1, r32768 and unit-gain output736;
++the old real-statistic helper rounds r to45590 and gives output1024. This is a
++material change, not an assertion that old helper outputs were proved correct.
++Very small rows can quantize to m=0 and now deterministically produce zero.
++Padding poison is ignored rather than included in a supposedly logical mean.
++
++Historical accuracy/timing results are not evidence for this changed program.
++Before model-equivalence or inference-quality claims: pin same checkpoint and
++inputs, old/new profiles at each actual scale, per-node errors, normalization
++errors, logits, argmax/sequence differences, task accuracy, and new source/range/
++mask census. None is silently inferred from scalar or synthetic CPU tests.
+--- a/zk-torch-4/src/basicblock/llama.rs
++++ b/zk-torch-4/src/basicblock/llama.rs
+@@ -9,6 +9,83 @@
+ use crate::sumcheck::SumcheckProof;
+ use crate::transcript::Transcript;
+ use crate::util::arith::{f_to_int, get_n, int_to_f};
++
++/// Public scalar normalization domain; larger scales require linked limbs.
++pub const RMS_MEAN_MAX: i128 = (1i128 << 28) - 1;
++
++pub fn floor_sqrt(n: i128) -> i128 {
++    assert!(n >= 0);
++    let (mut lo, mut hi) = (0i128, 1i128 << 63);
++    while lo + 1 < hi {
++        let mid = lo + (hi-lo)/2;
++        if mid <= n / mid { lo=mid; } else { hi=mid; }
++    }
++    lo
++}
++
++/// Fixed private bucket layout: zero, 28 positive dyadic intervals, and
++/// three forbidden padding positions. Every proof uses all 32 positions.
++pub fn rms_bucket_bounds(sf: usize) -> Vec<(i128,i128,i128,i128)> {
++    assert!(sf<=20,"exact scalar RMS supports activation scales 0..20; larger scales need wider arithmetic");
++    let c=1i128 << (3*sf);
++    let mut buckets=vec![(0,0,0,0)];
++    for j in 0..28 {
++        let lo=1i128<<j;let hi=(1i128<<(j+1))-1;
++        let r=floor_sqrt(c/lo)+1;
++        let u=floor_sqrt(c*hi)+1+(hi+1)/2;
++        buckets.push((lo,hi,r,u));
++    }
++    buckets.resize(32,(-1,-1,0,0));
++    buckets
++}
++
++/// Public independent bounds; the second-product bound is conditional on
++/// the separately proved one-hot bucket, not on the desired final bracket.
++pub fn rms_bounds(sf: usize) -> (i128,i128,i128) {
++    let buckets=rms_bucket_bounds(sf);
++    let r=buckets.iter().map(|b|b.2).max().unwrap();
++    let u=buckets.iter().map(|b|b.3).max().unwrap();
++    let c=1i128 << (3*sf);
++    let d=buckets.iter().filter(|b|b.0>=0).map(|b|b.2*b.3+b.3+b.1/4).max().unwrap().max(c+u+1);
++    assert!(RMS_MEAN_MAX*r < (1i128<<59) && d < (1i128<<61));
++    (r,u,d)
++}
++
++/// Private fixed-shape one-hot advice. Its relation is defined by compile-time
++/// bitness, row-sum and selected-interval roots, never by this honest hint.
++#[derive(Clone,Debug)]
++pub struct RMSBucket;
++impl BasicBlock for RMSBucket {
++    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
++        assert_eq!(inputs.len(),1);let x=inputs[0];assert_eq!(x.shape.len(),1);
++        let len=x.shape[0];assert!(len.is_power_of_two());
++        let mut values=vec![int_to_f(0);len*32];
++        for (i,&v) in x.data.as_ref().unwrap().evaluations_ref().iter().enumerate() {
++            let m=f_to_int(v);assert!((0..=RMS_MEAN_MAX).contains(&m));
++            let bucket=if m==0 {0} else {128-(m as u128).leading_zeros() as usize};
++            values[i+len*bucket]=int_to_f(1);
++        }
++        vec![Witness::new(vec![len,32],values,crate::dag::DataType::Bool,0,Role::Auxiliary)]
++    }
++    fn run_gpu(&self,inputs:&[&Witness])->Vec<Witness> {self.run(inputs)}
++    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>) {(vec![],vec![])}
++    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool {true}
++}
++
++/// Nearest nonnegative integer sqrt(Qs^3/m), midpoint ties upward.
++/// The zero-statistic extension is exactly r=0, with epsilon exactly zero.
++pub fn rounded_rms_reciprocal(m: i128, sf: usize) -> i128 {
++    let (bound,_,_)=rms_bounds(sf);
++    assert!((0..=RMS_MEAN_MAX).contains(&m), "RMS mean outside public domain");
++    if m==0 { return 0; }
++    let k=4i128 << (3*sf);
++    let (mut lo,mut hi)=(0,bound+1);
++    while lo+1<hi {
++        let mid=lo+(hi-lo)/2;
++        if m*(2*mid-1)*(2*mid-1)<=k {lo=mid;} else {hi=mid;}
++    }
++    lo
++}
+ 
+ // ============================================================================
+ // RMSReciprocal: 1 / RMS(x) computed per (b, s, ..., :) row.
+@@ -43,17 +120,9 @@
+         // is wrong by a factor of `d_pad / self.dim`, which trips the
+         // NonNegative tolerance gate.
+         if self.dim == 0 {
+-            // Exact mode: the input is the in-circuit mean m (scale 2^sf);
+-            // r is the integer with (2r-1)^2 m <= 4·2^(3 sf) <= (2r+1)^2 m.
+-            let k4: i128 = 4i128 << (3 * input.sf);
+-            let res: Vec<AlmostGoldilocksField> = evals.iter().map(|&v| {
+-                let m = f_to_int(v);
+-                if m <= 0 { return int_to_f(0); }
+-                let r0 = (((k4 / 4) as f64) / (m as f64)).sqrt().round() as i128;
+-                let ok = |r: i128| (2 * r - 1) * (2 * r - 1) * m <= k4 && k4 <= (2 * r + 1) * (2 * r + 1) * m;
+-                let r = (r0 - 3..=r0 + 3).filter(|&r| r >= 0).find(|&r| ok(r)).expect("exact rms reciprocal");
+-                int_to_f(r)
+-            }).collect();
++            let res: Vec<AlmostGoldilocksField> = evals.iter().map(|&v|
++                int_to_f(rounded_rms_reciprocal(f_to_int(v), input.sf))
++            ).collect();
+             return vec![Witness::new(input.shape.clone(), res, input.data_type, input.sf, Role::Auxiliary)];
+         }
+         let n = self.dim as f64;
+@@ -113,12 +182,14 @@
+         assert_eq!(inputs.len(), 1, "DivConst expects 1 input");
+         let input = inputs[0];
+         let evals = input.data.as_ref().unwrap().evaluations_ref();
+-        let c = self.divisor as f64;
++        assert!(self.divisor > 0, "division by zero");
++        let c = self.divisor as i128;
+         let result: Vec<AlmostGoldilocksField> = evals
+             .iter()
+             .map(|&v| {
+-                let x_int = f_to_int(v) as f64;
+-                let y_int = (x_int / c).round() as i128;
++                let x_int = f_to_int(v);
++                // Euclidean rounding, including negative exact half ties.
++                let y_int = (x_int + c / 2).div_euclid(c);
+                 int_to_f(y_int)
+             })
+             .collect();
+@@ -297,12 +368,12 @@
+ 
+     #[test]
+     fn div_const_rounds_to_nearest() {
+-        // sf = 0; divide [10, 7, 3, 4] by 2 → [5, 4, 2, 2] (banker / round-half-away-from-zero).
++        // sf = 0; divide [10, 7, 3, 4] by 2 → [5, 4, 2, 2] (ties toward positive infinity).
+         let x = make_witness(vec![4], vec![10, 7, 3, 4], 0);
+         let d = DivConst { divisor: 2 };
+         let out = d.run(&[&x]);
+         let evals = out[0].data.as_ref().unwrap().evaluations_ref();
+-        // f64::round is half-away-from-zero.
++        // Positive half ties round upward; negative halves do too.
+         assert_eq!(f_to_int(evals[0]), 5);
+         assert_eq!(f_to_int(evals[1]), 4); // 7/2 = 3.5 → 4
+         assert_eq!(f_to_int(evals[2]), 2); // 3/2 = 1.5 → 2
+--- a/zk-torch-4/src/basicblock/mod.rs
++++ b/zk-torch-4/src/basicblock/mod.rs
+@@ -40,7 +40,7 @@
+ pub use einsum::Einsum;
+ pub use exp::{ExpHelper, TwoPow};
+ pub use instancenorm::{InstanceNorm3D, InstanceNormHelper};
+-pub use llama::{DivConst, RMSReciprocal, SigmoidConst, SoftmaxConst};
++pub use llama::{DivConst, RMSBucket, RMSReciprocal, SigmoidConst, SoftmaxConst};
+ pub use maxpool::{GeneralMaxPoolHelper, MaxPoolHelper, Replicate2x2};
+ pub use pad::{ZeroPad, ZeroPad3D, ZeroPadAsym};
+ pub use permute::Permute;
+@@ -120,6 +120,7 @@
+     ReLUHelper(ReLUHelper),
+     Replicate2x2(Replicate2x2),
+     RMSReciprocal(RMSReciprocal),
++    RMSBucket(RMSBucket),
+     ScaleDown(ScaleDown),
+     ScaleUp(ScaleUp),
+     ScatterToBEV(ScatterToBEV),
+@@ -217,6 +218,7 @@
+             BasicBlockType::ReLUHelper(b)           => b.$method($($arg),*),
+             BasicBlockType::Replicate2x2(b)         => b.$method($($arg),*),
+             BasicBlockType::RMSReciprocal(b)        => b.$method($($arg),*),
++            BasicBlockType::RMSBucket(b)            => b.$method($($arg),*),
+             BasicBlockType::ScaleDown(b)            => b.$method($($arg),*),
+             BasicBlockType::ScaleUp(b)              => b.$method($($arg),*),
+             BasicBlockType::ScatterToBEV(b)         => b.$method($($arg),*),
+--- a/zk-torch-4/src/dag/bert.rs
++++ b/zk-torch-4/src/dag/bert.rs
+@@ -14,6 +14,8 @@
+     move |g, x| {
+         assert!(x.len() == 1, "This custom LayerNorm layer expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x], false)[0];
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let n = x_shape[x_shape.len() - 1];
+@@ -21,33 +23,7 @@
+         let seq = x_shape[1];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+ 
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // Reshape x_sum [1, seq] → [1, seq, 1] so the sub against
+-        // x_mean_mul_n stays element-wise per row rather than broadcasting
+-        // to a [1, seq, seq] outer-product. See the matching fix in
+-        // dag/whisper.rs::whisper_layer_norm.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
++        // div_const emits exact deterministic rounding roots.
+ 
+         let x_minus_mean = g.sub(x, x_mean)[0];
+         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
+--- a/zk-torch-4/src/dag/builder.rs
++++ b/zk-torch-4/src/dag/builder.rs
+@@ -78,15 +78,15 @@
+     }
+ 
+     /// Dense full-padded literal used for integer range constraints.
+-    fn integer_literal(&mut self, shape: Vec<usize>, value: i128, sf: usize) -> EdgeId {
++    pub(crate) fn integer_literal(&mut self, shape: Vec<usize>, value: i128, sf: usize) -> EdgeId {
+         let n = shape.iter().map(|s| s.next_power_of_two()).product();
+         self.public_literal(Witness::new(shape, vec![int_to_f(value); n], DataType::Float, sf, Role::Input))
+     }
+ 
+     /// Integer interval certificate. Both sides are lookup roots, with a
+     /// common authenticated small sum; the field relation therefore lifts.
+-    fn integer_interval(&mut self, a: EdgeId, lo: i128, hi: i128) {
+-        assert!(lo <= hi && hi-lo < (1i128<<40), "unsupported interval budget");
++    pub(crate) fn integer_interval(&mut self, a: EdgeId, lo: i128, hi: i128) {
++        assert!(lo <= hi && hi-lo < (1i128<<62), "unsupported interval budget");
+         let w=self.init_values[a].as_ref().unwrap();
+         let shape=w.shape.clone(); let sf=w.sf;
+         let low=self.integer_literal(shape.clone(),lo,sf);
+@@ -96,6 +96,10 @@
+         self.init_values[above].as_mut().unwrap().role=Role::Output;
+         self.init_values[below].as_mut().unwrap().role=Role::Output;
+         let bits=(128-((hi-lo) as u128).leading_zeros() as usize).max(1);
++        let row_bits=crate::util::arith::get_n(&self.init_values[a].as_ref().unwrap().shape);
++        assert!(bits+row_bits < usize::BITS as usize ||
++            (std::env::var("NO_SPARSE_SPLIT").is_err() && bits>*crate::TABLE_COMMIT_LOG),
++            "wide normalization ranges require split sparse representation");
+         self.add_nonneg_node_bits(above,bits);
+         self.add_nonneg_node_bits(below,bits);
+     }
+@@ -141,7 +145,35 @@
+         let data_type = inp.data_type;
+         let out = Witness::new_wo_data(shape, data_type, sf, Role::Output);
+         self.init_values.push(Some(out));
+-        self.add_gkr_node(vec![a], block)
++        let y = self.add_gkr_node(vec![a], block)[0];
++        vec![y]
++    }
++
++    fn division_guards(&mut self,a: EdgeId,y: EdgeId,c: usize) {
++        let input=self.init_values[a].as_ref().unwrap();
++        let output=self.init_values[y].as_ref().unwrap();
++        assert_eq!(input.shape,output.shape,"division advice shape mismatch");
++        assert_eq!(input.sf,output.sf,"division advice scale mismatch");
++        assert!(input.shape.iter().all(|&d| d>0),"invalid division shape");
++        let sf=self.init_values[a].as_ref().unwrap().sf;
++        // Exact integer division on a public bounded domain. The registered
++        // DAG includes these roots; advice alone is never the specification.
++        assert!((1..=(1 << 20)).contains(&c), "unsupported divisor");
++        const B: i128 = (1i128 << 54) - 1;
++        self.integer_interval(a, -B, B);
++        self.integer_interval(y, -((B / c as i128) + 1), (B / c as i128) + 1);
++        let shape=self.init_values[a].as_ref().unwrap().shape.clone();
++        let n=shape.iter().map(|x| x.next_power_of_two()).product();
++        let af=self.change_shape(a,vec![n]);
++        let yf=self.change_shape(y,vec![n]);
++        let divisor=self.integer_literal(vec![n],c as i128,0);
++        let cy=self.einsum("i,i->i".into(),vec![yf,divisor],false)[0];
++        let rem=self.sub(af,cy)[0];
++        // rho = a-c*y+floor(c/2) lies in [0,c-1]. Unlike the old
++        // symmetric interval this has exactly one allowed half-tie answer.
++        let half=self.integer_literal(vec![n],(c/2) as i128,sf);
++        let rho=self.add(rem,half)[0];
++        self.integer_interval(rho,0,c as i128-1);
+     }
+ 
+     pub fn add_nonneg_node(&mut self, a: EdgeId) {
+@@ -934,7 +966,7 @@
+     }
+ 
+     /// SubSample2D with explicit output size.
+-    fn subsample2d_sized(&mut self, x: EdgeId, stride_h: usize, stride_w: usize, offset_h: usize, offset_w: usize, out_h: usize, out_w: usize) -> EdgeId {
++    pub(crate) fn subsample2d_sized(&mut self, x: EdgeId, stride_h: usize, stride_w: usize, offset_h: usize, offset_w: usize, out_h: usize, out_w: usize) -> EdgeId {
+         let x_shape = &self.init_values[x].as_ref().unwrap().shape;
+         let (channels, _batch, _logical_c) = Self::per_channel_lead(x_shape);
+         let off = x_shape.len() - 3;
+@@ -1023,6 +1055,16 @@
+         y
+     }
+ 
++    /// Logical reduction inputs have explicit signed lifts before summation.
++    /// Padding is authenticated and excluded before, rather than after, a mean.
++    pub(crate) fn mean_input(&mut self, x: EdgeId, count: usize) -> EdgeId {
++        assert!((1..=(1<<20)).contains(&count), "unsupported mean reduction size");
++        let shape=self.init_values[x].as_ref().unwrap().shape.clone();
++        let x=self.mask(x,shape);
++        self.integer_interval(x,-((1i128<<30)-1),(1i128<<30)-1);
++        x
++    }
++
+     /// ReduceMean over one or more axes.
+     /// E.g. reduce_mean(x, &[1, 2]) on shape [B, S, D] computes mean over axes 1,2 → shape [B].
+     pub fn reduce_mean(&mut self, x: EdgeId, axes: &[usize]) -> EdgeId {
+@@ -1033,7 +1075,9 @@
+             assert!(ax < ndim, "axis {ax} out of bounds for {ndim}-dim tensor");
+         }
+ 
+-        let n: usize = axes.iter().map(|&ax| shape[ax]).product();
++        assert!(axes.iter().collect::<std::collections::HashSet<_>>().len()==axes.len(), "duplicate mean axis");
++        let n=axes.iter().try_fold(1usize,|n,&ax|n.checked_mul(shape[ax])).expect("mean reduction size overflow");
++        let x=self.mean_input(x,n);
+ 
+         let in_chars: String = (0..ndim).map(|i| (b'a' + i as u8) as char).collect();
+         let out_chars: String = (0..ndim)
+@@ -1945,6 +1989,23 @@
+ 
+     /// Compile: build consumers/producers, ports, and topological order.
+     pub fn compile(mut self) -> (Dag, Vec<Vec<Witness>>) {
++        // Every division/RMS advice primitive receives defining constraints, including raw
++        // add_gkr_node users. Legacy row-f64 reciprocal advice is unsupported.
++        // The queue is intentionally live: RMS guards themselves create an
++        // exact quarter division and a private bucket advice node.
++        let mut cursor=0;
++        while cursor<self.nodes.len() {
++            let node=self.nodes[cursor].clone();cursor+=1;
++            match node.kind {
++                BasicBlockType::DivConst(b)=>self.division_guards(node.inputs[0],node.outputs[0],usize::try_from(b.divisor).expect("divisor too large")),
++                BasicBlockType::RMSReciprocal(b)=>{
++                    assert_eq!(b.dim,0,"legacy unconstrained RMS advice is unsupported; use the exact mean gate");
++                    crate::dag::llama::rms_reciprocal_constraints(&mut self,node.inputs[0],node.outputs[0]);
++                },
++                BasicBlockType::RMSBucket(_)=>crate::dag::llama::rms_bucket_constraints(&mut self,node.inputs[0],node.outputs[0]),
++                _=>{},
++            }
++        }
+         let helpers: Vec<_> = self.nodes.iter().filter_map(|n| {
+             if let BasicBlockType::ExpHelper(h) = &n.kind {
+                 Some((n.id, n.inputs[0], n.outputs[0], h.num_bits))
+--- a/zk-torch-4/src/dag/gpt2.rs
++++ b/zk-torch-4/src/dag/gpt2.rs
+@@ -14,6 +14,8 @@
+     move |g, x| {
+         assert!(x.len() == 1, "This custom LayerNorm layer expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x], false)[0];
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let n = x_shape[x_shape.len() - 1];
+@@ -21,40 +23,7 @@
+         let seq = x_shape[1];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+ 
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // `x_sum` is [1, seq] but `x_mean_mul_n` is [1, seq, 1]. Subtracting them
+-        // directly broadcasts to a [1, seq, seq] OUTER PRODUCT whose entry (i, j)
+-        // is `x_sum[j] - n*x_mean[i]`, a difference between two DIFFERENT rows'
+-        // sums. Only the diagonal is the intended rounding remainder; off-diagonal
+-        // entries are unbounded in both signs and break the NonNegative check as
+-        // soon as row energies differ. A power-of-two padding tail guarantees they
+-        // differ, since a pad row has zero energy while real rows do not - which
+-        // is why non-power-of-two sequence lengths (BERT-Large 384, Whisper
+-        // large-v3 1500/448) failed while power-of-two ones (GPT-2 1024) happened
+-        // to stay in range. Reshape first so the sub stays element-wise per row.
+-        // Same fix as dag/bert.rs and dag/whisper.rs::whisper_layer_norm.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
++        // div_const emits exact deterministic rounding roots.
+ 
+         let x_minus_mean = g.sub(x, x_mean)[0];
+         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
+--- a/zk-torch-4/src/dag/gptj.rs
++++ b/zk-torch-4/src/dag/gptj.rs
+@@ -14,6 +14,8 @@
+     move |g, x| {
+         assert!(x.len() == 1, "This custom LayerNorm layer expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x], false)[0];
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let n = x_shape[x_shape.len() - 1];
+@@ -21,30 +23,7 @@
+         let x_mean = g.div_const(x_sum, n)[0];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+ 
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // x_sum reshape so the sub stays element-wise per row, not outer-product.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
++        // div_const emits exact deterministic rounding roots.
+ 
+         let x_minus_mean = g.sub(x, x_mean)[0];
+         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
+--- a/zk-torch-4/src/dag/lenet.rs
++++ b/zk-torch-4/src/dag/lenet.rs
+@@ -17,10 +17,9 @@
+ //! `x^2 + x`, not tanh or ReLU: in the ONNX it appears as `Mul(y, y)` followed
+ //! by `Add(., y)`. That is a degree-2 polynomial, so it needs no range check and
+ //! no lookup, which is why this model is cheap for us. And pooling is AVERAGE,
+-//! not max; average pooling is linear and is expressed here as a depthwise
+-//! convolution; average pooling is linear and is built here from four strided
+-//! gathers plus a divide, so it costs no comparison chain and no lookup, unlike
+-//! the maxpool every other CNN in this table uses.
++//! not max. Its finite mean uses four explicit-size strided gathers plus
++//! exact integer division with authenticated range roots; its repaired cost
++//! must not be read from historical no-lookup timings.
+ 
+ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+ 
+@@ -41,39 +40,41 @@
+     g.add(sq, x)[0]
+ }
+ 
+-/// Average pooling, `2x2` stride `2`, as a strided convolution against a
+-/// block-diagonal `1/4` kernel: `w[co][ci][kh][kw] = 1/4` when `co == ci`.
+-///
+-/// Average pooling is linear, so it needs no comparison and no lookup, unlike
+-/// the maxpool the other CNNs here use. Two earlier attempts are worth
+-/// recording. A depthwise conv with a `[C,1,2,2]` kernel failed its
+-/// FlattenKernel check because the constant was written column-major, the
+-/// einsum operand convention, rather than the padded row-major a conv weight
+-/// expects. Composing `subsample2d` gathers instead failed differently:
+-/// `subsample2d` truncates the final window, so offset 1 on a width-28 input
+-/// returns 13 columns rather than 14 and the four gathers no longer broadcast
+-/// against each other. The layout used here was verified against a hand
+-/// computed average before being wired in.
+-fn avg_pool2x2(g: &mut DagBuilder, x: EdgeId, channels: usize) -> EdgeId {
+-    let cp = channels.next_power_of_two();
+-    let kp = 2usize.next_power_of_two();
+-    let mut data = crate::zero_witness_vec(cp * cp * kp * kp);
+-    let quarter = AlmostGoldilocksField(1u64 << (*SF_LOG - 2));
+-    for c in 0..channels {
+-        for kh in 0..2 {
+-            for kw in 0..2 {
+-                data[((c * cp + c) * kp + kh) * kp + kw] = quarter;
+-            }
+-        }
++/// Exact 2x2 mean, using four explicit-size row-major gathers and DivConst.
++/// The explicit output extent avoids the old offset-one truncation bug. The
++/// authenticated row-major mask excludes spatial/channel padding BEFORE sums.
++pub(crate) fn avg_pool2x2(g: &mut DagBuilder, x: EdgeId, channels: usize) -> EdgeId {
++    let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++    let sf=g.init_values[x].as_ref().unwrap().sf;
++    assert!(shape.len()==3 || shape.len()==4);
++    let h=shape[shape.len()-2];let w=shape[shape.len()-1];
++    assert!(h>0 && w>0 && h%2==0 && w%2==0);
++    let cp=channels.next_power_of_two();
++    let (batch,rows)=if shape.len()==4 {
++        assert_eq!(shape[1],channels);(shape[0],shape[0].next_power_of_two()*cp)
++    } else if shape[0]==channels {(1,channels)} else {
++        assert_eq!(shape[0]%cp,0);(shape[0]/cp,shape[0])
++    };
++    let hp=h.next_power_of_two();let wp=w.next_power_of_two();
++    let len=rows.next_power_of_two()*hp*wp;
++    let mut mask=vec![AlmostGoldilocksField(0);len];
++    for c in 0..rows {
++        if c/cp>=batch || c%cp>=channels {continue;}
++        for ih in 0..h {for iw in 0..w {mask[iw+wp*(ih+hp*c)]=AlmostGoldilocksField(1);}}
+     }
+-    let w = Witness::new(vec![channels, channels, 2, 2], data,
+-                         DataType::Uint, *SF_LOG, Role::Constant);
+-    let w_e = g.param(w);
+-    let out = g.conv2d_strided(x, w_e, (2, 2), (2, 2))[0];
+-    // Convolution multiplies two fixed-point tensors without rescaling, so the
+-    // product sits at 2*sf and is brought back explicitly, as after every other
+-    // convolution here.
+-    if *SF_LOG > 0 { g.scale(out, 2 * *SF_LOG, *SF_LOG)[0] } else { out }
++    let mask=g.public_literal(Witness::new(vec![len],mask,DataType::Bool,0,Role::Input));
++    let xf=g.change_shape(x,vec![len]);
++    let masked=g.einsum("i,i->i".into(),vec![xf,mask],false)[0];
++    let x=g.change_shape(masked,shape);
++    let bound=(1i128<<30)-1;g.integer_interval(x,-bound,bound);
++    let mut parts=Vec::new();
++    for oh in 0..2 {for ow in 0..2 {
++        let part=g.subsample2d_sized(x,2,2,oh,ow,h/2,w/2);
++        g.init_values[part].as_mut().unwrap().sf=sf;
++        parts.push(part);
++    }}
++    let a=g.add(parts[0],parts[1])[0];let b=g.add(parts[2],parts[3])[0];
++    let sum=g.add(a,b)[0];g.div_const(sum,4)[0]
+ }
+ 
+ /// EZKL's LeNet-5. `conv_w` is `[conv1 (6,1,5,5), conv2 (16,6,5,5)]`, `fc_w` is
+--- a/zk-torch-4/src/dag/llama.rs
++++ b/zk-torch-4/src/dag/llama.rs
+@@ -205,48 +205,128 @@
+     }
+ }
+ 
+-/// ZK4_EXACT_RMS=1: the RMS reciprocal r is pinned exactly by the rounding
+-/// bracket (2r-1)^2 m <= 4·2^(3 SF) <= (2r+1)^2 m on the in-circuit mean m,
+-/// instead of the tolerance gate |m r^2 - 1| <= 2/2^SF. The tolerance gate
+-/// fails on realistic activations (quantizing r alone moves m r^2 by more
+-/// than 2/2^SF), the bracket holds for every honest row.
+-pub fn exact_rms() -> bool { std::env::var("ZK4_EXACT_RMS").ok().as_deref() == Some("1") }
+-
+-/// The reciprocity gate of an RMS/Layer norm; returns r ([1, seq, 1]).
+-/// `r_old` is the tolerance-mode advice (None in exact mode).
+-pub(crate) fn rms_reciprocal_gate(g: &mut DagBuilder, r_old: Option<EdgeId>, x_mean: EdgeId, seq: usize, sf: EdgeId, tolerance: EdgeId) -> EdgeId {
+-    let pad = seq.next_power_of_two() != seq;
+-    if exact_rms() {
+-        let r = g.rms_reciprocal_from_mean(x_mean);
+-        let c = |g: &mut DagBuilder, v: u64| g.param(Witness::new(vec![1], vec![AlmostGoldilocksField(v)], DataType::Float, 0, Role::Constant));
+-        let (two, one, k4) = (c(g, 2), c(g, 1), c(g, 4u64 << (3 * *SF_LOG)));
+-        let r2 = g.einsum("bsi,i->bsi".to_string(), vec![r, two], false)[0];
+-        let lo = g.sub(r2, one)[0];
+-        let hi = g.add(r2, one)[0];
+-        let lo2 = g.einsum("bsi,bsi->bsi".to_string(), vec![lo, lo], false)[0];
+-        let hi2 = g.einsum("bsi,bsi->bsi".to_string(), vec![hi, hi], false)[0];
+-        let lom = g.einsum("bsi,bsi->bsi".to_string(), vec![lo2, x_mean], false)[0];
+-        let him = g.einsum("bsi,bsi->bsi".to_string(), vec![hi2, x_mean], false)[0];
+-        let d1 = g.sub(k4, lom)[0];
+-        let d2 = g.sub(him, k4)[0];
+-        let (d1, d2) = if pad { (g.mask(d1, vec![1, seq, 1]), g.mask(d2, vec![1, seq, 1])) } else { (d1, d2) };
+-        let bits = 3 * *SF_LOG + 8;
+-        g.add_nonneg_node_bits(d1, bits);
+-        g.add_nonneg_node_bits(d2, bits);
+-        return r;
+-    }
+-    let r = r_old.expect("tolerance-mode reciprocal");
+-    let r_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![r, r], true)[0];
+-    let z = g.einsum("bsi,bsi->bsi".to_string(), vec![x_mean, r_sq], true)[0];
+-    let z_sf_diff = g.sub(z, sf)[0];
+-    // Pad rows (mean 0) cannot satisfy the gate; mask them when the sequence
+-    // axis is padded (r only multiplies zero rows there).
+-    let z_sf_diff = if pad { g.mask(z_sf_diff, vec![1, seq, 1]) } else { z_sf_diff };
+-    let positive_3 = g.add(z_sf_diff, tolerance)[0];
+-    let positive_4 = g.sub(tolerance, z_sf_diff)[0];
+-    g.add_nonneg_node(positive_3);
+-    g.add_nonneg_node(positive_4);
+-    r
++/// There is one deterministic RMS relation; the old environment-controlled
++/// tolerance relation is no longer selected by any named model.
++pub fn exact_rms() -> bool { true }
++
++/// Scalar exact reciprocal with independently bounded linked intermediates.
++/// Epsilon is exactly zero, and a zero statistic deterministically returns zero.
++pub(crate) fn rms_reciprocal_gate(g: &mut DagBuilder, x_mean: EdgeId) -> EdgeId {
++    g.rms_reciprocal_from_mean(x_mean)
++}
++
++pub(crate) fn rms_reciprocal_constraints(g: &mut DagBuilder, x_mean: EdgeId, r: EdgeId) {
++    let input=g.init_values[x_mean].as_ref().unwrap();
++    let output=g.init_values[r].as_ref().unwrap();
++    assert_eq!(input.shape,output.shape,"RMS advice shape mismatch");
++    assert_eq!(input.sf,output.sf,"RMS advice scale mismatch");
++    assert!(!input.shape.is_empty() && input.shape.iter().all(|&d|d>0),"invalid RMS shape");
++    use crate::basicblock::llama::{rms_bounds, RMS_MEAN_MAX};
++    let sf=g.init_values[x_mean].as_ref().unwrap().sf;
++    let (rmax,umax,pmax)=rms_bounds(sf);
++    let shape=g.init_values[x_mean].as_ref().unwrap().shape.clone();
++    let len=shape.iter().map(|x| x.next_power_of_two()).product();
++    let m=g.change_shape(x_mean,vec![len]);
++    let rf=g.change_shape(r,vec![len]);
++    g.integer_interval(m,0,RMS_MEAN_MAX);
++    g.integer_interval(rf,0,rmax);
++    let c=|g: &mut DagBuilder,v| g.integer_literal(vec![len],v,0);
++    let mul=|g: &mut DagBuilder,a,b| g.einsum("i,i->i".into(),vec![a,b],false)[0];
++    let one=c(g,1); let three=c(g,3); let target=c(g,1i128 << (3*sf));
++    let bucket=g.add_gkr_node(vec![m],BasicBlockType::RMSBucket(crate::basicblock::llama::RMSBucket))[0];
++    g.init_values.push(Some(Witness::new_wo_data(vec![len,32],DataType::Bool,0,Role::Auxiliary)));
++    let bounds=crate::basicblock::llama::rms_bucket_bounds(sf);
++    let rsel=rms_select(g,bucket,bounds.iter().map(|b|b.2).collect());
++    let usel=rms_select(g,bucket,bounds.iter().map(|b|b.3).collect());
++    let rd=g.sub(rsel,rf)[0];g.integer_interval(rd,0,rmax);
++    // ReLUHelper(v-1) supplies the zero flag on nonnegative integer v.
++    // Its hint is independently defined by three range/equality constraints.
++    let zero_flag=|g: &mut DagBuilder,v| {
++        let vm1=g.sub(v,one)[0];
++        let z=g.add_gkr_node(vec![vm1],BasicBlockType::ReLUHelper(crate::basicblock::relu::ReLUHelper))[0];
++        g.init_values.push(Some(Witness::new_wo_data(vec![len],DataType::Bool,0,Role::Output)));
++        g.integer_interval(z,0,1);
++        let zv=mul(g,z,v); g.integer_interval(zv,0,0);
++        let vpz=g.add(v,z)[0]; g.integer_interval(vpz,1,RMS_MEAN_MAX.max(rmax)+1);
++        z
++    };
++    let z=zero_flag(g,m); let b=zero_flag(g,rf);
++    let zr=mul(g,z,rf); g.integer_interval(zr,0,0);
++    let u=mul(g,m,rf); g.integer_interval(u,0,umax);
++    let ud=g.sub(usel,u)[0];g.integer_interval(ud,0,umax);
++    let t=mul(g,u,rf);
++    // h=RD(m-3,4)=floor((m-1)/4); ceil(m/4)=h+1, even at m=0.
++    let mm3=g.sub(m,three)[0];let h=g.div_const(mm3,4)[0];
++    let ct=g.sub(target,t)[0];let ctu=g.add(ct,u)[0];
++    let dl=g.sub(ctu,h)[0];let dl=g.sub(dl,one)[0];
++    let tu=g.add(t,u)[0];let tuh=g.add(tu,h)[0];let dh=g.sub(tuh,target)[0];
++    let active_low=g.sub(one,b)[0]; let active_high=g.sub(one,z)[0];
++    let dl=mul(g,active_low,dl); let dh=mul(g,active_high,dh);
++    g.integer_interval(dl,0,pmax);
++    g.integer_interval(dh,0,pmax);
++
++}
++
++/// Select from an immutable public table without publishing the private bucket.
++fn rms_select(g:&mut DagBuilder,bucket:EdgeId,values:Vec<i128>)->EdgeId {
++    let table=g.public_literal(Witness::new(vec![32],values.into_iter().map(crate::util::arith::int_to_f).collect(),DataType::Int,0,Role::Input));
++    g.einsum("ij,j->i".into(),vec![bucket,table],false)[0]
++}
++
++pub(crate) fn rms_bucket_constraints(g:&mut DagBuilder,m:EdgeId,bucket:EdgeId) {
++    use crate::basicblock::llama::{rms_bucket_bounds,RMS_MEAN_MAX};
++    let input=g.init_values[m].as_ref().unwrap();
++    assert_eq!(input.shape.len(),1,"bucket input must be a flat row tensor");
++    let len=input.shape[0];let sf=input.sf;
++    assert!(len.is_power_of_two());
++    assert_eq!(g.init_values[bucket].as_ref().unwrap().shape,vec![len,32]);
++    assert_eq!(g.init_values[bucket].as_ref().unwrap().sf,0);
++    g.integer_interval(m,0,RMS_MEAN_MAX);
++    g.integer_interval(bucket,0,1);
++    let sum=g.einsum("ij->i".into(),vec![bucket],false)[0];g.integer_interval(sum,1,1);
++    let bounds=rms_bucket_bounds(sf);
++    let lo=rms_select(g,bucket,bounds.iter().map(|b|b.0).collect());
++    let hi=rms_select(g,bucket,bounds.iter().map(|b|b.1).collect());
++    let a=g.sub(m,lo)[0];let b=g.sub(hi,m)[0];
++    g.integer_interval(a,0,RMS_MEAN_MAX+1);g.integer_interval(b,0,RMS_MEAN_MAX+1);
++}
++
++/// Bound and mask the RMS input before squaring. Bounding the square's
++/// ScaleDown quotient makes this local rescale an integer rounding function;
++/// this does not certify unrelated ScaleDown instances elsewhere in the DAG.
++pub(crate) fn rms_square(g: &mut DagBuilder, x: EdgeId) -> EdgeId {
++    use crate::basicblock::llama::{floor_sqrt,rms_bounds,RMS_MEAN_MAX};
++    let sf=g.init_values[x].as_ref().unwrap().sf;
++    let _=rms_bounds(sf);
++    let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++    assert!((1..=(1<<20)).contains(shape.last().unwrap()), "unsupported RMS reduction dimension");
++    let x=g.mask(x,shape);
++    let bound=floor_sqrt(RMS_MEAN_MAX*(1i128<<sf));
++    g.integer_interval(x,-bound,bound);
++    let sq=g.einsum("bsi,bsi->bsi".into(),vec![x,x],true)[0];
++    g.integer_interval(sq,0,RMS_MEAN_MAX);
++    sq
++}
++
++/// The two RMS output rescales are bounded locally as well; unrelated graph
++/// rescales remain outside this normalization certificate.
++pub(crate) fn rms_apply(g: &mut DagBuilder,x: EdgeId,r: EdgeId,w: EdgeId) -> EdgeId {
++    use crate::basicblock::llama::{floor_sqrt,rms_bounds,RMS_MEAN_MAX};
++    let sf=g.init_values[x].as_ref().unwrap().sf;
++    assert_eq!(g.init_values[w].as_ref().unwrap().sf,sf,"RMS gain scale mismatch");
++    let (rmax,_,_)=rms_bounds(sf); let q=1i128<<sf;
++    let xmax=floor_sqrt(RMS_MEAN_MAX*q);
++    // Mean/square roots also imply |h|<2^31 across s<=20,n<=2^20.
++    // See the profile proof; this extra bound is independent of final output.
++    let hmax=((xmax*rmax+q-1)/q).min((1i128<<31)-1);
++    let wmax=(1i128<<30)-1;
++    g.integer_interval(w,-wmax,wmax);
++    let h=g.einsum("bsi,bs->bsi".into(),vec![x,r],true)[0];
++    g.integer_interval(h,-hmax,hmax);
++    let out=g.einsum("bsi,i->bsi".into(),vec![h,w],true)[0];
++    let ymax=(hmax*wmax+q-1)/q;
++    g.integer_interval(out,-ymax,ymax);
++    out
+ }
+ 
+ pub fn llama_rms_norm(
+@@ -255,71 +335,23 @@
+     move |g, x| {
+         assert!(x.len() == 1, "This custom RMSNorm layer expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let seq = x_shape[1];
+         let n = x_shape[x_shape.len() - 1];
+-        let r_old = if exact_rms() { None } else { Some(g.rms_reciprocal(x)[0]) };
+-
+-        // Prove r is correctly computed
+-        let sf = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(*SF_FLOAT as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(2)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![x, x], true)[0];
++
++        let x_sq = rms_square(g,x);
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x_sq], false)[0];
+         let x_mean = g.div_const(x_sum, n)[0];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // `x_sum` is [1, seq] but `x_mean_mul_n` is [1, seq, 1]. Subtracting them
+-        // directly broadcasts to a [1, seq, seq] OUTER PRODUCT whose entry (i, j)
+-        // is `x_sum[j] - n*x_mean[i]`, a difference between two DIFFERENT rows'
+-        // sums. Only the diagonal is the intended rounding remainder; off-diagonal
+-        // entries are unbounded in both signs and break the NonNegative check as
+-        // soon as row energies differ. A power-of-two padding tail guarantees they
+-        // differ, since a pad row has zero energy while real rows do not - which
+-        // is why non-power-of-two sequence lengths (BERT-Large 384, Whisper
+-        // large-v3 1500/448) failed while power-of-two ones (GPT-2 1024) happened
+-        // to stay in range. Reshape first so the sub stays element-wise per row.
+-        // Same fix as dag/bert.rs and dag/whisper.rs::whisper_layer_norm.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
+-
+-        let r = rms_reciprocal_gate(g, r_old, x_mean, seq, sf, tolerance);
++        // div_const emits exact deterministic rounding roots.
++
++        let r = rms_reciprocal_gate(g, x_mean);
+ 
+         // Compute RMSNorm
+         let r = g.change_shape(r, vec![1, seq]);
+-        let h = g.einsum("bsi,bs->bsi".to_string(), vec![x, r], true)[0];
+-        let out = g.einsum("bsi,i->bsi".to_string(), vec![h, w_e], true)[0];
++        let out = rms_apply(g,x,r,w_e);
+         vec![out]
+     }
+ }
+@@ -727,75 +759,28 @@
+ }
+ 
+ /// RMSNorm that handles seq > 1 correctly.
+-fn llama3_rms_norm(
++pub(crate) fn llama3_rms_norm(
+     w_e: EdgeId,
+     seq: usize,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "RMSNorm expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let n = x_shape[x_shape.len() - 1];
+-        let r_old = if exact_rms() { None } else { Some(g.rms_reciprocal(x)[0]) };
+-
+-        let sf = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(*SF_FLOAT as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(2)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![x, x], true)[0];
++
++        let x_sq = rms_square(g,x);
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x_sq], false)[0];
+         let x_mean = g.div_const(x_sum, n)[0];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // `x_sum` is [1, seq] but `x_mean_mul_n` is [1, seq, 1]. Subtracting them
+-        // directly broadcasts to a [1, seq, seq] OUTER PRODUCT whose entry (i, j)
+-        // is `x_sum[j] - n*x_mean[i]`, a difference between two DIFFERENT rows'
+-        // sums. Only the diagonal is the intended rounding remainder; off-diagonal
+-        // entries are unbounded in both signs and break the NonNegative check as
+-        // soon as row energies differ. A power-of-two padding tail guarantees they
+-        // differ, since a pad row has zero energy while real rows do not - which
+-        // is why non-power-of-two sequence lengths (BERT-Large 384, Whisper
+-        // large-v3 1500/448) failed while power-of-two ones (GPT-2 1024) happened
+-        // to stay in range. Reshape first so the sub stays element-wise per row.
+-        // Same fix as dag/bert.rs and dag/whisper.rs::whisper_layer_norm.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
+-
+-        let r = rms_reciprocal_gate(g, r_old, x_mean, seq, sf, tolerance);
++        // div_const emits exact deterministic rounding roots.
++
++        let r = rms_reciprocal_gate(g, x_mean);
+ 
+         let r = g.change_shape(r, vec![1, seq]);
+-        let h = g.einsum("bsi,bs->bsi".to_string(), vec![x, r], true)[0];
+-        let out = g.einsum("bsi,i->bsi".to_string(), vec![h, w_e], true)[0];
++        let out = rms_apply(g,x,r,w_e);
+         vec![out]
+     }
+ }
+--- a/zk-torch-4/src/dag/mod.rs
++++ b/zk-torch-4/src/dag/mod.rs
+@@ -1293,3 +1293,6 @@
+         assert_eq!(downloaded, vec![0u64, 1, 2, 3]);
+     }
+ }
++
++#[cfg(test)]
++mod normalization_tests;
+--- /dev/null
++++ b/zk-torch-4/src/dag/normalization_tests.rs
+@@ -0,0 +1,221 @@
++//! Real CPU operator/graph tests, plus direct evaluation of emitted range roots.
++//! These are NOT a substitute for cryptographic prover/verifier replay.
++use super::*;
++use crate::basicblock::{BasicBlock, BasicBlockType, DivConst, RMSReciprocal};
++use crate::basicblock::llama::{rounded_rms_reciprocal, RMS_MEAN_MAX};
++use crate::util::arith::{f_to_int,int_to_f};
++
++fn forward(d: &Dag,w: &mut [Vec<Witness>],override_value: Option<(EdgeId,i128)>) -> bool {
++    let values=override_value.map(|(e,v)| (e,vec![v;w[e][0].shape.iter().map(|n|n.next_power_of_two()).product()]));
++    forward_values(d,w,values)
++}
++fn forward_values(d: &Dag,w: &mut [Vec<Witness>],override_value: Option<(EdgeId,Vec<i128>)>) -> bool {
++    let mut valid=true;
++    for &n in &d.topo {
++        let nd=&d.nodes[n];
++        if let BasicBlockType::NonNegative(b)=&nd.kind {
++            for v in w[nd.inputs[0]][0].data.as_ref().unwrap().evaluations_ref() {
++                let x=f_to_int(*v);
++                valid &= x>=0 && x<(1i128<<b.table_size_log);
++            }
++        }
++        let inputs=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();
++        let outputs=nd.kind.run(&inputs);
++        for (&e,mut v) in nd.outputs.iter().zip(outputs) {
++            if let Some((target,values))=&override_value {
++                if e==*target {
++                    v=Witness::new(v.shape,values.iter().copied().map(int_to_f).collect(),v.data_type,v.sf,v.role);
++                }
++            }
++            w[e]=vec![v];
++        }
++    }
++    valid
++}
++fn input(b:&mut DagBuilder,shape:Vec<usize>,values:Vec<i128>,sf:usize)->EdgeId {
++    b.committed_input(Witness::new(shape,values.into_iter().map(int_to_f).collect(),DataType::Float,sf,Role::Input))
++}
++
++#[test]
++fn division_actual_graph_signed_ties_and_mutations() {
++    for c in [1,2,3,768,1024,8192,1<<20] {
++        for a in [-(c as i128)/2,-1,0,1,c as i128/2,(1i128<<54)-1,-((1i128<<54)-1)] {
++            let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![a],0);
++            // Raw advice must acquire the same constraints at compile time.
++            let y=b.add_gkr_node(vec![x],BasicBlockType::DivConst(DivConst{divisor:c}))[0];
++            b.init_values.push(Some(Witness::new_wo_data(vec![1],DataType::Float,0,Role::Output)));
++            let (d,w)=b.compile();let expected=(a+c as i128/2).div_euclid(c as i128);
++            let mut honest=w.clone();assert!(forward(&d,&mut honest,None));
++            assert_eq!(f_to_int(honest[y][0].data.as_ref().unwrap().index(0)),expected);
++            for bad in [expected-1,expected+1] {assert!(!forward(&d,&mut w.clone(),Some((y,bad))));}
++        }
++    }
++}
++
++#[test]
++fn rms_actual_graph_zero_ties_sign_and_adjacent_mutations() {
++    for sf in [0,1,10,15,16,20] {
++        let q=1i128<<sf;
++        for m in [0,1,2,q,4*(1i128<<(3*sf)),RMS_MEAN_MAX] {
++            if m>RMS_MEAN_MAX {continue;}
++            let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![m],sf);
++            let r=b.rms_reciprocal_from_mean(x);
++            let (d,w)=b.compile();let expected=rounded_rms_reciprocal(m,sf);
++            let mut honest=w.clone();assert!(forward(&d,&mut honest,None),"sf={sf} m={m}");
++            assert_eq!(f_to_int(honest[r][0].data.as_ref().unwrap().index(0)),expected);
++            for bad in [expected-1,expected+1,-expected,1i128<<40] {
++                if bad!=expected {assert!(!forward(&d,&mut w.clone(),Some((r,bad))),"sf={sf} m={m} r={bad}");}
++            }
++        }
++    }
++}
++
++#[test]
++fn means_ignore_poisoned_padding_and_use_logical_count() {
++    for pad in [-100000,777777] {
++        let mut b=DagBuilder::new();
++        // Col-major [3,3]: axis0 varies fastest, both axes have padding.
++        let mut v=vec![pad;16];for j in 0..3 {for i in 0..3 {v[i+4*j]=(i+j*3) as i128;}}
++        let x=input(&mut b,vec![3,3],v,0);let y=b.reduce_mean(x,&[1]);
++        let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++        let got=w[y][0].data.as_ref().unwrap().evaluations_ref().iter().map(|v|f_to_int(*v)).collect::<Vec<_>>();
++        assert_eq!(got,vec![3,4,5,0]);
++        let mut b=DagBuilder::new();
++        let x=input(&mut b,vec![3],vec![1,2,3,pad],0);let y=b.reduce_mean(x,&[0]);
++        let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++        assert!(w[y][0].shape.is_empty());
++        assert_eq!(f_to_int(w[y][0].data.as_ref().unwrap().index(0)),2);
++    }
++}
++
++#[test]
++fn named_transformer_norm_paths_cpu_and_zero_extension() {
++    for n in [3usize,768,1024,4096,8192] {
++        let sf=*crate::SF_LOG;if sf>20 {return;}
++        let q=1i128<<sf;
++        for kind in 0..6 {
++            let mut b=DagBuilder::new();let len=4*n.next_power_of_two();
++            let mut v=vec![12345;len];
++            for j in 0..n {for i in 0..3 {v[i+4*j]=if i==0 {0} else {q+(j%3) as i128};}}
++            let x=input(&mut b,vec![1,3,n],v,sf);
++            let gain=b.param(Witness::new(vec![n],vec![int_to_f(q);n.next_power_of_two()],DataType::Float,sf,Role::Constant));
++            let bias=b.param(Witness::new(vec![n],vec![int_to_f(0);n.next_power_of_two()],DataType::Float,sf,Role::Constant));
++            let y=match kind {
++                0=>b.pipe(&[x],super::llama::llama_rms_norm(gain))[0],
++                1=>b.pipe(&[x],super::gpt2::gpt2_layer_norm(gain,bias))[0],
++                2=>b.pipe(&[x],super::gptj::gptj_layer_norm(gain,bias))[0],
++                3=>b.pipe(&[x],super::bert::bert_layer_norm(gain,bias))[0],
++                4=>b.pipe(&[x],super::whisper::whisper_layer_norm(gain,bias))[0],
++                _=>b.pipe(&[x],super::llama::llama3_rms_norm(gain,3))[0],
++            };
++            let (d,mut w)=b.compile();assert!(forward(&d,&mut w,None),"kind={kind} n={n}");
++            for j in 0..n {assert_eq!(f_to_int(w[y][0].data.as_ref().unwrap().index(4*j)),0);}
++        }
++    }
++}
++
++#[test]
++fn normalization_rejects_unsupported_scale_and_legacy_advice() {
++    let bad_scale=std::panic::catch_unwind(|| {let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![1],21);b.rms_reciprocal_from_mean(x);b.compile();});
++    assert!(bad_scale.is_err());
++    let legacy=std::panic::catch_unwind(|| {let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![1],10);let _=b.add_gkr_node(vec![x],BasicBlockType::RMSReciprocal(RMSReciprocal{dim:1}));b.init_values.push(Some(Witness::new_wo_data(vec![1],DataType::Float,10,Role::Output)));b.compile();});
++    assert!(legacy.is_err());
++    let over_mean=std::panic::catch_unwind(|| rounded_rms_reciprocal(RMS_MEAN_MAX+1,10));
++    assert!(over_mean.is_err());
++    let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![1i128<<54],0);
++    b.div_const(x,2);let (d,mut w)=b.compile();assert!(!forward(&d,&mut w,None));
++}
++
++#[test]
++fn private_rms_bucket_rejects_wrong_valid_onehot_and_padding() {
++    for m in [0,1,2,3,127,128,RMS_MEAN_MAX] {
++        let mut b=DagBuilder::new();let x=input(&mut b,vec![1],vec![m],20);
++        b.rms_reciprocal_from_mean(x);let (d,w)=b.compile();
++        let bucket=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::RMSBucket(_))).unwrap().outputs[0];
++        assert!(forward(&d,&mut w.clone(),None));
++        let correct=if m==0 {0} else {128-(m as u128).leading_zeros() as usize};
++        for wrong in [0,1,2,28,29,31] {
++            if wrong==correct {continue;}
++            let mut hint=vec![0;32];hint[wrong]=1;
++            assert!(!forward_values(&d,&mut w.clone(),Some((bucket,hint))),"m={m},wrong={wrong}");
++        }
++        assert!(!forward_values(&d,&mut w.clone(),Some((bucket,vec![0;32]))));
++        let mut two=vec![0;32];two[correct]=1;two[(correct+1)%32]=1;
++        assert!(!forward_values(&d,&mut w.clone(),Some((bucket,two))));
++        let mut nonbinary=vec![0;32];nonbinary[correct]=2;
++        assert!(!forward_values(&d,&mut w.clone(),Some((bucket,nonbinary))));
++        let graph=crate::morpheus::piop::Graph::new(&d,&w,crate::morpheus::piop::Config{tcl:4,slots_log:10,req_planes_log:5});
++        assert!(graph.committed[bucket]);assert!(!graph.public.contains_key(&bucket));
++        assert_eq!(graph.shapes[bucket],vec![1,32]);
++    }
++}
++
++#[test]
++fn private_rms_all_dyadic_boundaries_sf16_sf20() {
++    let mut means=vec![0];
++    for j in 0..28 {let lo=1i128<<j;means.extend([lo-1,lo,2*lo-1]);}
++    means.resize(128,0);
++    for sf in [16,20] {
++        let mut b=DagBuilder::new();let x=input(&mut b,vec![128],means.clone(),sf);
++        let r=b.rms_reciprocal_from_mean(x);let (d,mut w)=b.compile();
++        assert!(forward(&d,&mut w,None));
++        let bucket=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::RMSBucket(_))).unwrap().outputs[0];
++        assert_eq!(w[bucket][0].shape,vec![128,32]);
++        for (i,&m) in means.iter().enumerate() {
++            assert_eq!(f_to_int(w[r][0].data.as_ref().unwrap().index(i)),rounded_rms_reciprocal(m,sf));
++            let expected=if m==0 {0} else {128-(m as u128).leading_zeros() as usize};
++            for j in 0..32 {assert_eq!(f_to_int(w[bucket][0].data.as_ref().unwrap().index(i+128*j)),if j==expected {1}else{0});}
++        }
++    }
++}
++
++#[test]
++fn lenet_average_pool_exact_signed_ties_layout_and_padding() {
++    for (c,h,w) in [(6usize,28usize,28usize),(16,10,10),(3,4,6)] {
++        for batch in [1usize,3] {
++            let cp=c.next_power_of_two();let hp=h.next_power_of_two();let wp=w.next_power_of_two();
++            let lead=if batch==1 {c}else{batch.next_power_of_two()*cp};
++            let len=lead.next_power_of_two()*hp*wp;
++            let mut values=vec![999999;len];
++            for b in 0..batch {for ch in 0..c {for ih in 0..h {for iw in 0..w {
++                values[iw+wp*(ih+hp*(ch+b*cp))]=((iw+ih+ch+b)%7) as i128-3;
++            }}}}
++            let shape=if batch==1 {vec![c,h,w]}else{vec![batch,c,h,w]};
++            let mut builder=DagBuilder::new();let x=input(&mut builder,shape,values.clone(),*crate::SF_LOG);
++            let y=super::lenet::avg_pool2x2(&mut builder,x,c);let (d,mut witnesses)=builder.compile();
++            assert!(forward(&d,&mut witnesses,None));
++            let out=witnesses[y][0].data.as_ref().unwrap();let op=(h/2).next_power_of_two();let oq=(w/2).next_power_of_two();
++            for b in 0..batch {for ch in 0..c {for ih in 0..h/2 {for iw in 0..w/2 {
++                let sum=(0..2).flat_map(|dh|(0..2).map(move|dw|(dh,dw))).map(|(dh,dw)|values[2*iw+dw+wp*(2*ih+dh+hp*(ch+b*cp))]).sum::<i128>();
++                assert_eq!(f_to_int(out.index(iw+oq*(ih+op*(ch+b*cp)))),(sum+2).div_euclid(4));
++            }}}}
++            for b in 0..batch.next_power_of_two() {for ch in 0..cp {for ih in 0..op {for iw in 0..oq {
++                if b>=batch || ch>=c || ih>=h/2 || iw>=w/2 {assert_eq!(f_to_int(out.index(iw+oq*(ih+op*(ch+b*cp)))),0);}
++            }}}}
++        }
++    }
++}
++
++#[test]
++fn resnet_global_mean_uses_row_major_channels_and_spatial_padding() {
++    for shape in [vec![2usize,2,2],vec![3,3,5],vec![3,7,7],vec![2,3,3,5]] {
++        let ndim=shape.len();let c=shape[ndim-3];let h=shape[ndim-2];let w=shape[ndim-1];
++        let batch=if ndim==4 {shape[0]}else{1};
++        let cp=c.next_power_of_two();let hp=h.next_power_of_two();let wp=w.next_power_of_two();
++        let mut values=vec![999999;batch.next_power_of_two()*cp*hp*wp];
++        for b in 0..batch {for ch in 0..c {for ih in 0..h {for iw in 0..w {
++            values[iw+wp*(ih+hp*(ch+cp*b))]=(100*ch+1000*b+ih*w+iw) as i128;
++        }}}}
++        let mut builder=DagBuilder::new();let x=input(&mut builder,shape,values.clone(),*crate::SF_LOG);
++        let y=super::resnet::global_mean_row_major(&mut builder,x);let (d,mut witnesses)=builder.compile();
++        assert!(forward(&d,&mut witnesses,None));
++        let out=witnesses[y][0].data.as_ref().unwrap();
++        for b in 0..batch {for ch in 0..c {
++            let sum=(0..h).flat_map(|ih|(0..w).map(move|iw|(ih,iw))).map(|(ih,iw)|values[iw+wp*(ih+hp*(ch+cp*b))]).sum::<i128>();
++            let n=(h*w) as i128;assert_eq!(f_to_int(out.index(ch+cp*b)),(sum+n/2).div_euclid(n));
++        }}
++        for b in 0..batch.next_power_of_two() {for ch in 0..cp {
++            if b>=batch || ch>=c {assert_eq!(f_to_int(out.index(ch+cp*b)),0);}
++        }}
++    }
++}
+--- a/zk-torch-4/src/dag/resnet.rs
++++ b/zk-torch-4/src/dag/resnet.rs
+@@ -208,13 +208,10 @@
+             }
+             // Head: GAP → FC.
+             //
+-            // reduce_mean over [1, 2] is H and W, which is correct under the
+-            // folded layout: axis 0 is the combined b*c, so this is global
+-            // average pooling per image per channel and needs no axis shift.
+-            // It leaves [b_pad*c_pad], with c in the LOW bits and b in the
+-            // HIGH bits -- so the FC head reshapes to [c_pad, B], matching
+-            // einsum's convention that the first shape dimension is lowest.
+-            h = g.reduce_mean(h, &[1, 2]);
++            // CNN raw buffers are row-major. Reinterpret [foldedC,H,W]
++            // as [W,H,foldedC] before column-major Einsum reduction.
++            // Result keeps c in low bits and b in high bits for the FC view.
++            h = global_mean_row_major(g,h);
+             if batch > 1 {
+                 let feat = g.init_values[h].as_ref().unwrap().shape[0] / batch;
+                 h = g.change_shape(h, vec![feat, batch]);
+@@ -232,6 +229,21 @@
+     }
+ }
+ 
++/// CNN storage is row-major (W is fastest), whereas Einsum is column-major.
++/// Reinterpret the SAME raw buffer as [W,H,C,(B)] before spatial reduction.
++/// This is not a transpose and requires no private layout-dependent choice.
++pub(crate) fn global_mean_row_major(g:&mut DagBuilder,x:EdgeId)->EdgeId {
++    let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++    assert!(shape.len()==3 || shape.len()==4);
++    let reversed=shape.iter().rev().copied().collect::<Vec<_>>();
++    let view=g.change_shape(x,reversed);
++    let mean=g.reduce_mean(view,&[0,1]);
++    if shape.len()==4 {
++        let size=shape[0].next_power_of_two()*shape[1].next_power_of_two();
++        g.change_shape(mean,vec![size])
++    } else {mean}
++}
++
+ /// Compute the output spatial size after running ResNet stem + N stages.
+ pub fn resnet50_output_shape(num_layers: usize) -> (usize, usize) {
+     let configs = resnet50_conv_configs();
+--- a/zk-torch-4/src/dag/whisper.rs
++++ b/zk-torch-4/src/dag/whisper.rs
+@@ -1,43 +1,26 @@
+ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+ use ndarray::ArrayD;
+-use std::sync::OnceLock;
+ 
+ use crate::dag::{DagBuilder, DataType, EdgeId, Role, Witness};
+ use crate::util::shape::pad_to_pow_of_two;
+ use crate::SF_FLOAT;
+ use crate::SF_LOG;
+ 
+-/// Width (in SF=10 units) of the LayerNorm reciprocity gate
+-/// `r² · mean(x²) ≈ sf`. `whisper_rms_norm` checks
+-/// `|z - sf| <= recip_tolerance`. Default 2 keeps the original ±0.002
+-/// float-band soundness margin; smoke-test bins that drive the LN with
+-/// low-variance synthetic inputs (where integer rounding in
+-/// `r² · mean(x²) / sf` exceeds ±2) can widen it via
+-/// `WHISPER_RECIP_TOL`. The same env knob lifts the gate's strictness
+-/// uniformly across all whisper LN instances.
+-fn whisper_recip_tolerance() -> u64 {
+-    static VAL: OnceLock<u64> = OnceLock::new();
+-    *VAL.get_or_init(|| {
+-        std::env::var("WHISPER_RECIP_TOL")
+-            .ok()
+-            .and_then(|s| s.parse().ok())
+-            .unwrap_or(2)
+-    })
+-}
+-
+ // ============================================================================
+ // Whisper-specific LayerNorm (handles arbitrary seq_len)
+ // ============================================================================
+ 
+ /// LayerNorm for Whisper: works with any sequence length.
+ /// Input shape: [1, S, D] (batch=1, seq=S, hidden=D).
+-fn whisper_layer_norm(
++pub(crate) fn whisper_layer_norm(
+     w_e: EdgeId,
+     b_e: EdgeId,
+ ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
+     move |g, x| {
+         assert!(x.len() == 1, "LayerNorm expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let seq = x_shape[1];
+         let n = x_shape[x_shape.len() - 1];
+@@ -47,34 +30,7 @@
+         let x_mean = g.div_const(x_sum, n)[0];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+ 
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // Reshape x_sum [1, seq] → [1, seq, 1] so the sub against
+-        // x_mean_mul_n (shape [1, seq, 1]) stays element-wise per row
+-        // instead of broadcasting to an outer-product [1, seq, seq].
+-        // (NumPy-style left-pad would otherwise produce [1, 1, seq] vs
+-        // [1, seq, 1] → [1, seq, seq], mixing rows.)
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
++        // div_const emits exact deterministic rounding roots.
+ 
+         let x_minus_mean = g.sub(x, x_mean)[0];
+         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
+@@ -96,60 +52,22 @@
+     move |g, x| {
+         assert!(x.len() == 1, "RMSNorm expects 1 input");
+         let x = x[0];
++        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
++        let x=g.mean_input(x,*shape.last().unwrap());
+         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
+         let n = x_shape[x_shape.len() - 1];
+-        let r_old = if crate::dag::llama::exact_rms() { None } else { Some(g.rms_reciprocal(x)[0]) };
+-
+-        let sf = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(*SF_FLOAT as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(whisper_recip_tolerance())],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![x, x], true)[0];
++
++        let x_sq = crate::dag::llama::rms_square(g,x);
+         let x_sum = g.einsum("bsi->bs".to_string(), vec![x_sq], false)[0];
+         let x_mean = g.div_const(x_sum, n)[0];
+         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
+-        let n_param: usize = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField(n as u64)],
+-            DataType::Float,
+-            0,
+-            Role::Constant,
+-        ));
+-        let mean_tolerance = g.param(Witness::new(
+-            vec![1],
+-            vec![AlmostGoldilocksField((n / 2) as u64)],
+-            DataType::Float,
+-            *SF_LOG,
+-            Role::Constant,
+-        ));
+-        let x_mean_mul_n =
+-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+-
+-        // See note in `whisper_layer_norm`: reshape x_sum so the sub is
+-        // element-wise per row rather than an outer-product broadcast.
+-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
+-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
+-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
+-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
+-        g.add_nonneg_node(positive_1);
+-        g.add_nonneg_node(positive_2);
+-
+-        let r = crate::dag::llama::rms_reciprocal_gate(g, r_old, x_mean, seq, sf, tolerance);
++        // div_const emits exact deterministic rounding roots.
++
++        let r = crate::dag::llama::rms_reciprocal_gate(g, x_mean);
+ 
+         // Key fix: change_shape to [1, seq] instead of [1, 1]
+         let r = g.change_shape(r, vec![1, seq]);
+-        let h = g.einsum("bsi,bs->bsi".to_string(), vec![x, r], true)[0];
+-        let out = g.einsum("bsi,i->bsi".to_string(), vec![h, w_e], true)[0];
++        let out = crate::dag::llama::rms_apply(g,x,r,w_e);
+         vec![out]
+     }
+ }
+--- a/zk-torch-4/src/morpheus/piop/exp_tests.rs
++++ b/zk-torch-4/src/morpheus/piop/exp_tests.rs
+@@ -184,3 +184,103 @@
+     let bad=Arc::new(bad); pd.vals[out]=Some(bad.clone()); g.outputs=vec![(out,bad)];
+     assert!(!replay(&g,&pd));
+ }
++
++/// Real PIOP replay coverage for the next numerical repair. These tests are
++/// authored/typechecked even when missing CUDA linkage blocks execution.
++fn normalization_case(is_rms:bool, input:i128, override_advice:Option<i128>) -> bool {
++    normalization_case_with_bucket(is_rms,input,override_advice,None)
++}
++fn normalization_case_with_bucket(is_rms:bool,input:i128,override_advice:Option<i128>,bucket_override:Option<usize>)->bool {
++    let mut b=DagBuilder::new();
++    let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(input)],DataType::Float,10,Role::Input));
++    let y=if is_rms {b.rms_reciprocal_from_mean(x)} else {b.div_const(x,2)[0]};
++    let (d,mut w)=b.compile();
++    let forward=|w:&mut Vec<Vec<Witness>>,bad:Option<i128>,bad_bucket:Option<usize>| {
++        for &n in &d.topo {
++            let nd=&d.nodes[n];
++            let ins=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();
++            let outs=nd.kind.run(&ins);
++            for (&e,mut v) in nd.outputs.iter().zip(outs) {
++                if e==y {if let Some(bad)=bad {v=Witness::new(vec![1],vec![int_to_f(bad)],v.data_type,v.sf,v.role);}}
++                if matches!(nd.kind,BasicBlockType::RMSBucket(_)) {
++                    if let Some(index)=bad_bucket {
++                        let mut vals=vec![int_to_f(0);32];vals[index]=int_to_f(1);
++                        v=Witness::new(vec![1,32],vals,v.data_type,v.sf,v.role);
++                    }
++                }
++                if bad.is_some() && matches!(nd.kind,BasicBlockType::ReLUHelper(_)) {
++                    // Malicious source remains well-typed: a negative r would
++                    // make the honest helper emit >1, but that must not turn
++                    // this verifier test into a source-fit constructor panic.
++                    let bit=if v.data.as_ref().unwrap().index(0).reduce().0==0 {0} else {1};
++                    v=Witness::new(vec![1],vec![int_to_f(bit)],v.data_type,v.sf,v.role);
++                }
++                w[e]=vec![v];
++            }
++        }
++    };
++    forward(&mut w,None,None);
++    let g=Graph::new(&d,&w,Config{tcl:4,slots_log:10,req_planes_log:5});
++    let mut pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<10]);
++    if override_advice.is_some() || bucket_override.is_some() {
++        forward(&mut w,override_advice,bucket_override);
++        // Mutate AFTER honest prover preparation. A constructor panic is not
++        // verifier rejection: supply legal selectors even for negative roots.
++        for (e,ws) in w.iter().enumerate() {
++            if ws[0].poly_type==crate::dag::PolyType::Dense {
++                pd.vals[e]=Some(Arc::new(ws[0].data.as_ref().unwrap().evaluations_ref().iter().map(|v|v.reduce().0).collect()));
++            }
++        }
++        for (&node,&bits) in &g.lookups {
++            if matches!(d.nodes[node].kind,BasicBlockType::NonNegative(_)) {
++                let vals=pd.v(d.nodes[node].inputs[0]);
++                pd.sel.insert(node,vals.iter().map(|&v|if v<(1u64<<bits) {v} else {0}).collect());
++            }
++        }
++    }
++    replay(&g,&pd)
++}
++
++#[test]
++fn exact_mean_piop_rejects_both_old_half_tie_counterexamples() {
++    for (input,correct,wrong) in [(1,1,0),(-1,0,-1)] {
++        assert!(normalization_case(false,input,None));
++        assert!(normalization_case(false,input,Some(correct)));
++        assert!(!normalization_case(false,input,Some(wrong)));
++    }
++}
++
++#[test]
++fn exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples() {
++    assert!(normalization_case(true,1024,None));
++    for bad in [-1024,0,1023,1025] {assert!(!normalization_case(true,1024,Some(bad)));}
++    assert!(normalization_case(true,0,None));
++    assert!(!normalization_case(true,0,Some(1)));
++}
++
++#[test]
++fn exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding() {
++    assert!(normalization_case_with_bucket(true,1024,None,None));
++    for wrong in [0,1,10,12,29,31] {
++        assert!(!normalization_case_with_bucket(true,1024,None,Some(wrong)));
++    }
++}
++
++#[test]
++fn nonnegative_partial_chunks_preserve_61_62_63_bit_widths() {
++    for bits in [61,62,63] {
++        let mut b=DagBuilder::new();
++        let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(0)],DataType::Int,0,Role::Input));
++        let node=b.nodes.len();b.add_nonneg_node_bits(x,bits);
++        let (d,w)=b.compile();let g=Graph::new(&d,&w,Config{tcl:4,slots_log:10,req_planes_log:5});
++        let chunks=g.chunks(node);
++        assert_eq!(chunks.iter().sum::<usize>(),bits);
++        assert_eq!(chunks.last(),Some(&(bits%4)));
++        assert!(chunks[..chunks.len()-1].iter().all(|&w|w==4));
++        // Actual selector table maxima reconstruct exactly2^bits−1, never
++        // the rounded-up2^64−1 domain that would invalidate signed lifting.
++        let mut shift=0;let mut max=0u128;
++        for w in chunks {max+=((1u128<<w)-1)<<shift;shift+=w;}
++        assert_eq!(max,(1u128<<bits)-1);
++    }
++}
+--- a/zk-torch-4/src/morpheus/piop/mod.rs
++++ b/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -106,7 +106,7 @@
+ }
+ 
+ fn advice_kind(k: &BasicBlockType) -> bool {
+-    matches!(k, BasicBlockType::DivConst(_) | BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_) | BasicBlockType::RMSReciprocal(_)
++    matches!(k, BasicBlockType::DivConst(_) | BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_) | BasicBlockType::RMSReciprocal(_) | BasicBlockType::RMSBucket(_)
+         // Vision advice, constrained by range checks / product zero checks
+         // wired by the builder (the same relation as the previous prover).
+         | BasicBlockType::ReLUHelper(_) | BasicBlockType::MaxPoolHelper(_) | BasicBlockType::GeneralMaxPoolHelper(_)
+@@ -363,7 +363,7 @@
+             // by the input's declared Bool type; every other request tensor
+             // gets 2^req_planes_log planes. The honest prover checks the fit.
+             let bits = g.bool_typed[e] || g.dag.producers[e].map(|n| matches!(g.dag.nodes[n].kind,
+-                BasicBlockType::ReLUHelper(_) | BasicBlockType::PillarMaxPool(_) | BasicBlockType::ScatterToBEV(_))).unwrap_or(false);
++                BasicBlockType::ReLUHelper(_) | BasicBlockType::RMSBucket(_) | BasicBlockType::PillarMaxPool(_) | BasicBlockType::ScatterToBEV(_))).unwrap_or(false);
+             if bits {
+                 assert!(v.par_iter().all(|&x| x <= 1), "edge {e}: declared bit tensor holds a non-bit value");
+                 (0, true)
+--- a/zk-torch-4/src/morpheus/statement.rs
++++ b/zk-torch-4/src/morpheus/statement.rs
+@@ -72,6 +72,7 @@
+         ReLUHelper(_) => { w.u(27); },
+         Replicate2x2(b) => { w.u(28); w.us(b.channels)?; w.us(b.out_h)?; w.us(b.out_w)?; },
+         RMSReciprocal(b) => { w.u(29); w.us(b.dim)?; },
++        RMSBucket(_) => { w.u(40); w.bytes(b"private-dyadic-rms-bucket-v1")?; },
+         ScaleDown(b) => { w.u(30); w.us(b.output_sf)?; },
+         ScaleUp(b) => { w.u(31); w.us(b.output_sf)?; },
+         ScatterToBEV(b) => { w.u(32); w.us(b.n_pillars)?; w.us(b.features)?; w.us(b.ny)?; w.us(b.nx)?; },

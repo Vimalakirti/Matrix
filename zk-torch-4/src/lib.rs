@@ -11,6 +11,7 @@ pub mod crypto;
 pub mod dag;
 pub mod fold;
 pub mod mlperf;
+pub mod morpheus;
 pub mod pcs;
 pub mod poly;
 pub mod sumcheck;
@@ -30,6 +31,9 @@ use crate::util::config::Config;
 // ============================================================================
 
 pub static CONFIG_FILE: Lazy<String> = Lazy::new(|| {
+    // libtest arguments are test filters/flags, never a benchmark YAML path.
+    // Keep production binaries' explicit-config fail-closed behavior unchanged.
+    if cfg!(test) { return "config.yaml".to_string(); }
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
         return "config.yaml".to_string();
@@ -47,7 +51,7 @@ pub static CONFIG: Lazy<Config> = Lazy::new(|| {
     // the fold tree quietly doubled, because tcl 6 -> the default 8 pushes the
     // top aux bucket from arity 24 to 26, past the GPU same-point cap. Only the
     // no-argument case is allowed to default.
-    let explicit = env::args().len() >= 2;
+    let explicit = !cfg!(test) && env::args().len() >= 2;
     match File::open(&*CONFIG_FILE) {
         Ok(mut file) => {
             let mut contents = String::new();
@@ -134,8 +138,26 @@ pub use transcript::Transcript;
 /// proof) because no single object holds them all. Returns 0 if a component
 /// cannot be serialized, so a reporting failure degrades the size number
 /// rather than aborting a completed proof run.
+/// Zero-filled `Vec<usize>` via the allocator's zeroed path (calloc pages),
+/// not a store loop: callers overwrite every slot anyway.
+pub fn zero_vec_usize(n: usize) -> Vec<usize> {
+    vec![0usize; n]
+}
+
 pub fn ser_len<T: serde::Serialize>(x: &T) -> usize {
     bincode::serialize(x).map(|v| v.len()).unwrap_or(0)
+}
+
+/// SHA-256 of a value's bincode serialization, as 16 hex digits. Benches print
+/// it under ZK4_PROOF_FP=1 so two configurations of the prover (allocator,
+/// sync mode, GPU vs CPU sub-provers) can be checked for BIT-identical proofs,
+/// which is stronger than both proofs verifying: the prover is deterministic,
+/// so a change that is supposed to be prover-internal must not move a byte.
+pub fn ser_fingerprint<T: serde::Serialize>(x: &T) -> String {
+    use sha2::{Digest, Sha256};
+    let bytes = bincode::serialize(x).unwrap_or_default();
+    let h = Sha256::digest(&bytes);
+    h.iter().take(8).map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Zero-filled witness buffer, allocated rather than written.

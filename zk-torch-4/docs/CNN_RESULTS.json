@@ -1,0 +1,481 @@
+{
+  "scope": "one predeclared original-profile selected PROVER run per case; no repetitions/cherry-picking; not a general security or scalability claim",
+  "source_manifest_sha256": "6cd8ebd1a82e4822f2a8761a0cbe8f28c21ea4d5a6c85e80ea6fad1d5c4d3f1f",
+  "binary_sha256": "acf9f06f202906eacc7095dd221451df4cb0dda23d0f7eb0544aa8535e549f9f",
+  "rlimit_as_bytes": 3221225472,
+  "coins": "fresh OS random tape per selected prover; never recorded",
+  "failed_v1_mini": "Preserved OOM exit -6 under3GiB, not a verifier rejection; v2 exact-zero repair subsequently passed full mini and equivalence audits",
+  "registration_scope": "Every measured selected trial is a fresh process with fresh model and input registration; registration is separately measured, not amortized. Proof wire requires the independently pinned public registry/statement and fixed public verifier program/profile.",
+  "comparison_caution": "Authentication attempts are randomized. Report accepted attempt indices beside raw times; default/pp comparison must use stage costs and separate wire/registry bytes, not unqualified total-time speedups.",
+  "cases": [
+    {
+      "batch": 1,
+      "conv_mode": "default",
+      "status": "owner prover and canonical public-only valid/all-isolated-negative suite PASS",
+      "preproof_registry_pin": {
+        "utc": "2026-10-30T15:58:00.836448+00:00",
+        "sha256": "486cc9ae79d96958f42ff7fd579dfdbf48ce589b7e1e7a0da0e94567bbcc7733",
+        "proof_wire_absent": true,
+        "event": "IN_CLOSE_WRITE",
+        "bytes": 1903907
+      },
+      "public_registry_statement_bytes": 1903907,
+      "prove": {
+        "status": "terminal",
+        "measure_seconds": {
+          "fixture_read": 1.871203707,
+          "dag_and_initial_witness_build": 0.001092361,
+          "all_450_validation": 0.840415692,
+          "selected_batch_witness_existing_dag": 0.001857827,
+          "graph_cache_layout_prepare": 0.003013322,
+          "model_registration": 7.097626897,
+          "input_registration": 6.9918747,
+          "public_registry_prepare_encode": 0.000700929,
+          "public_registry_write": 0.000458152,
+          "prove_api_including_source_pack_commit_and_link_selfcheck": 909.022606305,
+          "proof_encode": 0.370439799,
+          "proof_write": 0.030579753
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 926.2776064872742,
+          "maxrss_kib": 872408,
+          "user_seconds": 3143.156583,
+          "system_seconds": 11.369715,
+          "rlimit_as_bytes": 3221225472
+        }
+      },
+      "proof_wire_bytes": 165443423,
+      "accepted_attempt_reported": 4,
+      "accepted_attempt_index_zero_based": 4,
+      "authentication_attempts_including_acceptance": 5,
+      "proof_wire_sha256": "07fc9321f1c16e298b1d0ff3c4a332df9d9dc2ff1ca07d3fbdaed75958b8017f",
+      "public_link_plan": {
+        "coarse_tables_bytes": 150994944,
+        "coarse_fold_scratch_bytes": 8388608,
+        "coarse_eq_scratch_bytes": 8388608,
+        "max_round_tables_bytes": 7223168,
+        "dense_query_bytes": 65798144,
+        "block_term_entries": 4129,
+        "declared_bit_blocks": 9769
+      },
+      "allocated_digits": 5214720,
+      "verify": {
+        "status": "terminal",
+        "measure_seconds": {
+          "public_registry_read_reconstruction_admission": 0.009861568,
+          "proof_read": 0.080799382,
+          "proof_decode": 0.374857133,
+          "proof_canonical_roundtrip": 0.340886139,
+          "single_valid_verify_api": 106.352757249,
+          "valid_verify_auth": 74.076580214,
+          "valid_verify_link": 0.459272102,
+          "valid_verify_piop": 31.795659246,
+          "all_proof_negative_controls": 250.580552282
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 357.8097765445709,
+          "maxrss_kib": 710116,
+          "user_seconds": 578.02836,
+          "system_seconds": 3.358453,
+          "rlimit_as_bytes": 3221225472
+        },
+        "pass_labels": [
+          "canonical_public_statement_and_layout_admission",
+          "SECRET_FREE_SAVED_WIRE_VERIFY",
+          "response_mutation_rejected",
+          "piop_mutation_rejected",
+          "extra_piop_rejected",
+          "link_mutation_rejected",
+          "missing_auth_rejected",
+          "request_id_rejected",
+          "registry_model_mutation_rejected",
+          "registry_input_mutation_rejected",
+          "malformed_wire_rejected",
+          "canonical_wrong_classification_rejected",
+          "public_classification_mutation_rejected",
+          "convolution_mode_mutation_rejected",
+          "COMPLETE_AUTHENTICATED_TRAINED_CNN profile=morpheus-ternary-shake256-v2 compact=true native_security_audit_separate=true"
+        ],
+        "isolated_negative_group_count": 12
+      },
+      "independent_status": "PASS: pre-pinned public registry and saved wire only; all isolated controls",
+      "independent_resources": {
+        "exit_code": 0,
+        "elapsed_seconds": 341.83605766296387,
+        "maxrss_kib": 710424,
+        "rlimit_as_bytes": 3221225472
+      },
+      "independent_negative_group_count": 12
+    },
+    {
+      "batch": 4,
+      "conv_mode": "default",
+      "status": "owner prover and canonical public-only valid/all-isolated-negative suite PASS",
+      "preproof_registry_pin": {
+        "utc": "2026-10-30T16:30:26.366319+00:00",
+        "sha256": "7154a036eb75b45f8ee5919da8f1f889a025e5d7efc1cd4715e7917c6e78bb8b",
+        "proof_wire_absent": true,
+        "event": "IN_CLOSE_WRITE",
+        "bytes": 2703419
+      },
+      "public_registry_statement_bytes": 2703419,
+      "prove": {
+        "status": "terminal",
+        "measure_seconds": {
+          "fixture_read": 2.061267853,
+          "dag_and_initial_witness_build": 0.001426024,
+          "all_450_validation": 0.471842301,
+          "selected_batch_witness_existing_dag": 0.003335941,
+          "graph_cache_layout_prepare": 0.007427852,
+          "model_registration": 8.46107889,
+          "input_registration": 8.105039058,
+          "public_registry_prepare_encode": 0.000834841,
+          "public_registry_write": 0.001849043,
+          "prove_api_including_source_pack_commit_and_link_selfcheck": 531.237030601,
+          "proof_encode": 0.387704329,
+          "proof_write": 0.031366673
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 550.8147222995758,
+          "maxrss_kib": 957792,
+          "user_seconds": 1744.607807,
+          "system_seconds": 7.1744769999999995,
+          "rlimit_as_bytes": 3221225472
+        }
+      },
+      "proof_wire_bytes": 186656735,
+      "accepted_attempt_reported": 1,
+      "accepted_attempt_index_zero_based": 1,
+      "authentication_attempts_including_acceptance": 2,
+      "proof_wire_sha256": "d9bff25e585f52b3e7e04eb226417cdf0c1f270d120bb86de0525de14ed3b34b",
+      "public_link_plan": {
+        "coarse_tables_bytes": 150994944,
+        "coarse_fold_scratch_bytes": 8388608,
+        "coarse_eq_scratch_bytes": 8388608,
+        "max_round_tables_bytes": 7223168,
+        "dense_query_bytes": 78381056,
+        "block_term_entries": 13398,
+        "declared_bit_blocks": 13307
+      },
+      "allocated_digits": 7517696,
+      "verify": {
+        "status": "terminal",
+        "measure_seconds": {
+          "public_registry_read_reconstruction_admission": 0.019423019,
+          "proof_read": 0.107486966,
+          "proof_decode": 0.455374411,
+          "proof_canonical_roundtrip": 0.491578264,
+          "single_valid_verify_api": 138.012240951,
+          "valid_verify_auth": 84.186628809,
+          "valid_verify_link": 0.526898694,
+          "valid_verify_piop": 53.267960568,
+          "all_proof_negative_controls": 506.634232872
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 645.7623975276947,
+          "maxrss_kib": 798044,
+          "user_seconds": 894.80232,
+          "system_seconds": 3.812175,
+          "rlimit_as_bytes": 3221225472
+        },
+        "pass_labels": [
+          "canonical_public_statement_and_layout_admission",
+          "SECRET_FREE_SAVED_WIRE_VERIFY",
+          "response_mutation_rejected",
+          "piop_mutation_rejected",
+          "extra_piop_rejected",
+          "link_mutation_rejected",
+          "missing_auth_rejected",
+          "request_id_rejected",
+          "registry_model_mutation_rejected",
+          "registry_input_mutation_rejected",
+          "malformed_wire_rejected",
+          "canonical_wrong_classification_rejected",
+          "canonical_last_row_wrong_classification_rejected",
+          "last_row_output_mutation_rejected",
+          "public_classification_mutation_rejected",
+          "convolution_mode_mutation_rejected",
+          "COMPLETE_AUTHENTICATED_TRAINED_CNN profile=morpheus-ternary-shake256-v2 compact=true native_security_audit_separate=true"
+        ],
+        "isolated_negative_group_count": 14
+      }
+    },
+    {
+      "batch": 16,
+      "conv_mode": "default",
+      "status": "owner prover and canonical public-only valid/all-isolated-negative suite PASS",
+      "preproof_registry_pin": {
+        "utc": "2026-10-30T16:51:41.313293+00:00",
+        "sha256": "58e908496a01ca7914f020cb6e3eceb88098b88d352852b3838641eddac55f97",
+        "proof_wire_absent": true,
+        "event": "IN_CLOSE_WRITE",
+        "bytes": 5901467
+      },
+      "public_registry_statement_bytes": 5901467,
+      "prove": {
+        "status": "terminal",
+        "measure_seconds": {
+          "fixture_read": 1.760046541,
+          "dag_and_initial_witness_build": 0.002036596,
+          "all_450_validation": 0.2341861,
+          "selected_batch_witness_existing_dag": 0.007143844,
+          "graph_cache_layout_prepare": 0.004160075,
+          "model_registration": 7.04574591,
+          "input_registration": 7.050036729,
+          "public_registry_prepare_encode": 0.001672057,
+          "public_registry_write": 0.00098649,
+          "prove_api_including_source_pack_commit_and_link_selfcheck": 1406.853794226,
+          "proof_encode": 0.666573612,
+          "proof_write": 0.18909727
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 1423.8799996376038,
+          "maxrss_kib": 1223944,
+          "user_seconds": 4710.808326,
+          "system_seconds": 14.848661,
+          "rlimit_as_bytes": 3221225472
+        }
+      },
+      "proof_wire_bytes": 273681503,
+      "accepted_attempt_reported": 3,
+      "accepted_attempt_index_zero_based": 3,
+      "authentication_attempts_including_acceptance": 4,
+      "proof_wire_sha256": "6f4e8c5a75d5c71458bf0aceaa16e45f958355f89a73e01ac029a48922da196d",
+      "public_link_plan": {
+        "coarse_tables_bytes": 150994944,
+        "coarse_fold_scratch_bytes": 8388608,
+        "coarse_eq_scratch_bytes": 8388608,
+        "max_round_tables_bytes": 7223168,
+        "dense_query_bytes": 90963968,
+        "block_term_entries": 51425,
+        "declared_bit_blocks": 27929
+      },
+      "allocated_digits": 16970240,
+      "verify": {
+        "status": "terminal",
+        "measure_seconds": {
+          "public_registry_read_reconstruction_admission": 0.021609128,
+          "proof_read": 0.114745054,
+          "proof_decode": 0.54836048,
+          "proof_canonical_roundtrip": 0.554306818,
+          "single_valid_verify_api": 234.414718342,
+          "valid_verify_auth": 117.169966857,
+          "valid_verify_link": 0.808147124,
+          "valid_verify_piop": 116.393504482,
+          "all_proof_negative_controls": 1099.365055908
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 1335.069593667984,
+          "maxrss_kib": 1114004,
+          "user_seconds": 1703.471025,
+          "system_seconds": 5.67178,
+          "rlimit_as_bytes": 3221225472
+        },
+        "pass_labels": [
+          "canonical_public_statement_and_layout_admission",
+          "SECRET_FREE_SAVED_WIRE_VERIFY",
+          "response_mutation_rejected",
+          "piop_mutation_rejected",
+          "extra_piop_rejected",
+          "link_mutation_rejected",
+          "missing_auth_rejected",
+          "request_id_rejected",
+          "registry_model_mutation_rejected",
+          "registry_input_mutation_rejected",
+          "malformed_wire_rejected",
+          "canonical_wrong_classification_rejected",
+          "canonical_last_row_wrong_classification_rejected",
+          "last_row_output_mutation_rejected",
+          "public_classification_mutation_rejected",
+          "convolution_mode_mutation_rejected",
+          "COMPLETE_AUTHENTICATED_TRAINED_CNN profile=morpheus-ternary-shake256-v2 compact=true native_security_audit_separate=true"
+        ],
+        "isolated_negative_group_count": 14
+      }
+    },
+    {
+      "batch": 4,
+      "conv_mode": "pp",
+      "status": "owner prover and canonical public-only valid/all-isolated-negative suite PASS",
+      "preproof_registry_pin": {
+        "utc": "2026-10-30T17:41:36.180064+00:00",
+        "sha256": "2aeca5a414f130e08cee296e87865fb4339e1d48b2beec232e2f62ebf8171af4",
+        "proof_wire_absent": true,
+        "event": "IN_CLOSE_WRITE",
+        "bytes": 2703663
+      },
+      "public_registry_statement_bytes": 2703663,
+      "prove": {
+        "status": "terminal",
+        "measure_seconds": {
+          "fixture_read": 1.82770609,
+          "dag_and_initial_witness_build": 0.000901823,
+          "all_450_validation": 0.395881015,
+          "selected_batch_witness_existing_dag": 0.002970898,
+          "graph_cache_layout_prepare": 0.003544305,
+          "model_registration": 7.376719791,
+          "input_registration": 8.12879514,
+          "public_registry_prepare_encode": 0.000804085,
+          "public_registry_write": 0.000706388,
+          "prove_api_including_source_pack_commit_and_link_selfcheck": 727.472880335,
+          "proof_encode": 0.494840477,
+          "proof_write": 0.040347426
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 745.7985262870789,
+          "maxrss_kib": 981520,
+          "user_seconds": 2447.210743,
+          "system_seconds": 8.613014,
+          "rlimit_as_bytes": 3221225472
+        }
+      },
+      "proof_wire_bytes": 190304927,
+      "accepted_attempt_reported": 2,
+      "accepted_attempt_index_zero_based": 2,
+      "authentication_attempts_including_acceptance": 3,
+      "proof_wire_sha256": "76ae1b38a89392e3131b57adba66519b0e21c91afbe66d23ac603e1d841c975e",
+      "public_link_plan": {
+        "coarse_tables_bytes": 150994944,
+        "coarse_fold_scratch_bytes": 8388608,
+        "coarse_eq_scratch_bytes": 8388608,
+        "max_round_tables_bytes": 7266176,
+        "dense_query_bytes": 82051072,
+        "block_term_entries": 14934,
+        "declared_bit_blocks": 13307
+      },
+      "allocated_digits": 7910912,
+      "verify": {
+        "status": "terminal",
+        "measure_seconds": {
+          "public_registry_read_reconstruction_admission": 0.012239028,
+          "proof_read": 0.109079278,
+          "proof_decode": 0.434887062,
+          "proof_canonical_roundtrip": 0.384270067,
+          "single_valid_verify_api": 136.228523973,
+          "valid_verify_auth": 81.397921822,
+          "valid_verify_link": 0.581813042,
+          "valid_verify_piop": 54.222237879,
+          "all_proof_negative_controls": 513.153896107
+        },
+        "resources": {
+          "exit_code": 0,
+          "elapsed_seconds": 650.3506031036377,
+          "maxrss_kib": 815116,
+          "user_seconds": 895.57045,
+          "system_seconds": 3.538824,
+          "rlimit_as_bytes": 3221225472
+        },
+        "pass_labels": [
+          "canonical_public_statement_and_layout_admission",
+          "SECRET_FREE_SAVED_WIRE_VERIFY",
+          "response_mutation_rejected",
+          "piop_mutation_rejected",
+          "extra_piop_rejected",
+          "link_mutation_rejected",
+          "missing_auth_rejected",
+          "request_id_rejected",
+          "registry_model_mutation_rejected",
+          "registry_input_mutation_rejected",
+          "malformed_wire_rejected",
+          "canonical_wrong_classification_rejected",
+          "canonical_last_row_wrong_classification_rejected",
+          "last_row_output_mutation_rejected",
+          "public_classification_mutation_rejected",
+          "convolution_mode_mutation_rejected",
+          "COMPLETE_AUTHENTICATED_TRAINED_CNN profile=morpheus-ternary-shake256-v2 compact=true native_security_audit_separate=true"
+        ],
+        "isolated_negative_group_count": 14
+      },
+      "independent_recovery_note": "Two earlier verifier-only replay attempts lost execution-session access and lack terminal receipts; both preserved, neither classified as verification failure. Final root-managed recovery uses the same pinned wire/registry and binary; its timing is diagnostic only, excluded from benchmark data.",
+      "independent_status": "PASS: pre-pinned public registry and saved wire only; all isolated controls",
+      "independent_resources": {
+        "exit_code": 0,
+        "elapsed_seconds": 660.0525467395782,
+        "maxrss_kib": 815272,
+        "rlimit_as_bytes": 3221225472
+      },
+      "independent_negative_group_count": 14
+    }
+  ],
+  "evidence_summary_sha256": "d758f0a159c701b53cb19766671e2953d9302373c8da9f0f871b85304dc0f7b2",
+  "publication_status": "LOCAL FINAL CANDIDATE; all four owner cases and independent B1/PP replays PASS; default-CUDA compile/link PASS; not approved for upload",
+  "base_code_commit": "d4402fc76fe3ebc563c9b6e2100c8357df7fbfc0",
+  "previous_mlp_source_manifest_sha256": "e9bdfbd4e471a7aa87ba94ef84767568098aad02157d1ecac48e44d6b652c431",
+  "tested_library_sha256": "3c67d835893c53be4925b346ebfa5aa842b7c0d23f7a02732322fc2230380f6d",
+  "profile_identity_note": "No serialized full-profile digest was recorded; wire header encodes profile name. Admission checks equality to Profile::ternary(); params.rs digest is explicitly a source-file identity.",
+  "profile_source_sha256": "bab808f5b3aa18f52efd9105ab7706a153fff34a0ab972b3aaaa7e2088092df7",
+  "profile": "morpheus-ternary-shake256-v2; rank16/ring4096, unchanged original caps; public-support sampling is distinct from full-support sampling",
+  "public_support_columns": {
+    "B1/default": 1933,
+    "B4/default": 2492,
+    "B16/default": 4788,
+    "B4/pp": 2588
+  },
+  "cuda_compile_link": {
+    "status": "PASS; compile/link only, no GPU execution",
+    "receipt_sha256": "e18b98c335a0cc0f9b742852c7188581a9341fe5dea9197a13b2e8e9ec721b3d",
+    "default_features": true,
+    "cuda_compute": "80",
+    "elapsed_seconds": 81.89405729004648,
+    "max_rss_kib": 932216,
+    "artifacts": [
+      {
+        "target": "bench_streaming_lenet",
+        "sha256": "1b8511992c33c55fd8750ca33061e7404ccb6a1c37f6caf77456c00685b03fdc",
+        "features": [
+          "cuda",
+          "default"
+        ]
+      },
+      {
+        "target": "morpheus_trained_cnn",
+        "sha256": "680921b87b1d34bb24f2b9adab6b837ae9ceb708969286dd34e2403f0654f98d",
+        "features": [
+          "cuda",
+          "default"
+        ]
+      },
+      {
+        "target": "morpheus_trained_digits",
+        "sha256": "4e7b4a1e0ac2fb6e4db44fab7f277f9aa1d9884c8b13bdbb502b025ef71063f4",
+        "features": [
+          "cuda",
+          "default"
+        ]
+      }
+    ]
+  },
+  "cargo_cpu_correctness": {
+    "build_status": "PASS; fresh empty target, locked locally cached dependencies, no manual rlib linking",
+    "build_receipt_sha256": "e2c15704159fc451b2cab46997004d2d22b7a2d6782ec74bba4cbe2e321acb1f",
+    "rustc_version": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1\n",
+    "binary_sha256": "4e6b84c2b8b53d69a614fd912861c2e1fa4b98625cda07f555c6282459493541",
+    "features": [
+      "cpu-replay"
+    ],
+    "b1_public_only_status": "PASS: saved original wire with pinned public registry and 12 isolated negative controls",
+    "b1_receipt_sha256": "fa45627a71430e31c9c88ceacd70b74179bdd11baa24b5778ed426b774ef07f9",
+    "input_hashes": {
+      "public-registry.bin": "486cc9ae79d96958f42ff7fd579dfdbf48ce589b7e1e7a0da0e94567bbcc7733",
+      "request-0.bin": "07fc9321f1c16e298b1d0ff3c4a332df9d9dc2ff1ca07d3fbdaed75958b8017f"
+    },
+    "scope": "Correctness/reproducibility only; no new proof or benchmark; not a clean-machine dependency-download test; not byte identity with original direct-rustc executable"
+  },
+  "performance_status": "Deferred to separate-host evaluation at user request; existing owner times retained with original binary identity; subsequent build/replay diagnostics are not benchmark replacements",
+  "fixture_hashes": {
+    "dataset.json": "adfc34a9e64ed6450af4668254507e9bb119d36302cdec4424e53e9ad869ed95",
+    "split.json": "ed9a8f69fc299901b6c608dba326d70b255c5449aa33e9a0f05c6eeb006fa817",
+    "float_model.json": "572a912897927838ec5a7c28fbe35fca40c74eea7e79dada8ac67c4f0ddfae76",
+    "model.json": "4561c946cbf26528ea65c0fe8b39c14f5197ede610fe5463ca106d4b68e9497f",
+    "test_inputs.json": "94bef0b41e810c792fa3d4bdc8e35a9ba02f6c2231c5d7e491324facb8d10d5a",
+    "integer_test_outputs.json": "fabbde68bfc53a0ad8ab994567c69d23f6961fb86d8bb88426089cd7d2ef7b63",
+    "selected_examples.json": "3ab6088fd6cd9cd53486fa5f913553bc68382b94250ac1e2e7fa18bc9155c059"
+  }
+}

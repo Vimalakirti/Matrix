@@ -1,29 +1,10 @@
 use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 use ndarray::ArrayD;
-use std::sync::OnceLock;
 
 use crate::dag::{DagBuilder, DataType, EdgeId, Role, Witness};
 use crate::util::shape::pad_to_pow_of_two;
 use crate::SF_FLOAT;
 use crate::SF_LOG;
-
-/// Width (in SF=10 units) of the LayerNorm reciprocity gate
-/// `r² · mean(x²) ≈ sf`. `whisper_rms_norm` checks
-/// `|z - sf| <= recip_tolerance`. Default 2 keeps the original ±0.002
-/// float-band soundness margin; smoke-test bins that drive the LN with
-/// low-variance synthetic inputs (where integer rounding in
-/// `r² · mean(x²) / sf` exceeds ±2) can widen it via
-/// `WHISPER_RECIP_TOL`. The same env knob lifts the gate's strictness
-/// uniformly across all whisper LN instances.
-fn whisper_recip_tolerance() -> u64 {
-    static VAL: OnceLock<u64> = OnceLock::new();
-    *VAL.get_or_init(|| {
-        std::env::var("WHISPER_RECIP_TOL")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2)
-    })
-}
 
 // ============================================================================
 // Whisper-specific LayerNorm (handles arbitrary seq_len)
@@ -31,13 +12,15 @@ fn whisper_recip_tolerance() -> u64 {
 
 /// LayerNorm for Whisper: works with any sequence length.
 /// Input shape: [1, S, D] (batch=1, seq=S, hidden=D).
-fn whisper_layer_norm(
+pub(crate) fn whisper_layer_norm(
     w_e: EdgeId,
     b_e: EdgeId,
 ) -> impl FnOnce(&mut DagBuilder, &[EdgeId]) -> Vec<EdgeId> {
     move |g, x| {
         assert!(x.len() == 1, "LayerNorm expects 1 input");
         let x = x[0];
+        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
+        let x=g.mean_input(x,*shape.last().unwrap());
         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
         let seq = x_shape[1];
         let n = x_shape[x_shape.len() - 1];
@@ -47,34 +30,7 @@ fn whisper_layer_norm(
         let x_mean = g.div_const(x_sum, n)[0];
         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
 
-        let n_param: usize = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(n as u64)],
-            DataType::Float,
-            0,
-            Role::Constant,
-        ));
-        let mean_tolerance = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField((n / 2) as u64)],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let x_mean_mul_n =
-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
-
-        // Reshape x_sum [1, seq] → [1, seq, 1] so the sub against
-        // x_mean_mul_n (shape [1, seq, 1]) stays element-wise per row
-        // instead of broadcasting to an outer-product [1, seq, seq].
-        // (NumPy-style left-pad would otherwise produce [1, 1, seq] vs
-        // [1, seq, 1] → [1, seq, seq], mixing rows.)
-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
-        g.add_nonneg_node(positive_1);
-        g.add_nonneg_node(positive_2);
+        // div_const emits exact deterministic rounding roots.
 
         let x_minus_mean = g.sub(x, x_mean)[0];
         let x_minus_mean = g.mask(x_minus_mean, vec![1, seq, n]);
@@ -96,86 +52,22 @@ fn whisper_rms_norm(
     move |g, x| {
         assert!(x.len() == 1, "RMSNorm expects 1 input");
         let x = x[0];
+        let shape=g.init_values[x].as_ref().unwrap().shape.clone();
+        let x=g.mean_input(x,*shape.last().unwrap());
         let x_shape = g.init_values[x].as_ref().unwrap().shape.clone();
         let n = x_shape[x_shape.len() - 1];
-        let r = g.rms_reciprocal(x)[0];
 
-        let sf = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(*SF_FLOAT as u64)],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let tolerance = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(whisper_recip_tolerance())],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let x_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![x, x], true)[0];
+        let x_sq = crate::dag::llama::rms_square(g,x);
         let x_sum = g.einsum("bsi->bs".to_string(), vec![x_sq], false)[0];
         let x_mean = g.div_const(x_sum, n)[0];
         let x_mean = g.change_shape(x_mean, vec![1, seq, 1]);
-        let n_param: usize = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField(n as u64)],
-            DataType::Float,
-            0,
-            Role::Constant,
-        ));
-        let mean_tolerance = g.param(Witness::new(
-            vec![1],
-            vec![AlmostGoldilocksField((n / 2) as u64)],
-            DataType::Float,
-            *SF_LOG,
-            Role::Constant,
-        ));
-        let x_mean_mul_n =
-            g.einsum("bsi,i->bsi".to_string(), vec![x_mean, n_param], false)[0];
+        // div_const emits exact deterministic rounding roots.
 
-        // See note in `whisper_layer_norm`: reshape x_sum so the sub is
-        // element-wise per row rather than an outer-product broadcast.
-        let x_sum_reshaped = g.change_shape(x_sum, vec![1, seq, 1]);
-        let x_sum_sub_x_mean_mul_n = g.sub(x_sum_reshaped, x_mean_mul_n)[0];
-        let positive_1 = g.add(x_sum_sub_x_mean_mul_n, mean_tolerance)[0];
-        let positive_2 = g.sub(mean_tolerance, x_sum_sub_x_mean_mul_n)[0];
-        g.add_nonneg_node(positive_1);
-        g.add_nonneg_node(positive_2);
-
-        let r_sq = g.einsum("bsi,bsi->bsi".to_string(), vec![r, r], true)[0];
-        let z = g.einsum("bsi,bsi->bsi".to_string(), vec![x_mean, r_sq], true)[0];
-        let z_sf_diff = g.sub(z, sf)[0];
-        // Same pad-row masking as llama_rms_norm: the reciprocity gate
-        // |mean(x^2)*r^2 - 1| <= tolerance cannot hold on a zero padding row,
-        // where mean(x^2) = 0 makes z_sf_diff = -sf (positive_3 = -1022 at SF=10,
-        // tolerance 2). Whisper hits this on its CONTEXT axes rather than the
-        // hidden one, which is why n_audio_ctx 1500 -> 2048 and n_text_ctx
-        // 448 -> 512 failed while a power-of-two ctx passed. Sound: r on a pad
-        // row only ever multiplies a zero row.
-        // Only mask when the sequence axis is ACTUALLY padded. The gate exists to
-        // neutralise all-zero padding rows; when `seq` is already a power of two
-        // there are none, and the mask is a semantic no-op that still costs a
-        // constant witness plus an einsum per norm. Measured on llama2 8L/seq64
-        // (seq already 64): masking unconditionally added 357 fold-tree leaves and
-        // cost ~15% prove (36.4-38.3s -> 42.3-43.4s). Models with a non-power-of-two
-        // sequence or context length still get it, which is what BERT-Large (384)
-        // and Whisper large-v3 (1500/448) need.
-        let z_sf_diff = if seq.next_power_of_two() != seq {
-            g.mask(z_sf_diff, vec![1, seq, 1])
-        } else {
-            z_sf_diff
-        };
-        let positive_3 = g.add(z_sf_diff, tolerance)[0];
-        let positive_4 = g.sub(tolerance, z_sf_diff)[0];
-        g.add_nonneg_node(positive_3);
-        g.add_nonneg_node(positive_4);
+        let r = crate::dag::llama::rms_reciprocal_gate(g, x_mean);
 
         // Key fix: change_shape to [1, seq] instead of [1, 1]
         let r = g.change_shape(r, vec![1, seq]);
-        let h = g.einsum("bsi,bs->bsi".to_string(), vec![x, r], true)[0];
-        let out = g.einsum("bsi,i->bsi".to_string(), vec![h, w_e], true)[0];
+        let out = crate::dag::llama::rms_apply(g,x,r,w_e);
         vec![out]
     }
 }
@@ -265,8 +157,8 @@ fn whisper_gelu(g: &mut DagBuilder, x: EdgeId) -> EdgeId {
     g.einsum(einsum_str, vec![x, h], true)[0]
 }
 
-/// Self-attention (no causal mask). Parameterized by n_head and head_dim.
-fn whisper_self_attention(
+/// Encoder self-attention is bidirectional; decoder self-attention is causal.
+pub(crate) fn whisper_self_attention(
     g: &mut DagBuilder,
     x: EdgeId,
     w_q: EdgeId,
@@ -280,6 +172,7 @@ fn whisper_self_attention(
     n_head: usize,
     head_dim: usize,
     n_state: usize,
+    causal: bool,
 ) -> EdgeId {
     // x shape: [1, seq, n_state]
     let seq = g.init_values[x].as_ref().unwrap().shape[1];
@@ -311,9 +204,7 @@ fn whisper_self_attention(
     let scores = g.einsum("bhsd,bhtd->bhst".to_string(), vec![q, k], true)[0];
     // Use 'z' for scalar to avoid overwriting 's' dimension when seq > 1
     let scores = g.einsum("bhst,z->bhst".to_string(), vec![scores, d_sqrt_recip], true)[0];
-    let softmax_c = g.softmax_const(scores)[0];
-    let scores = g.add(scores, softmax_c)[0];
-    let scores = g.exp(scores)[0];
+    let scores = if causal { g.causal_softmax(scores,seq) } else { g.softmax(scores) };
 
     let out = g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
     let out = g.change_shape(out, vec![1, seq, n_head, head_dim]);
@@ -325,7 +216,7 @@ fn whisper_self_attention(
 
 /// Cross-attention: Q from decoder, K/V from encoder output.
 /// seq_q and seq_kv may differ.
-fn whisper_cross_attention(
+pub(crate) fn whisper_cross_attention(
     g: &mut DagBuilder,
     x_dec: EdgeId,       // decoder state [1, S_dec, n_state]
     enc_out: EdgeId,     // encoder output [1, S_enc, n_state]
@@ -374,9 +265,7 @@ fn whisper_cross_attention(
     let scores = g.einsum("bhsd,bhtd->bhst".to_string(), vec![q, k], true)[0];
     // Use 'z' for scalar to avoid overwriting 's' dimension when seq > 1
     let scores = g.einsum("bhst,z->bhst".to_string(), vec![scores, d_sqrt_recip], true)[0];
-    let softmax_c = g.softmax_const(scores)[0];
-    let scores = g.add(scores, softmax_c)[0];
-    let scores = g.exp(scores)[0];
+    let scores = g.softmax(scores);
 
     let out = g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
     let out = g.change_shape(out, vec![1, seq_dec, n_head, head_dim]);
@@ -471,7 +360,7 @@ pub fn whisper_encoder(
         let ln_out = g.pipe(&[x], whisper_layer_norm(attn_ln_w, attn_ln_b));
         let attn_out = whisper_self_attention(
             g, ln_out[0], w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
-            n_head, head_dim, n_state,
+            n_head, head_dim, n_state, false,
         );
         let residual = g.add(attn_out, x)[0];
 
@@ -548,7 +437,7 @@ pub fn whisper_decoder(
         let ln_out = g.pipe(&[x], whisper_layer_norm(attn_ln_w, attn_ln_b));
         let attn_out = whisper_self_attention(
             g, ln_out[0], w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
-            n_head, head_dim, n_state,
+            n_head, head_dim, n_state, true,
         );
         let residual = g.add(attn_out, x)[0];
 

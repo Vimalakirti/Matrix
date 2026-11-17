@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "original_document_sha256": {
+    "README.md": "2bb6bb36dee5182358cce2ee8d1f7d250f767e6e1c5900b10432ace7072fc763",
+    "independent/FINAL_Q20_REVIEW.md": "e9164c835c918395c6e3dc6be3fd4a476e0272a677feb02a8dc0f62fefe145a9",
+    "recovery-20261030/README.md": "a88a463feb9c3cd3a9e60640cd54fdda5d13d21814effb72f2066081b09cae27"
+  },
+  "document_change": "workspace path labels and portable reproduction commands only; no change to review conclusions",
+  "raw_logs": "byte-preserved original evidence; historical host paths may occur inside logs and machine receipts",
+  "source": "frozen 16-file overlay unchanged; full required 443-source manifest unchanged; original 448-file inventory retained",
+  "recovery_inventory": "recovery-20261030/original-recovery-manifest.json is the unchanged original recovery inventory; its original README hash refers to the pre-normalization document, not the portable editorial copy. export-manifest.json is authoritative for this export.",
+  "portable_script_original_sha256": {
+    "manifest.py": "f5046b84545eda31ef6efaa87aff12e05a1ec502d5ac0304b6c76d1f069505d1",
+    "record_adaptations.py": "c59b339972304e520847a5b26d23732eb5664ecb5433cf9397dc08c9f777b5bb"
+  },
+  "portable_scripts": "manifest.py and record_adaptations.py have argument-driven, read-only-source replacements; reconstruct.py and verify_export.py are new portable wrappers. Original prepare_harness.py and prepare_base_harness.py remain byte-identical."
+}

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-almost-goldilocks-cuda = { path = "../almost-goldilocks-cuda-rs" }
+almost-goldilocks-cuda = { path = "../almost-goldilocks-cuda-rs", default-features = false }
 log = { version = "0.4", default-features = false }
 env_logger = "0.10"
 serde = { version = "1.0", features = ["derive"] }
@@ -12,9 +12,35 @@ serde_yaml = "0.9"
 bincode = "1.3"
 once_cell = "1.15"
 rand = "0.8"
+rand_chacha = "0.3"
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+sha3 = "0.10"
+uint = "0.9"
 rayon = "1.10"
 num_cpus = "1.16"
 ndarray = { version = "0.15", features = ["serde"] }
 ndarray_einsum_beta = "0.7"
 sha2 = "=0.10.8"
 indexmap = "=2.13.0"
+
+[features]
+default = ["cuda"]
+cuda = ["almost-goldilocks-cuda/cuda"]
+cpu-replay = []
+
+[[bin]]
+name = "morpheus_cpu_replay"
+path = "src/bin/morpheus_cpu_replay.rs"
+required-features = ["cpu-replay"]
+
+[[bin]]
+name = "morpheus_cpu_fullproof"
+path = "src/bin/morpheus_cpu_fullproof.rs"
+required-features = ["cpu-replay"]
+
+[[bin]]
+name = "morpheus_cpu_deferred"
+path = "src/bin/morpheus_cpu_deferred.rs"
+required-features = ["cpu-replay"]

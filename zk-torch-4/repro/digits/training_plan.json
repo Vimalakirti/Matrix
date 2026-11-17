@@ -1,0 +1,11 @@
+{
+  "dataset": "sklearn.datasets.load_digits(n_class=10), bundled 1797-row dataset",
+  "split": "train_test_split(np.arange(1797), test_size=0.25, random_state=20261030, stratify=target); preserve returned order",
+  "normalization": "pixels / 16; exact integer Q10 inputs = pixel * 64",
+  "architecture": [64, 32, 10],
+  "training": {"hidden_layer_sizes": [32], "activation": "relu", "solver": "lbfgs", "alpha": 0.0001, "max_iter": 400, "max_fun": 50000, "tol": 0.0001, "random_state": 1729},
+  "quantization": "floor(parameter * 1024 + 0.5), ties towards positive infinity",
+  "proof_examples": "first four rows in the fixed returned test split, selected before training or inspecting test accuracy",
+  "public_parameter_absolute_bound": 8191,
+  "selection_policy": "one training run; no test tuning or example replacement, including failures"
+}

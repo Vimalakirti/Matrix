@@ -21,6 +21,7 @@ pub mod exp;
 pub mod instancenorm;
 pub mod llama;
 pub mod maxpool;
+pub mod normalization;
 pub mod pad;
 pub mod permute;
 pub mod pointpillar;
@@ -40,8 +41,9 @@ pub use conv::{
 pub use einsum::Einsum;
 pub use exp::{ExpHelper, TwoPow};
 pub use instancenorm::{InstanceNorm3D, InstanceNormHelper};
-pub use llama::{DivConst, RMSReciprocal, SigmoidConst, SoftmaxConst};
-pub use maxpool::{GeneralMaxPoolHelper, MaxPoolHelper, Replicate2x2};
+pub use llama::{DivConst, RMSBucket, RMSReciprocal, SigmoidConst, SoftmaxConst};
+pub use normalization::{MaskedMaxSelector,NormalizedRatio};
+pub use maxpool::{GeneralMaxPoolHelper, MaxPoolHelper, MaxPoolSelector, MaskedMaxPoolHelper, Replicate2x2};
 pub use pad::{ZeroPad, ZeroPad3D, ZeroPadAsym};
 pub use permute::Permute;
 pub use pointpillar::{GatherFromGrid, PillarMaxPool, ScatterToBEV};
@@ -112,6 +114,10 @@ pub enum BasicBlockType {
     GeneralMaxPoolHelper(GeneralMaxPoolHelper),
     InstanceNorm3D(InstanceNorm3D),
     MaxPoolHelper(MaxPoolHelper),
+    MaxPoolSelector(MaxPoolSelector),
+    MaskedMaxPoolHelper(MaskedMaxPoolHelper),
+    MaskedMaxSelector(MaskedMaxSelector),
+    NormalizedRatio(NormalizedRatio),
     NonNegative(NonNegative),
     Permute(Permute),
     PillarMaxPool(PillarMaxPool),
@@ -120,6 +126,7 @@ pub enum BasicBlockType {
     ReLUHelper(ReLUHelper),
     Replicate2x2(Replicate2x2),
     RMSReciprocal(RMSReciprocal),
+    RMSBucket(RMSBucket),
     ScaleDown(ScaleDown),
     ScaleUp(ScaleUp),
     ScatterToBEV(ScatterToBEV),
@@ -172,6 +179,8 @@ impl BasicBlockType {
                 assert_eq!(n, 2, "Conv* expects 2 inputs (X, W), got {n}")
             }
             BasicBlockType::Einsum(_) => assert!(n >= 1, "Einsum expects at least 1 input, got {n}"),
+            BasicBlockType::MaxPoolSelector(_) => assert_eq!(n,3,"MaxPoolSelector expects three inputs"),
+            BasicBlockType::MaskedMaxPoolHelper(_) | BasicBlockType::MaskedMaxSelector(_) | BasicBlockType::NormalizedRatio(_) => assert_eq!(n,2,"normalization expects two inputs"),
             BasicBlockType::GatherFromGrid(_) => assert_eq!(n, 2, "GatherFromGrid expects 2 inputs, got {n}"),
             BasicBlockType::InstanceNorm3D(_) => assert_eq!(n, 3, "InstanceNorm3D expects 3 inputs, got {n}"),
             BasicBlockType::ProductZeroCheck(_) => {
@@ -209,6 +218,10 @@ macro_rules! dispatch_basicblock {
             BasicBlockType::GeneralMaxPoolHelper(b) => b.$method($($arg),*),
             BasicBlockType::InstanceNorm3D(b)       => b.$method($($arg),*),
             BasicBlockType::MaxPoolHelper(b)        => b.$method($($arg),*),
+            BasicBlockType::MaxPoolSelector(b)      => b.$method($($arg),*),
+            BasicBlockType::MaskedMaxPoolHelper(b)  => b.$method($($arg),*),
+            BasicBlockType::MaskedMaxSelector(b)   => b.$method($($arg),*),
+            BasicBlockType::NormalizedRatio(b)     => b.$method($($arg),*),
             BasicBlockType::NonNegative(b)          => b.$method($($arg),*),
             BasicBlockType::Permute(b)              => b.$method($($arg),*),
             BasicBlockType::PillarMaxPool(b)        => b.$method($($arg),*),
@@ -217,6 +230,7 @@ macro_rules! dispatch_basicblock {
             BasicBlockType::ReLUHelper(b)           => b.$method($($arg),*),
             BasicBlockType::Replicate2x2(b)         => b.$method($($arg),*),
             BasicBlockType::RMSReciprocal(b)        => b.$method($($arg),*),
+            BasicBlockType::RMSBucket(b)            => b.$method($($arg),*),
             BasicBlockType::ScaleDown(b)            => b.$method($($arg),*),
             BasicBlockType::ScaleUp(b)              => b.$method($($arg),*),
             BasicBlockType::ScatterToBEV(b)         => b.$method($($arg),*),

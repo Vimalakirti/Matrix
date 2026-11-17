@@ -1,0 +1,6 @@
+{
+  "zk-torch-4/src/morpheus/piop/cv.rs": "87c3f5a38dc5c4a060315afac643fd37452ef529bc00365c7e3cbbf440d7fba0",
+  "zk-torch-4/src/dag/builder.rs": "125447b01205054b2f51749b6b945afa1532d366334a67569b19e46cdaa0ab3c",
+  "zk-torch-4/src/morpheus/piop/mod.rs": "c252760d63faee799a5c5c86d232cbabe4d225f855b7daf5adad916740727dc7",
+  "zk-torch-4/src/morpheus/piop/cv_batch_tests.rs": "daefe8151998f676033fe6c50b2aa7681ea89ab34bf9482fa477452ded0c7f4c"
+}

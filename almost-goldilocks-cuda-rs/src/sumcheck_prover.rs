@@ -670,7 +670,7 @@ impl GpuBatchedSamePointState {
                     )?;
                 }
             }
-            crate::memory::synchronize()?;
+            crate::memory::sync_mine()?;
             drop(d_eq_unique);
             drop(d_eq_scratch);
         }
@@ -2117,65 +2117,93 @@ impl BoolSumcheckGpu {
         positions: &[Vec<usize>],
         eq: &[crate::extension::AlmostGoldilocksExt2],
     ) -> crate::error::Result<Self> {
+        let mut eqf: Vec<u64> = Vec::with_capacity(2 * eq.len());
+        for x in eq { eqf.push(x.c0.0); eqf.push(x.c1.0); }
+        Self::new_with_device_eq(weights, positions, crate::memory::DeviceBuffer::from_slice(&eqf)?)
+    }
+
+    /// Like [`new`] but takes eq(r, .) already on the device (see
+    /// `eq_lagrange::ext2_eq_dp_all_device_u64`), as flat (c0, c1) pairs.
+    pub fn new_with_device_eq(
+        weights: &[crate::extension::AlmostGoldilocksExt2],
+        positions: &[Vec<usize>],
+        d_eq: crate::memory::DeviceBuffer<u64>,
+    ) -> crate::error::Result<Self> {
         let n_terms = weights.len();
         // Build the u32 index array DIRECTLY and sort each term's slice in
         // place. The caller's positions come from a HashMap so they are
         // unordered and must be sorted, but doing that by deep-cloning
         // Vec<Vec<usize>> first cost 363 MB per sub-group at arity 22 before a
         // single byte reached the device.
-        let mut idx: Vec<u32> = Vec::with_capacity(positions.iter().map(|p| p.len()).sum());
-        let mut off: Vec<u32> = Vec::with_capacity(n_terms + 1);
-        // COUNTING sort, not a comparison sort. A selection polynomial's cube
-        // index is `input_index + table_index << input_n` (poly/sparse.rs), and
-        // table_index < 2^table_commit_log, which is 64 in the shipped configs.
-        // So sorted order is "bucket by the high bits, stable within a bucket",
-        // and the number of buckets is tiny. sort_unstable on 45M u32 per
-        // sub-group was the single largest item in setup.
-        //
-        // The bucket count is derived from the data (max index >> input_n),
-        // not assumed: if a caller ever passes something whose high part is
-        // wide, this falls back to sorting rather than allocating a huge
-        // histogram.
-        let mut scratch: Vec<u32> = Vec::new();
-        let mut hist: Vec<u32> = Vec::new();
-        for p in positions {
-            let start = idx.len();
-            off.push(start as u32);
-            idx.extend(p.iter().map(|&x| x as u32));
-            let seg = &mut idx[start..];
-            if seg.len() < 2 { continue; }
+        // Per-term sorted u32 segments, built in parallel (terms are
+        // independent; this was ~80 ms serial per arity-24 sub-group), then
+        // concatenated. Same bucketing logic as before, per term.
+        fn sort_term(p: &[usize]) -> Vec<u32> {
+            let mut seg: Vec<u32> = p.iter().map(|&x| x as u32).collect();
+            if seg.len() < 2 { return seg; }
+            // Already sorted (lookups.rs scatters positions in sorted order):
+            // nothing to do.
+            if seg.windows(2).all(|w| w[0] < w[1]) { return seg; }
             let maxv = seg.iter().copied().max().unwrap_or(0);
-            // low bits = input index; its width is ceil(log2(len)) for a
-            // selection poly (exactly one nonzero per input row).
+            // COUNTING sort, not a comparison sort. A selection polynomial's
+            // cube index is `input_index + table_index << input_n`
+            // (poly/sparse.rs) with a small table, so sorted order is "bucket
+            // by the high bits, stable within a bucket". The bucket count is
+            // derived from the data; a wide high part falls back to sorting.
             let input_bits = usize::BITS as usize - (seg.len() as u32 - 1).leading_zeros() as usize;
             let buckets = (maxv as usize >> input_bits) + 1;
-            if buckets > 4096 || input_bits >= 32 { seg.sort_unstable(); continue; }
-            hist.clear(); hist.resize(buckets + 1, 0);
+            if buckets > 4096 || input_bits >= 32 { seg.sort_unstable(); return seg; }
+            let mut hist = vec![0u32; buckets + 1];
             for &v in seg.iter() { hist[(v as usize >> input_bits) + 1] += 1; }
             for b in 1..=buckets { hist[b] += hist[b - 1]; }
-            scratch.clear(); scratch.resize(seg.len(), 0);
+            let mut out = vec![0u32; seg.len()];
             for &v in seg.iter() {
                 let b = v as usize >> input_bits;
-                scratch[hist[b] as usize] = v;
+                out[hist[b] as usize] = v;
                 hist[b] += 1;
             }
-            // Within a bucket the low bits are the input index, which the
-            // caller supplies in arbitrary (HashMap) order, so each bucket
-            // still needs ordering -- but over 2^input_bits/buckets items.
+            // Row-order callers (lookups.rs) leave every bucket ascending
+            // since the scatter is stable; check in O(n) and skip the sort.
             let mut lo = 0usize;
             for b in 0..buckets {
                 let hi = hist[b] as usize;
-                if hi > lo + 1 { scratch[lo..hi].sort_unstable(); }
+                if hi > lo + 1 && !out[lo..hi].windows(2).all(|w| w[0] < w[1]) {
+                    out[lo..hi].sort_unstable();
+                }
                 lo = hi;
             }
-            seg.copy_from_slice(&scratch);
+            out
         }
-        off.push(idx.len() as u32);
-        let n = idx.len();
+        let segs: Vec<Vec<u32>> = std::thread::scope(|sc| {
+            let hs: Vec<_> = positions.iter().map(|p| sc.spawn(move || sort_term(p))).collect();
+            hs.into_iter().map(|h| h.join().expect("sort_term thread")).collect()
+        });
+        Self::from_sorted_u32(weights, &segs, d_eq)
+    }
+
+    /// Build from per-term positions that are ALREADY sorted ascending (as
+    /// lookups.rs produces them), uploading each term's slice straight into
+    /// the device index buffer: no host sort, no host concatenation (a fresh
+    /// ~75 MB array per arity-24 sub-group, page-faulted on first touch).
+    pub fn from_sorted_u32(
+        weights: &[crate::extension::AlmostGoldilocksExt2],
+        segs: &[Vec<u32>],
+        d_eq: crate::memory::DeviceBuffer<u64>,
+    ) -> crate::error::Result<Self> {
+        let n_terms = weights.len();
+        let total: usize = segs.iter().map(|v| v.len()).sum();
+        let mut off: Vec<u32> = Vec::with_capacity(n_terms + 1);
+        let mut d_idx: crate::memory::DeviceBuffer<u32> = crate::memory::DeviceBuffer::new(total.max(1))?;
+        let mut at = 0usize;
+        for seg in segs {
+            off.push(at as u32);
+            if !seg.is_empty() { d_idx.write_slice_at(at, seg)?; }
+            at += seg.len();
+        }
+        off.push(at as u32);
+        let n = total;
         let mut w: Vec<u64> = Vec::with_capacity(2 * n_terms);
         for x in weights { w.push(x.c0.0); w.push(x.c1.0); }
-        let mut eqf: Vec<u64> = Vec::with_capacity(2 * eq.len());
-        for x in eq { eqf.push(x.c0.0); eqf.push(x.c1.0); }
 
         // One partial per (block, term) rather than one per 256 entries, so the
         // host-side fold is over a few thousand values instead of 65535.
@@ -2189,7 +2217,7 @@ impl BoolSumcheckGpu {
         let nb = (n + BOOL_BLOCK - 1) / BOOL_BLOCK;
         let scan_len = 3 * nb + 4 * BOOL_BLOCK;
         Ok(Self {
-            d_idx: crate::memory::DeviceBuffer::from_slice(&idx)?,
+            d_idx,
             d_val: {
                 // Filled on device: every entry is the constant Ext2(1, 0), so
                 // uploading it was 726 MB of PCIe per sub-group to transfer 1.
@@ -2204,7 +2232,7 @@ impl BoolSumcheckGpu {
             },
             d_off: crate::memory::DeviceBuffer::from_slice(&off)?,
             d_w: crate::memory::DeviceBuffer::from_slice(&w)?,
-            d_eq: crate::memory::DeviceBuffer::from_slice(&eqf)?,
+            d_eq,
             d_flags: crate::memory::DeviceBuffer::new(n.max(1))?,
             d_gid: crate::memory::DeviceBuffer::new(n.max(1))?,
             d_partial: crate::memory::DeviceBuffer::new(partial_blocks * 8)?,
@@ -2273,7 +2301,7 @@ impl BoolSumcheckGpu {
             // aext2_fold_single_ffi does not synchronize, so an illegal access
             // here would only surface at the next sync, in an unrelated kernel.
             if std::env::var("ZK4_GPU_BOOL_DBG").is_ok() {
-                crate::memory::synchronize().map_err(|e| crate::error::CudaError::InvalidArgument(
+                crate::memory::sync_mine().map_err(|e| crate::error::CudaError::InvalidArgument(
                     format!("eq fold sync (len={} half={}): {:?}", self.d_eq.len(), half, e)))?;
             }
             self.d_eq = out;

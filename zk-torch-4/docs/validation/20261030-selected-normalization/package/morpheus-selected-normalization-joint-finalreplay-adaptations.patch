@@ -1,0 +1,244 @@
+--- original/almost-goldilocks-cuda-rs/build.rs
++++ adapted/almost-goldilocks-cuda-rs/build.rs
+@@ -57,68 +57,7 @@
+     // Headers live in the sibling cuda_almost_goldilocks/ directory.
+     let cuda_dir = manifest_dir.join("../cuda_almost_goldilocks");
+ 
+-    let (nvcc, cuda_lib_path) = find_cuda_paths();
+-    if !std::path::Path::new(&nvcc).exists() {
+-        panic!("CUDA toolkit not found at {}", nvcc);
+-    }
+-
+-    let output_lib = out_dir.join("libalmost_goldilocks_cuda_wrapper.a");
+-    let obj_file = out_dir.join("wrapper.o");
+-    let compute_cap = env::var("CUDA_COMPUTE").unwrap_or_else(|_| "80".to_string());
+-    // SASS for the target plus PTX: ptxas then runs at build time, so resource
+-    // errors (e.g. > 48 KB static shared memory) fail the build instead of
+-    // surfacing as a JIT launch failure at run time.
+-    let gencode = format!(
+-        "-gencode=arch=compute_{},code=[sm_{},compute_{}]",
+-        compute_cap, compute_cap, compute_cap
+-    );
+-
+-    eprintln!("[build.rs] nvcc: {}", nvcc);
+-    eprintln!("[build.rs] compute capability: {}", compute_cap);
+-    eprintln!("[build.rs] header include path: {}", cuda_dir.display());
+-
+-    let status = Command::new(&nvcc)
+-        .args([
+-            "-O3",
+-            &gencode,
+-            "-std=c++17",
+-            "--default-stream",
+-            "per-thread",
+-            "-Xcompiler",
+-            "-fPIC",
+-            "-c",
+-            cuda_wrapper.to_str().unwrap(),
+-            "-o",
+-            obj_file.to_str().unwrap(),
+-            &format!("-I{}", cuda_dir.to_str().unwrap()),
+-        ])
+-        .status()
+-        .expect("Failed to execute nvcc");
+-    if !status.success() {
+-        panic!("Failed to compile CUDA wrapper");
+-    }
+-
+-    let status = Command::new("ar")
+-        .args([
+-            "rcs",
+-            output_lib.to_str().unwrap(),
+-            obj_file.to_str().unwrap(),
+-        ])
+-        .status()
+-        .expect("Failed to execute ar");
+-    if !status.success() {
+-        panic!("Failed to create static library");
+-    }
+-
+-    println!("cargo:rustc-link-search=native={}", out_dir.display());
+-    println!("cargo:rustc-link-lib=static=almost_goldilocks_cuda_wrapper");
+-    println!("cargo:rustc-link-search=native={}", cuda_lib_path);
+-    println!("cargo:rustc-link-lib=static=cudart_static");
+-    println!("cargo:rustc-link-lib=stdc++");
+-    println!("cargo:rustc-link-lib=dl");
+-    println!("cargo:rustc-link-lib=rt");
+-    println!("cargo:rustc-link-lib=pthread");
+-
++    // VALIDATION ONLY: CUDA compilation and linker directives omitted.
+     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE");
+     println!("cargo:rerun-if-changed=cuda/wrapper.cu");
+     // Track EVERY header wrapper.cu can include, not a hand-kept list: the
+--- original/almost-goldilocks-cuda-rs/src/ffi.rs
++++ adapted/almost-goldilocks-cuda-rs/src/ffi.rs
+@@ -7,7 +7,7 @@
+ 
+ use std::os::raw::{c_int, c_void};
+ 
+-#[link(name = "almost_goldilocks_cuda_wrapper", kind = "static")]
++// VALIDATION ONLY: no native library supplied; any reachable FFI must fail linking.
+ extern "C" {
+     // -------------------- init / memory --------------------
+     pub fn almost_goldilocks_cuda_init() -> c_int;
+--- original/zk-torch-4/src/bin/cpu_exp_replay.rs
++++ adapted/zk-torch-4/src/bin/cpu_exp_replay.rs
+@@ -0,0 +1,35 @@
++fn main() {
++    println!("RUN standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r");
++    zk_torch_4::morpheus::piop::exp_tests::standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r();
++    println!("PASS standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r");
++    println!("RUN immutable_literal_source_mutation_fails_verifier_rows");
++    zk_torch_4::morpheus::piop::exp_tests::immutable_literal_source_mutation_fails_verifier_rows();
++    println!("PASS immutable_literal_source_mutation_fails_verifier_rows");
++    println!("RUN verifier_statement_rejects_removed_guard_or_changed_literal");
++    zk_torch_4::morpheus::piop::exp_tests::verifier_statement_rejects_removed_guard_or_changed_literal();
++    println!("PASS verifier_statement_rejects_removed_guard_or_changed_literal");
++    println!("RUN finite_exp_rejects_modular_scaled_quotient_counterfeit");
++    zk_torch_4::morpheus::piop::exp_tests::finite_exp_rejects_modular_scaled_quotient_counterfeit();
++    println!("PASS finite_exp_rejects_modular_scaled_quotient_counterfeit");
++    println!("RUN padded_exp_verifier_rejects_nonzero_claimed_padding");
++    zk_torch_4::morpheus::piop::exp_tests::padded_exp_verifier_rejects_nonzero_claimed_padding();
++    println!("PASS padded_exp_verifier_rejects_nonzero_claimed_padding");
++    println!("RUN exact_mean_piop_rejects_both_old_half_tie_counterexamples");
++    zk_torch_4::morpheus::piop::exp_tests::exact_mean_piop_rejects_both_old_half_tie_counterexamples();
++    println!("PASS exact_mean_piop_rejects_both_old_half_tie_counterexamples");
++    println!("RUN exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples");
++    zk_torch_4::morpheus::piop::exp_tests::exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples();
++    println!("PASS exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples");
++    println!("RUN exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding");
++    zk_torch_4::morpheus::piop::exp_tests::exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding();
++    println!("PASS exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding");
++    println!("RUN nonnegative_partial_chunks_preserve_61_62_63_bit_widths");
++    zk_torch_4::morpheus::piop::exp_tests::nonnegative_partial_chunks_preserve_61_62_63_bit_widths();
++    println!("PASS nonnegative_partial_chunks_preserve_61_62_63_bit_widths");
++    println!("RUN selected_normalization_piop_rejects_ratio_and_selector_source_mutations");
++    zk_torch_4::morpheus::piop::exp_tests::selected_normalization_piop_rejects_ratio_and_selector_source_mutations();
++    println!("PASS selected_normalization_piop_rejects_ratio_and_selector_source_mutations");
++    println!("RUN instance_norm_piop_defines_statistics_affine_parameters_and_epsilon");
++    zk_torch_4::morpheus::piop::exp_tests::instance_norm_piop_defines_statistics_affine_parameters_and_epsilon();
++    println!("PASS instance_norm_piop_defines_statistics_affine_parameters_and_epsilon");
++}
+--- original/zk-torch-4/src/morpheus/piop/exp_tests.rs
++++ adapted/zk-torch-4/src/morpheus/piop/exp_tests.rs
+@@ -54,8 +54,7 @@
+     vc.ok && vc.consumed() && rows_hold(&vc.rows,&raw)
+ }
+ 
+-#[test]
+-fn standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r() {
++pub fn standalone_exp_has_canonical_verifier_roots_and_rejects_compensated_k_r() {
+     let (d,w) = standalone();
+     assert_eq!(d.exp_guard_nodes.len(),1);
+     let mut g = Graph::new(&d,&w,Config {tcl:4,slots_log:10,req_planes_log:6});
+@@ -77,8 +76,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn immutable_literal_source_mutation_fails_verifier_rows() {
++pub fn immutable_literal_source_mutation_fails_verifier_rows() {
+     let (d,w)=standalone();
+     let g=Graph::new(&d,&w,Config {tcl:4,slots_log:10,req_planes_log:6});
+     let mut pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<10]);
+@@ -88,8 +86,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn verifier_statement_rejects_removed_guard_or_changed_literal() {
++pub fn verifier_statement_rejects_removed_guard_or_changed_literal() {
+     let (mut d,w)=standalone();
+     let guard=d.exp_guard_nodes[&0][2];
+     d.exp_guard_nodes.remove(&0);
+@@ -109,8 +106,7 @@
+     assert!(statement::words(&g,&Profile::toy(),&KeySeed([1;8]),11,false,4).is_err());
+ }
+ 
+-#[test]
+-fn finite_exp_rejects_modular_scaled_quotient_counterfeit() {
++pub fn finite_exp_rejects_modular_scaled_quotient_counterfeit() {
+     let mut b=DagBuilder::new();
+     let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(0)],DataType::Float,*crate::SF_LOG,Role::Input));
+     let out=b.exp(x)[0]; let (d,mut w)=b.compile();
+@@ -164,8 +160,7 @@
+     assert!(!replay(&g,&pd));
+ }
+ 
+-#[test]
+-fn padded_exp_verifier_rejects_nonzero_claimed_padding() {
++pub fn padded_exp_verifier_rejects_nonzero_claimed_padding() {
+     let mut b=DagBuilder::new();
+     // Positive padding must be masked BEFORE the nonpositive helper guard.
+     let mut values=vec![int_to_f(0);5]; values.extend(vec![int_to_f(400);3]);
+@@ -241,8 +236,7 @@
+     replay(&g,&pd)
+ }
+ 
+-#[test]
+-fn exact_mean_piop_rejects_both_old_half_tie_counterexamples() {
++pub fn exact_mean_piop_rejects_both_old_half_tie_counterexamples() {
+     for (input,correct,wrong) in [(1,1,0),(-1,0,-1)] {
+         assert!(normalization_case(false,input,None));
+         assert!(normalization_case(false,input,Some(correct)));
+@@ -250,24 +244,21 @@
+     }
+ }
+ 
+-#[test]
+-fn exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples() {
++pub fn exact_rms_piop_rejects_sign_zero_and_neighbor_counterexamples() {
+     assert!(normalization_case(true,1024,None));
+     for bad in [-1024,0,1023,1025] {assert!(!normalization_case(true,1024,Some(bad)));}
+     assert!(normalization_case(true,0,None));
+     assert!(!normalization_case(true,0,Some(1)));
+ }
+ 
+-#[test]
+-fn exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding() {
++pub fn exact_rms_piop_rejects_wrong_private_bucket_and_forbidden_padding() {
+     assert!(normalization_case_with_bucket(true,1024,None,None));
+     for wrong in [0,1,10,12,29,31] {
+         assert!(!normalization_case_with_bucket(true,1024,None,Some(wrong)));
+     }
+ }
+ 
+-#[test]
+-fn nonnegative_partial_chunks_preserve_61_62_63_bit_widths() {
++pub fn nonnegative_partial_chunks_preserve_61_62_63_bit_widths() {
+     for bits in [61,62,63] {
+         let mut b=DagBuilder::new();
+         let x=b.committed_input(Witness::new(vec![1],vec![int_to_f(0)],DataType::Int,0,Role::Input));
+@@ -285,8 +276,7 @@
+     }
+ }
+ 
+-#[test]
+-fn selected_normalization_piop_rejects_ratio_and_selector_source_mutations() {
++pub fn selected_normalization_piop_rejects_ratio_and_selector_source_mutations() {
+     let mut b=DagBuilder::new();let q=1i128<<*crate::SF_LOG;
+     let x=b.committed_input(Witness::new(vec![1,3],vec![int_to_f(0),int_to_f(-q),int_to_f(100*q),int_to_f(0)],DataType::Float,*crate::SF_LOG,Role::Input));
+     let out=b.selected_softmax(x,vec![true,true,false,false]);let(d,mut w)=b.compile();
+@@ -304,8 +294,7 @@
+ 
+ /// Actual PIOP replay authored for InstanceNorm. Native CUDA linkage is still
+ /// required by this crate; a typecheck/CPU predicate test is NOT its execution.
+-#[test]
+-fn instance_norm_piop_defines_statistics_affine_parameters_and_epsilon() {
++pub fn instance_norm_piop_defines_statistics_affine_parameters_and_epsilon() {
+     let sf=10;let mut b=DagBuilder::new();
+     let x=b.committed_input(Witness::new(vec![1,1,1,2],vec![int_to_f(-1024),int_to_f(1024)],DataType::Float,sf,Role::Input));
+     let gamma=b.param(Witness::new(vec![1],vec![int_to_f(1024)],DataType::Float,sf,Role::Constant));
+--- original/zk-torch-4/src/morpheus/piop/mod.rs
++++ adapted/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -30,8 +30,8 @@
+ pub mod gpu;
+ pub mod layout;
+ pub mod tensor;
+-#[cfg(test)]
+-mod exp_tests;
++// VALIDATION ONLY: expose unchanged CPU test bodies to standalone runner.
++pub mod exp_tests;
+ 
+ use crate::basicblock::BasicBlockType;
+ use crate::dag::{Dag, PolyType, Role, Witness};

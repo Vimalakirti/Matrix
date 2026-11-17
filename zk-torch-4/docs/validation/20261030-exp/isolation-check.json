@@ -1,0 +1,22 @@
+{
+  "base_commit": "f192323f0725fed17a27dee21442fcba25460d2f",
+  "preserved_registration_protocol_files": [
+    "zk-torch-4/src/morpheus/request.rs",
+    "zk-torch-4/src/morpheus/coins.rs",
+    "zk-torch-4/src/morpheus/driver.rs",
+    "zk-torch-4/src/morpheus/wire.rs"
+  ],
+  "changed_files": [
+    "zk-torch-4/docs/exp_profile_scalar.txt",
+    "zk-torch-4/docs/morpheus_exp_profile.md",
+    "zk-torch-4/scripts/bench/morpheus/test_exp_profile.py",
+    "zk-torch-4/src/basicblock/exp.rs",
+    "zk-torch-4/src/bin/morpheus_piop_e2e.rs",
+    "zk-torch-4/src/dag/builder.rs",
+    "zk-torch-4/src/dag/mod.rs",
+    "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+    "zk-torch-4/src/morpheus/piop/mod.rs",
+    "zk-torch-4/src/morpheus/statement.rs"
+  ],
+  "constructor_scan": "one Dag literal, one Graph literal, DagBuilder new/compile updated; static scan only"
+}

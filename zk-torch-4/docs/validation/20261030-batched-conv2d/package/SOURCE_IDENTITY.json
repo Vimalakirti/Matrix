@@ -1,0 +1,19 @@
+{
+  "published_frozen_base_commit": "7241f377bebd47e911e4a587bdab1b0c7f89baf5",
+  "published_frozen_base_tree": "a10cf80803f913bebea1f46eb8a4695a41691481",
+  "base_source_files": 454,
+  "base_manifest_sha256": "da3f4f1bae5927b06547d61bd061725a46634db1cb944df469da532084770113",
+  "final_source_files": 455,
+  "final_manifest_sha256": "a57be8f20529556584fef5a97d8bf24c54d77809835890bd4e2678848c227579",
+  "overlay_patch_sha256": "6e755beca69b513a068b3337c3eae5b64c1ee5cc1435b62121967d8689b54666",
+  "overlay_manifest_sha256": "37c0be8a9ec441ad374d2b2ce7e00c3ddb7e2652c18d119eab3d0cd39e6e3842",
+  "changed_paths": [
+    "zk-torch-4/src/morpheus/piop/cv.rs",
+    "zk-torch-4/src/morpheus/piop/mod.rs",
+    "zk-torch-4/src/morpheus/piop/cv_batch_tests.rs"
+  ],
+  "builder_unchanged": true,
+  "full_source_trees_in_this_export": false,
+  "all_original_evidence_logs_preserved": true,
+  "no_remote_publication_by_exporter": true
+}

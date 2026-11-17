@@ -1,0 +1,172 @@
+SCALE=0
+RUN instance_norm_exact_epsilon_conversion_and_public_bounds
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:22:9:
+epsilon outside public statistic domain
+PASS instance_norm_exact_epsilon_conversion_and_public_bounds
+RUN instance_norm_row_major_layout_padding_and_parameter_dependencies
+PASS instance_norm_row_major_layout_padding_and_parameter_dependencies
+RUN instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+PASS instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+RUN instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^29) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 30 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^2) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 3 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^29) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 30 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+PASS instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+RUN instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles
+
+thread 'main' (5) panicked at src/dag/builder.rs:1953:52:
+unconstrained legacy InstanceNorm advice is unsupported; use instancenorm3d
+
+thread 'main' (5) panicked at src/basicblock/llama.rs:29:5:
+exact scalar RMS supports activation scales 0..20; larger scales need wider arithmetic
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (5) panicked at src/dag/instancenorm.rs:82:13:
+assertion `left == right` failed: InstanceNorm affine parameter shape mismatch
+  left: [2]
+ right: [1]
+
+thread 'main' (5) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+
+thread 'main' (5) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+PASS instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles
+SCALE=16
+RUN instance_norm_exact_epsilon_conversion_and_public_bounds
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:22:9:
+epsilon outside public statistic domain
+PASS instance_norm_exact_epsilon_conversion_and_public_bounds
+RUN instance_norm_row_major_layout_padding_and_parameter_dependencies
+PASS instance_norm_row_major_layout_padding_and_parameter_dependencies
+RUN instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+PASS instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+RUN instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^49) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 50 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^49) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 50 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+PASS instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+RUN instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles
+
+thread 'main' (15) panicked at src/dag/builder.rs:1953:52:
+unconstrained legacy InstanceNorm advice is unsupported; use instancenorm3d
+
+thread 'main' (15) panicked at src/basicblock/llama.rs:29:5:
+exact scalar RMS supports activation scales 0..20; larger scales need wider arithmetic
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (15) panicked at src/dag/instancenorm.rs:82:13:
+assertion `left == right` failed: InstanceNorm affine parameter shape mismatch
+  left: [2]
+ right: [1]
+
+thread 'main' (15) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+
+thread 'main' (15) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+PASS instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles
+SCALE=20
+RUN instance_norm_exact_epsilon_conversion_and_public_bounds
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:13:5:
+InstanceNorm epsilon must be finite and nonnegative
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:22:9:
+epsilon outside public statistic domain
+PASS instance_norm_exact_epsilon_conversion_and_public_bounds
+RUN instance_norm_row_major_layout_padding_and_parameter_dependencies
+PASS instance_norm_row_major_layout_padding_and_parameter_dependencies
+RUN instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+PASS instance_norm_domain_extremes_constant_channels_and_zero_epsilon
+RUN instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 3). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^1) (0 negative, max overflow value = 2). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 2 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^61) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 62 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+[range] WARNING: NonNegative range check — 1/1 value(s) fall outside the table [0, 2^61) (1 negative, max overflow value = 0). These clamp to index 0, so the proof WILL fail to verify. Raise table_size_log to >= 62 (use a config with a larger table_size_log, e.g. llama2_config.yaml for hidden>=2048).
+PASS instance_norm_changed_statistics_reciprocal_and_affine_quotients_fail_constraints
+RUN instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles
+
+thread 'main' (25) panicked at src/dag/builder.rs:1953:52:
+unconstrained legacy InstanceNorm advice is unsupported; use instancenorm3d
+
+thread 'main' (25) panicked at src/basicblock/llama.rs:29:5:
+exact scalar RMS supports activation scales 0..20; larger scales need wider arithmetic
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:43:5:
+epsilon outside public statistic domain
+
+thread 'main' (25) panicked at src/dag/instancenorm.rs:82:13:
+assertion `left == right` failed: InstanceNorm affine parameter shape mismatch
+  left: [2]
+ right: [1]
+
+thread 'main' (25) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+
+thread 'main' (25) panicked at src/poly/dense.rs:29:9:
+DenseMLPoly::new: expected 1 evaluations for n=0, got 2
+PASS instance_norm_rejects_legacy_raw_advice_and_invalid_public_profiles

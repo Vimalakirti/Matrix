@@ -230,8 +230,21 @@ fn main() {
     let mut breakdown: Option<String> = None;
 
     println!("Streaming {} generations (seq_len={} each):", n_proofs, seq_len);
+    // Weights (Role::Constant) keep one allocation across generations; only
+    // per-proof edges are reset from the template. Cloning the whole template
+    // every generation deep-copied every weight, so device-side weight caches
+    // (einsum operands, keyed by host address) could not hit. Same contents,
+    // same proofs.
+    let mut witnesses = witnesses_template.clone();
+    let const_edge: Vec<bool> = witnesses_template.iter()
+        .map(|ws| !ws.is_empty() && ws.iter().all(|w| w.role == zk_torch_4::dag::Role::Constant))
+        .collect();
     for it in 0..n_proofs {
-        let mut witnesses = witnesses_template.clone();
+        if it > 0 {
+            for (e, c) in const_edge.iter().enumerate() {
+                if !*c { witnesses[e] = witnesses_template[e].clone(); }
+            }
+        }
         // Fresh prompt tokens for this generation → fresh embedding selector.
         let tokens: Vec<usize> = (0..seq_len).map(|_| rng.gen::<usize>() % vocab_size).collect();
         witnesses[emb_sel] = vec![DagBuilder::build_one_hot_selector_witness(
@@ -292,13 +305,23 @@ fn main() {
 
         let s4 = Instant::now();
         let chunk = prover_acc.add_proof(&r, &witnesses);
+        // Stop the acc-update timer HERE. The proof-size bookkeeping below
+        // bincode-serializes the whole proof (several times, ~100 MB on GPT-2)
+        // and used to land inside this timer: ~330 ms per proof billed as
+        // acc-update on GPT-2 2L. The AR benches for Llama/GPT-J already
+        // stopped it here.
+        let d_acc = s4.elapsed(); t_acc += d_acc;
         proof_bytes += ser_len(&dp) + ser_len(&fp) + ser_len(&chunk);
+        if std::env::var("ZK4_PROOF_FP").ok().as_deref() == Some("1") {
+            println!("  proof fingerprint: dp {} fp {} chunk {}",
+                zk_torch_4::ser_fingerprint(&dp), zk_torch_4::ser_fingerprint(&fp),
+                zk_torch_4::ser_fingerprint(&chunk));
+        }
         // Keep one proof's component split; every iteration has the
         // same shape, so the last is representative.
         breakdown = Some(zk_torch_4::proof_size_report(
             &dp.node_proofs, &dp.edge_proofs, &dp.range_proof,
             &dp.two_pow_proof, &dp.output_claims, &dp, &fp));
-        t_acc += s4.elapsed(); let d_acc = s4.elapsed();
         let s5 = Instant::now();
         let ok = verifier_acc.verify_add_proof(&r, &witnesses, &chunk);
         t_accv += s5.elapsed(); let d_accv = s5.elapsed();

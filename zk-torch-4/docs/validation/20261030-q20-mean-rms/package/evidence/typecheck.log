@@ -1,0 +1,751 @@
+   Compiling almost-goldilocks-cuda v0.1.0 (/workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs)
+warning: unused variable: `out_dir`
+  --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/build.rs:53:9
+   |
+53 |     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+   |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_out_dir`
+   |
+   = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `cuda_wrapper`
+  --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/build.rs:56:9
+   |
+56 |     let cuda_wrapper = manifest_dir.join("cuda/wrapper.cu");
+   |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_cuda_wrapper`
+
+warning: function `find_cuda_paths` is never used
+ --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/build.rs:6:4
+  |
+6 | fn find_cuda_paths() -> (String, String) {
+  |    ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `almost-goldilocks-cuda` (build script) generated 3 warnings
+warning: variable does not need to be mutable
+   --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:595:13
+    |
+595 |         let mut d_scratch = pool_take(total_u64s)?;
+    |             ----^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `leaf_stride_ext2`
+   --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:636:17
+    |
+636 |             let leaf_stride_ext2 = leaf_u64s / 2;
+    |                 ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_leaf_stride_ext2`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:755:13
+    |
+755 |         let mut d_scratch = pool_take(total_u64s)?;
+    |             ----^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `n_terms`
+    --> /workspace/shared/morpheus-mean-rms-q20-typecheck2/almost-goldilocks-cuda-rs/src/sumcheck_prover.rs:2132:13
+     |
+2132 |         let n_terms = weights.len();
+     |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_n_terms`
+
+warning: `almost-goldilocks-cuda` (lib) generated 4 warnings (run `cargo fix --lib -p almost-goldilocks-cuda` to apply 4 suggestions)
+    Checking zk-torch-4 v0.1.0 (/workspace/shared/morpheus-mean-rms-q20-typecheck2/zk-torch-4)
+warning: unused import: `next_pow`
+ --> src/dag/builder.rs:8:36
+  |
+8 | use crate::util::arith::{int_to_f, next_pow};
+  |                                    ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `bit_decompose::decompose_and_pack`
+  --> src/dag/fold_integration.rs:21:21
+   |
+21 | use crate::commit::{bit_decompose::decompose_and_pack, AjtaiKey, GpuAjtaiStore};
+   |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `get_n`
+  --> src/dag/fold_integration.rs:49:71
+   |
+49 | use crate::util::arith::{ext2_add, ext2_field_eq, ext2_mul, ext2_sub, get_n};
+   |                                                                       ^^^^^
+
+warning: unused import: `rayon::prelude::*`
+   --> src/fold/same_point_sumcheck.rs:109:9
+    |
+109 |     use rayon::prelude::*;
+    |         ^^^^^^^^^^^^^^^^^
+
+warning: trailing semicolon in macro used in expression position
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: macro invocations at the end of a block are treated as expressions
+   = note: to ignore the value produced by the macro, add a semicolon after the invocation of `uint_full_mul_reg`
+   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+   = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+   = note: `#[warn(semicolon_in_expressions_from_non_local_macros)]` (part of `#[warn(future_incompatible)]`) on by default
+   = note: this warning originates in the macro `$crate::uint_full_mul_reg` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused imports: `Item` and `Stage`
+  --> src/morpheus/auth_gpu.rs:21:25
+   |
+21 | use super::transcript::{Item, MTranscript, Stage};
+   |                         ^^^^               ^^^^^
+
+warning: unused import: `interpolate`
+  --> src/morpheus/link_fast.rs:23:19
+   |
+23 | use super::link::{interpolate, raw_to_cols, LinkOutput, LinkProof, Statement};
+   |                   ^^^^^^^^^^^
+
+warning: unused import: `raw_to_cols`
+  --> src/morpheus/pcs_gpu.rs:11:19
+   |
+11 | use super::link::{raw_to_cols, uniform_q_coin};
+   |                   ^^^^^^^^^^^
+
+warning: unused import: `A_ENC_COLS`
+  --> src/morpheus/pcs_gpu.rs:13:30
+   |
+13 | use super::params::{Profile, A_ENC_COLS};
+   |                              ^^^^^^^^^^
+
+warning: unused import: `f_to_int`
+  --> src/morpheus/piop/mod.rs:41:26
+   |
+41 | use crate::util::arith::{f_to_int, log2_ceil};
+   |                          ^^^^^^^^
+
+warning: unused import: `LinkProof`
+  --> src/morpheus/request.rs:23:25
+   |
+23 | use super::link::{self, LinkProof, Row, Statement};
+   |                         ^^^^^^^^^
+
+warning: unused import: `almost_goldilocks_cuda::field::AlmostGoldilocksField`
+  --> src/pcs/mrlc.rs:43:5
+   |
+43 | use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rand::Rng`
+   --> src/dag/gpt2.rs:295:9
+    |
+295 |     use rand::Rng;
+    |         ^^^^^^^^^
+
+warning: duplicated attribute
+    --> src/dag/proving.rs:1192:5
+     |
+1192 |     #[test]
+     |     ^^^^^^^
+     |
+     = note: `#[warn(duplicate_macro_attributes)]` on by default
+
+warning: unused import: `Stage`
+  --> src/morpheus/auth_gpu.rs:21:44
+   |
+21 | use super::transcript::{Item, MTranscript, Stage};
+   |                                            ^^^^^
+
+warning: use of deprecated constant `std::isize::MAX`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+   = note: this warning originates in the macro `$crate::uint_overflowing_binop` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated constant `std::isize::MAX`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::uint_overflowing_binop` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::construct_uint` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u8>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u16>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl usize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl u64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i8>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i16>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i32>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl isize>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i64>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `$crate::impl_try_from_for_primitive` which comes from the expansion of the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: use of deprecated associated function `core::num::<impl i128>::max_value`: replaced by the `MAX` associated constant on this type
+  --> src/morpheus/gaussian_fast.rs:22:5
+   |
+22 |     uint::construct_uint! { pub struct U384(6); }
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: this warning originates in the macro `uint::construct_uint` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused import: `crate::poly::MLPoly`
+  --> src/mlperf.rs:21:5
+   |
+21 | use crate::poly::MLPoly;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Roots`
+  --> src/morpheus/gaussian.rs:22:28
+   |
+22 | use num_integer::{Integer, Roots};
+   |                            ^^^^^
+
+warning: value assigned to `combined_part_aux` is never read
+   --> src/dag/lookups.rs:487:64
+    |
+487 |         let mut combined_part_aux: Vec<AlmostGoldilocksExt2> = Vec::new();
+    |                                                                ^^^^^^^^^^ this value is reassigned later and never used
+...
+508 |         combined_part_aux = vec![AlmostGoldilocksExt2::zero(); max_table_size];
+    |         ----------------- `combined_part_aux` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/dag/mod.rs:625:13
+    |
+625 |         let mut collect = |nodes: &[NodeId]| -> Vec<usize> {
+    |             ----^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `t0`
+    --> src/fold/tree.rs:1297:9
+     |
+1297 |     let t0 = std::time::Instant::now();
+     |         ^^ help: if this is intentional, prefix it with an underscore: `_t0`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `degs`
+   --> src/morpheus/auth_gpu.rs:116:9
+    |
+116 |     let degs = p.degs();
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_degs`
+
+warning: unused variable: `half`
+   --> src/morpheus/auth_gpu.rs:117:9
+    |
+117 |     let half = K8::ONE.scale((Q + 1) / 2);
+    |         ^^^^ help: if this is intentional, prefix it with an underscore: `_half`
+
+warning: unused variable: `nvars`
+   --> src/morpheus/link_fast.rs:443:9
+    |
+443 |     let nvars = ell + 1;
+    |         ^^^^^ help: if this is intentional, prefix it with an underscore: `_nvars`
+
+warning: unused variable: `pos_of`
+   --> src/morpheus/link_gpu.rs:233:9
+    |
+233 |     let pos_of: Vec<usize> = { let mut v = vec![0; order.len()]; for (k, &t) in order.iter().enumerate() { v[t] = k; } v };
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_pos_of`
+
+warning: value assigned to `model_reg` is never read
+  --> src/morpheus/driver.rs:47:25
+   |
+47 |     let mut model_reg = None;
+   |                         ^^^^ this value is reassigned later and never used
+...
+82 |         model_reg = Some(m);
+   |         --------- `model_reg` is overwritten here before the previous value is read
+
+warning: value assigned to `model_secs` is never read
+  --> src/morpheus/driver.rs:48:26
+   |
+48 |     let mut model_secs = 0.0;
+   |                          ^^^ this value is reassigned later and never used
+...
+81 |         model_secs = m.secs;
+   |         ------------------- `model_secs` is overwritten here before the previous value is read
+
+warning: unused variable: `b`
+    --> src/pcs/link.rs:1060:17
+     |
+1060 |             let b = d_bits.as_ref().unwrap();
+     |                 ^ help: if this is intentional, prefix it with an underscore: `_b`
+
+warning: unused variable: `b`
+    --> src/pcs/link.rs:1132:17
+     |
+1132 |             let b = d_bits.as_ref().unwrap();
+     |                 ^ help: if this is intentional, prefix it with an underscore: `_b`
+
+warning: unused variable: `beta`
+   --> src/sumcheck/grand_product.rs:180:5
+    |
+180 |     beta: AlmostGoldilocksExt2,
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_beta`
+
+warning: function `load_weights` is never used
+  --> src/dag/pointpillar.rs:63:4
+   |
+63 | fn load_weights(g: &mut DagBuilder, all_weights: &[(Witness, Witness)], wi: &mut usize, n: usize) -> Vec<(EdgeId, EdgeId)> {
+   |    ^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `digit_to_ternary_chunks` is never used
+   --> src/fold/multifold.rs:256:4
+    |
+256 | fn digit_to_ternary_chunks(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `prefix_mle` is never used
+  --> src/morpheus/piop/cv.rs:65:4
+   |
+65 | fn prefix_mle(n: usize, x: &[K8]) -> K8 {
+   |    ^^^^^^^^^^
+
+warning: function `key_devs` is never used
+   --> src/morpheus/request.rs:400:4
+    |
+400 | fn key_devs<'k>(pc: &'k PcsGpu, reps: &'k [AuthReplica]) -> Vec<(i32, &'k auth_gpu::Keys)> {
+    |    ^^^^^^^^
+
+warning: field `partial` is never read
+   --> src/pcs/link.rs:645:5
+    |
+641 | pub struct LinkScratch {
+    |            ----------- field in this struct
+...
+645 |     partial: Option<DeviceBuffer<u64>>,
+    |     ^^^^^^^
+
+warning: `zk-torch-4` (lib) generated 48 warnings (1 duplicate) (run `cargo fix --lib -p zk-torch-4` to apply 20 suggestions)
+warning: unused import: `rand::Rng`
+  --> src/bin/yolo.rs:12:5
+   |
+12 | use rand::Rng;
+   |     ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "yolo" test) generated 1 warning (run `cargo fix --bin "yolo" -p zk-torch-4 --tests` to apply 1 suggestion)
+warning: function `argmax_row` is never used
+  --> src/bin/bench_streaming_oneshot_llama3.rs:66:4
+   |
+66 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `rand::Rng`
+  --> src/bin/bench_streaming_yolo.rs:14:5
+   |
+14 | use rand::Rng;
+   |     ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_llama3") generated 1 warning
+warning: variable does not need to be mutable
+    --> src/fold/same_point_sumcheck.rs:1909:13
+     |
+1909 |         let mut mk = |rng: &mut StdRng| {
+     |             ----^^
+     |             |
+     |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+    --> src/fold/same_point_sumcheck.rs:1958:13
+     |
+1958 |         let mut mk = |rng: &mut StdRng| {
+     |             ----^^
+     |             |
+     |             help: remove this `mut`
+
+warning: function `argmax_row` is never used
+  --> src/bin/oneshot_llama.rs:82:4
+   |
+82 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `argmax_row` is never used
+  --> src/bin/bench_streaming_oneshot_gpt2.rs:87:4
+   |
+87 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "oneshot_llama") generated 1 warning
+warning: variable does not need to be mutable
+    --> src/fold/same_point_sumcheck.rs:2029:13
+     |
+2029 |         let mut mk = |rng: &mut StdRng| {
+     |             ----^^
+     |             |
+     |             help: remove this `mut`
+
+warning: unused imports: `AjtaiKey` and `GpuAjtaiStore`
+  --> src/bin/morpheus_piop_e2e.rs:29:26
+   |
+29 | use zk_torch_4::commit::{AjtaiKey, GpuAjtaiStore};
+   |                          ^^^^^^^^  ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AccumulatorState` and `VerifierAccumulator`
+  --> src/bin/morpheus_piop_e2e.rs:31:46
+   |
+31 | use zk_torch_4::dag::streaming_accumulator::{AccumulatorState, VerifierAccumulator};
+   |                                              ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zk_torch_4::transcript::Transcript`
+  --> src/bin/morpheus_piop_e2e.rs:35:5
+   |
+35 | use zk_torch_4::transcript::Transcript;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zk_torch_4::ser_len`
+  --> src/bin/morpheus_piop_e2e.rs:36:5
+   |
+36 | use zk_torch_4::ser_len;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_gpt2" test) generated 1 warning
+warning: `zk-torch-4` (bin "bench_streaming_yolo" test) generated 1 warning (run `cargo fix --bin "bench_streaming_yolo" -p zk-torch-4 --tests` to apply 1 suggestion)
+warning: function `small_input` is never used
+  --> src/bin/bench_streaming_llama3.rs:54:4
+   |
+54 | fn small_input(size: usize) -> Vec<AlmostGoldilocksField> {
+   |    ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "bench_streaming_llama3") generated 1 warning
+warning: variable does not need to be mutable
+  --> src/bin/lenet_probe.rs:33:9
+   |
+33 |     let mut dag = dag;
+   |         ----^^^
+   |         |
+   |         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "lenet_probe" test) generated 1 warning (run `cargo fix --bin "lenet_probe" -p zk-torch-4 --tests` to apply 1 suggestion)
+warning: function `ms` is never used
+  --> src/bin/morpheus_piop_e2e.rs:40:4
+   |
+40 | fn ms(d: Duration) -> f64 { d.as_secs_f64() * 1e3 }
+   |    ^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `demo_seed` is never used
+  --> src/bin/morpheus_piop_e2e.rs:84:4
+   |
+84 | fn demo_seed() -> Seed {
+   |    ^^^^^^^^^
+
+warning: function `argmax_row_sharded` is never used
+   --> src/bin/morpheus_piop_e2e.rs:100:4
+    |
+100 | fn argmax_row_sharded(
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `embedding_matrix_shard` is never used
+   --> src/bin/morpheus_piop_e2e.rs:120:4
+    |
+120 | fn embedding_matrix_shard(hidden: usize, len: usize) -> Vec<AlmostGoldilocksField> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `rand::Rng`
+  --> src/bin/gpt2.rs:17:5
+   |
+17 | use rand::Rng;
+   |     ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "morpheus_piop_e2e" test) generated 8 warnings (run `cargo fix --bin "morpheus_piop_e2e" -p zk-torch-4 --tests` to apply 4 suggestions)
+warning: unused import: `rand::Rng`
+  --> src/bin/whisper.rs:14:5
+   |
+14 | use rand::Rng;
+   |     ^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `argmax_row` is never used
+  --> src/bin/oneshot_llama3.rs:70:4
+   |
+70 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "oneshot_llama3" test) generated 1 warning
+warning: `zk-torch-4` (bin "gpt2") generated 1 warning (run `cargo fix --bin "gpt2" -p zk-torch-4` to apply 1 suggestion)
+warning: function `argmax_row` is never used
+  --> src/bin/bench_streaming_oneshot_llama2.rs:72:4
+   |
+72 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Instant`
+  --> src/bin/morpheus_gpt2_probe.rs:22:27
+   |
+22 | use std::time::{Duration, Instant};
+   |                           ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AjtaiKey` and `GpuAjtaiStore`
+  --> src/bin/morpheus_gpt2_probe.rs:29:26
+   |
+29 | use zk_torch_4::commit::{AjtaiKey, GpuAjtaiStore};
+   |                          ^^^^^^^^  ^^^^^^^^^^^^^
+
+warning: unused imports: `AccumulatorState` and `VerifierAccumulator`
+  --> src/bin/morpheus_gpt2_probe.rs:31:46
+   |
+31 | use zk_torch_4::dag::streaming_accumulator::{AccumulatorState, VerifierAccumulator};
+   |                                              ^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zk_torch_4::transcript::Transcript`
+  --> src/bin/morpheus_gpt2_probe.rs:33:5
+   |
+33 | use zk_torch_4::transcript::Transcript;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `zk_torch_4::ser_len`
+  --> src/bin/morpheus_gpt2_probe.rs:34:5
+   |
+34 | use zk_torch_4::ser_len;
+   |     ^^^^^^^^^^^^^^^^^^^
+
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_llama2") generated 1 warning
+warning: constant `PAR_THRESHOLD` is never used
+  --> src/bin/whisper.rs:23:7
+   |
+23 | const PAR_THRESHOLD: usize = 1 << 16;
+   |       ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "whisper" test) generated 2 warnings (run `cargo fix --bin "whisper" -p zk-torch-4 --tests` to apply 1 suggestion)
+warning: function `ms` is never used
+  --> src/bin/morpheus_gpt2_probe.rs:38:4
+   |
+38 | fn ms(d: Duration) -> f64 { d.as_secs_f64() * 1e3 }
+   |    ^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `demo_seed` is never used
+  --> src/bin/morpheus_gpt2_probe.rs:82:4
+   |
+82 | fn demo_seed() -> Seed {
+   |    ^^^^^^^^^
+
+warning: function `argmax_row_sharded` is never used
+  --> src/bin/morpheus_gpt2_probe.rs:98:4
+   |
+98 | fn argmax_row_sharded(
+   |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `embedding_matrix_shard` is never used
+   --> src/bin/morpheus_gpt2_probe.rs:118:4
+    |
+118 | fn embedding_matrix_shard(hidden: usize, len: usize) -> Vec<AlmostGoldilocksField> {
+    |    ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `zk-torch-4` (bin "morpheus_gpt2_probe" test) generated 9 warnings (run `cargo fix --bin "morpheus_gpt2_probe" -p zk-torch-4 --tests` to apply 5 suggestions)
+warning: function `argmax_row` is never used
+  --> src/bin/oneshot_gptj.rs:83:4
+   |
+83 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "oneshot_gptj") generated 1 warning
+warning: unused import: `EdgeId`
+  --> src/bin/bench_streaming_lenet.rs:25:45
+   |
+25 | use zk_torch_4::dag::{DagBuilder, DataType, EdgeId, Role, Witness};
+   |                                             ^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "bench_streaming_lenet" test) generated 1 warning (run `cargo fix --bin "bench_streaming_lenet" -p zk-torch-4 --tests` to apply 1 suggestion)
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_llama3" test) generated 1 warning (1 duplicate)
+warning: variable does not need to be mutable
+  --> src/morpheus/commit.rs:86:13
+   |
+86 |         let mut add = |row: &mut Vec<u64>, v: &[u64]| for j in 0..N { row[j] = ((row[j] as u128 + v[j] as u128) % Q as u128) as u64 };
+   |             ----^^^
+   |             |
+   |             help: remove this `mut`
+
+warning: function `argmax_row` is never used
+  --> src/bin/bench_streaming_oneshot_gptj.rs:75:4
+   |
+75 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+   |    ^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_gptj") generated 1 warning
+warning: `zk-torch-4` (bin "oneshot_llama" test) generated 1 warning (1 duplicate)
+warning: function `argmax_row` is never used
+   --> src/bin/oneshot_gpt2.rs:112:4
+    |
+112 | fn argmax_row(logits: &Witness, pos: usize, vocab: usize) -> usize {
+    |    ^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `zk-torch-4` (bin "oneshot_gpt2") generated 1 warning
+warning: `zk-torch-4` (bin "bench_streaming_llama3" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "gpt2" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "yolo") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_llama2" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_gpt2") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "bench_streaming_yolo") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "oneshot_gptj" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "bench_streaming_lenet") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "morpheus_piop_e2e") generated 8 warnings (8 duplicates)
+warning: `zk-torch-4` (bin "lenet_probe") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "oneshot_llama3") generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "whisper") generated 2 warnings (2 duplicates)
+warning: `zk-torch-4` (bin "bench_streaming_oneshot_gptj" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "oneshot_gpt2" test) generated 1 warning (1 duplicate)
+warning: `zk-torch-4` (bin "morpheus_gpt2_probe") generated 9 warnings (9 duplicates)
+warning: unused variable: `weights`
+   --> src/sumcheck/sparse_bool_prover.rs:717:13
+    |
+717 |         let weights = vec![lift(1)];
+    |             ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_weights`
+
+warning: unused variable: `positions`
+   --> src/sumcheck/sparse_bool_prover.rs:718:13
+    |
+718 |         let positions = vec![vec![0usize, 1]]; // looks binary by setup
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_positions`
+
+warning: function `prove_verify_add_smoke` is never used
+    --> src/dag/proving.rs:1268:8
+     |
+1268 |     fn prove_verify_add_smoke() {
+     |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `zk-torch-4` (lib test) generated 55 warnings (45 duplicates) (run `cargo fix --lib -p zk-torch-4 --tests` to apply 8 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.13s

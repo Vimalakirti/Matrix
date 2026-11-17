@@ -1,0 +1,3 @@
+git apply --check: PASS
+git apply: PASS
+All443 source-file SHA256s match final candidate. Generated cache files excluded.

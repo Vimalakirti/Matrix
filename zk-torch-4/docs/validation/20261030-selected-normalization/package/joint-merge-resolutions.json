@@ -1,0 +1,27 @@
+[
+  {
+    "path": "morpheus/statement.rs",
+    "conflicts": 1,
+    "resolution": "preserve both additions; statement replaces legacy InstanceNorm tag with rejection and retains44/45"
+  },
+  {
+    "path": "dag/builder.rs",
+    "conflicts": 1,
+    "resolution": "preserve both additions; statement replaces legacy InstanceNorm tag with rejection and retains44/45"
+  },
+  {
+    "path": "dag/mod.rs",
+    "conflicts": 1,
+    "resolution": "preserve both additions; statement replaces legacy InstanceNorm tag with rejection and retains44/45"
+  },
+  {
+    "path": "morpheus/piop/exp_tests.rs",
+    "conflicts": 1,
+    "resolution": "preserve both additions; statement replaces legacy InstanceNorm tag with rejection and retains44/45"
+  },
+  {
+    "path": "morpheus/piop/mod.rs",
+    "conflicts": 1,
+    "resolution": "preserve both additions; statement replaces legacy InstanceNorm tag with rejection and retains44/45"
+  }
+]

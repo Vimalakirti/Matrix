@@ -93,14 +93,29 @@ impl std::ops::Sub for AlmostGoldilocksField {
     }
 }
 
+/// Canonical `x mod P` for any `x < 2^128`, via the Solinas identity
+/// `2^64 = 2^32 + 31 (mod P)`: three multiply-add passes and one conditional
+/// subtract instead of a 128-bit division. Every host field multiply went
+/// through `u128 % P`, which costs tens of ns; this is the same canonical
+/// residue, so results are bit-identical (`reduce128_matches_modulo`).
+#[inline]
+pub fn reduce128(x: u128) -> u64 {
+    const C: u128 = (1u128 << 32) + 31;
+    let s1 = (x as u64 as u128) + ((x >> 64) * C);          // < 2^97 + 2^64
+    let s2 = (s1 as u64 as u128) + ((s1 >> 64) * C);        // < 2^64 + 2^66
+    let s3 = (s2 as u64 as u128) + ((s2 >> 64) * C);        // < 2^64 + 2^35
+    // s3 < 2P, so one conditional subtract canonicalizes.
+    let p = ALMOST_GOLDILOCKS_PRIME as u128;
+    (if s3 >= p { s3 - p } else { s3 }) as u64
+}
+
 impl std::ops::Mul for AlmostGoldilocksField {
     type Output = Self;
     #[inline]
     fn mul(self, rhs: Self) -> Self {
         let a = canon(self.0);
         let b = canon(rhs.0);
-        let prod = (a as u128) * (b as u128);
-        Self((prod % (ALMOST_GOLDILOCKS_PRIME as u128)) as u64)
+        Self(reduce128((a as u128) * (b as u128)))
     }
 }
 
@@ -316,5 +331,25 @@ impl AlmostGoldilocksOps {
         let mut d_r = DeviceBuffer::<u64>::new(n)?;
         AlmostGoldilocksBatch::inverse(&d_a, &mut d_r)?;
         Ok(d_r.to_vec()?.into_iter().map(AlmostGoldilocksField).collect())
+    }
+}
+
+#[cfg(test)]
+mod reduce128_tests {
+    use super::*;
+    #[test]
+    fn reduce128_matches_modulo() {
+        let p = ALMOST_GOLDILOCKS_PRIME as u128;
+        let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+        let mut next = || { x ^= x << 13; x ^= x >> 7; x ^= x << 17; x };
+        let edge = [0u128, 1, p - 1, p, p + 1, (1u128 << 64) - 1, 1u128 << 64,
+                    (p - 1) * (p - 1), u128::MAX, u128::MAX - 1, ((1u128 << 64) - 1) * ((1u128 << 64) - 1)];
+        for &v in &edge { assert_eq!(reduce128(v) as u128, v % p, "edge {v}"); }
+        for _ in 0..2_000_000 {
+            let v = ((next() as u128) << 64) | next() as u128;
+            assert_eq!(reduce128(v) as u128, v % p);
+            let a = next() as u128; let b = next() as u128;
+            assert_eq!(reduce128(a * b) as u128, (a * b) % p);
+        }
     }
 }

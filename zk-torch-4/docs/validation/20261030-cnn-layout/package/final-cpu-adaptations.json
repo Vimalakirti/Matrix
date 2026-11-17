@@ -1,0 +1,32 @@
+[
+  {
+    "path": "almost-goldilocks-cuda-rs/build.rs",
+    "original_sha256": "af24b07a422dc98afb1dee9f61f21d88e7fd5c7eaf2710a330e542e599690a80",
+    "adapted_sha256": "bd6501a1ae3bde81b99f2cb5e32f2264da217cbce73f0ac5fc0c5f2759c4ae6a"
+  },
+  {
+    "path": "almost-goldilocks-cuda-rs/src/ffi.rs",
+    "original_sha256": "3977014957f9ee72a53276dd0b6994ec14f3159d794e68a40a0e704e0d472bc9",
+    "adapted_sha256": "fd7c813a04b12e081a237193591429fa09b0b3b4ff68735d0910518dcd02506d"
+  },
+  {
+    "path": "zk-torch-4/src/bin/cpu_cnn_cpu.rs",
+    "original_sha256": null,
+    "adapted_sha256": "1ef563c337529a2d67b29b3e93696a3476bea7971d2184260ed1894250879752"
+  },
+  {
+    "path": "zk-torch-4/src/dag/cnn_finite_activation_tests.rs",
+    "original_sha256": "ab432aca9e3aaed53cf0c4530100df18baadb3e17e4e0fa2f8ac42e9060eac87",
+    "adapted_sha256": "03d6b3f38e3a36b8a7922668526cd7dad384f65307bd234d0735197f077fde38"
+  },
+  {
+    "path": "zk-torch-4/src/dag/cnn_layout_tests.rs",
+    "original_sha256": "1ebd32e2a08241913318f704bc4dfa2fea5d04820ee1ff6eb9108d19a43bd123",
+    "adapted_sha256": "b86dcd86d5f86fe5fb70a185fcdcec0687bd90a28178a92151c31ddfcfeb69c3"
+  },
+  {
+    "path": "zk-torch-4/src/dag/mod.rs",
+    "original_sha256": "147cfa48bc2bd5cdf56740d5f5b008d5f42d643ca0afdecef882718f92d3d36e",
+    "adapted_sha256": "c0a0d800a6d7e3773f69b3b19ebd22d23d92b96d2f26d249ddfb07aaaabdd742"
+  }
+]

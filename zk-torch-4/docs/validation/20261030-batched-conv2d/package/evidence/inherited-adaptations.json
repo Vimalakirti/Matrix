@@ -1,0 +1,28 @@
+[
+  {
+    "path": "zk-torch-4/src/dag/cnn_layout_tests.rs",
+    "original_sha256": "1ebd32e2a08241913318f704bc4dfa2fea5d04820ee1ff6eb9108d19a43bd123",
+    "exposed_sha256": "b86dcd86d5f86fe5fb70a185fcdcec0687bd90a28178a92151c31ddfcfeb69c3",
+    "unchanged_function_bodies": true,
+    "test_names": [
+      "flatten_row_major_actual_graph_matches_logical_reference_with_poison",
+      "lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding",
+      "resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference",
+      "flatten_maps_are_immutable_public_program_data_not_private_sources",
+      "row_major_channel_bias_distinct_channels_basis_and_poisoned_padding",
+      "resnet_head_rejects_same_padded_size_but_wrong_logical_extents",
+      "cnn_public_literal_source_census_representative_graphs",
+      "explicit_nonpower_batch_survives_pad_and_pool_registered_views",
+      "explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference"
+    ]
+  },
+  {
+    "path": "zk-torch-4/src/dag/cnn_finite_activation_tests.rs",
+    "original_sha256": "ab432aca9e3aaed53cf0c4530100df18baadb3e17e4e0fa2f8ac42e9060eac87",
+    "exposed_sha256": "03d6b3f38e3a36b8a7922668526cd7dad384f65307bd234d0735197f077fde38",
+    "unchanged_function_bodies": true,
+    "test_names": [
+      "cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference"
+    ]
+  }
+]

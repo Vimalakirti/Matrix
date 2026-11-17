@@ -1,0 +1,45 @@
+{
+  "archive_sha256": "47bfbf050cf7283ac0b017c004a7865d5c5cc56f6c792114a7ac920c67525511",
+  "archive_artifact_hashes_verified": 989,
+  "relocated_commands": [
+    [
+      "independent-review/check_relations.py"
+    ],
+    [
+      "independent-review/check_fallback.py"
+    ],
+    [
+      "independent-review/check_mask_mutants.py"
+    ],
+    [
+      "independent-review/check_wrapper_integration.py",
+      "--root",
+      "source"
+    ],
+    [
+      "independent-review/check_joint_overlay.py",
+      "--base",
+      "base",
+      "--root",
+      "source",
+      "--manifest",
+      "evidence/base-source-manifest.json",
+      "--supplement",
+      "base",
+      "--reviewed-hashes",
+      "independent-review/reviewed-source-hashes.json"
+    ],
+    [
+      "evidence/verify_snapshot.py",
+      "source",
+      "evidence/final-source-manifest.json"
+    ],
+    [
+      "evidence/test_harness_safety.py",
+      "source"
+    ]
+  ],
+  "all_command_exits": 0,
+  "source_manifest_sha256": "a57be8f20529556584fef5a97d8bf24c54d77809835890bd4e2678848c227579",
+  "rust_replay": "not rerun or inferred by portable arithmetic checks"
+}

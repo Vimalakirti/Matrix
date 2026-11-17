@@ -1,0 +1,218 @@
+--- original/almost-goldilocks-cuda-rs/build.rs
++++ adapted/almost-goldilocks-cuda-rs/build.rs
+@@ -57,68 +57,7 @@
+     // Headers live in the sibling cuda_almost_goldilocks/ directory.
+     let cuda_dir = manifest_dir.join("../cuda_almost_goldilocks");
+ 
+-    let (nvcc, cuda_lib_path) = find_cuda_paths();
+-    if !std::path::Path::new(&nvcc).exists() {
+-        panic!("CUDA toolkit not found at {}", nvcc);
+-    }
+-
+-    let output_lib = out_dir.join("libalmost_goldilocks_cuda_wrapper.a");
+-    let obj_file = out_dir.join("wrapper.o");
+-    let compute_cap = env::var("CUDA_COMPUTE").unwrap_or_else(|_| "80".to_string());
+-    // SASS for the target plus PTX: ptxas then runs at build time, so resource
+-    // errors (e.g. > 48 KB static shared memory) fail the build instead of
+-    // surfacing as a JIT launch failure at run time.
+-    let gencode = format!(
+-        "-gencode=arch=compute_{},code=[sm_{},compute_{}]",
+-        compute_cap, compute_cap, compute_cap
+-    );
+-
+-    eprintln!("[build.rs] nvcc: {}", nvcc);
+-    eprintln!("[build.rs] compute capability: {}", compute_cap);
+-    eprintln!("[build.rs] header include path: {}", cuda_dir.display());
+-
+-    let status = Command::new(&nvcc)
+-        .args([
+-            "-O3",
+-            &gencode,
+-            "-std=c++17",
+-            "--default-stream",
+-            "per-thread",
+-            "-Xcompiler",
+-            "-fPIC",
+-            "-c",
+-            cuda_wrapper.to_str().unwrap(),
+-            "-o",
+-            obj_file.to_str().unwrap(),
+-            &format!("-I{}", cuda_dir.to_str().unwrap()),
+-        ])
+-        .status()
+-        .expect("Failed to execute nvcc");
+-    if !status.success() {
+-        panic!("Failed to compile CUDA wrapper");
+-    }
+-
+-    let status = Command::new("ar")
+-        .args([
+-            "rcs",
+-            output_lib.to_str().unwrap(),
+-            obj_file.to_str().unwrap(),
+-        ])
+-        .status()
+-        .expect("Failed to execute ar");
+-    if !status.success() {
+-        panic!("Failed to create static library");
+-    }
+-
+-    println!("cargo:rustc-link-search=native={}", out_dir.display());
+-    println!("cargo:rustc-link-lib=static=almost_goldilocks_cuda_wrapper");
+-    println!("cargo:rustc-link-search=native={}", cuda_lib_path);
+-    println!("cargo:rustc-link-lib=static=cudart_static");
+-    println!("cargo:rustc-link-lib=stdc++");
+-    println!("cargo:rustc-link-lib=dl");
+-    println!("cargo:rustc-link-lib=rt");
+-    println!("cargo:rustc-link-lib=pthread");
+-
++    // VALIDATION ONLY: CUDA compilation and linker directives omitted.
+     println!("cargo:rerun-if-env-changed=CUDA_COMPUTE");
+     println!("cargo:rerun-if-changed=cuda/wrapper.cu");
+     // Track EVERY header wrapper.cu can include, not a hand-kept list: the
+--- original/almost-goldilocks-cuda-rs/src/ffi.rs
++++ adapted/almost-goldilocks-cuda-rs/src/ffi.rs
+@@ -7,7 +7,7 @@
+ 
+ use std::os::raw::{c_int, c_void};
+ 
+-#[link(name = "almost_goldilocks_cuda_wrapper", kind = "static")]
++// VALIDATION ONLY: no native CUDA library and no FFI implementation/stubs.
+ extern "C" {
+     // -------------------- init / memory --------------------
+     pub fn almost_goldilocks_cuda_init() -> c_int;
+--- original/zk-torch-4/src/bin/cpu_cnn_cpu.rs
++++ adapted/zk-torch-4/src/bin/cpu_cnn_cpu.rs
+@@ -0,0 +1,12 @@
++fn main(){
++println!("RUN flatten_row_major_actual_graph_matches_logical_reference_with_poison");zk_torch_4::dag::cnn_layout_tests::flatten_row_major_actual_graph_matches_logical_reference_with_poison();println!("PASS flatten_row_major_actual_graph_matches_logical_reference_with_poison");
++println!("RUN lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding");zk_torch_4::dag::cnn_layout_tests::lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding();println!("PASS lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding");
++println!("RUN resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference");zk_torch_4::dag::cnn_layout_tests::resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference();println!("PASS resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference");
++println!("RUN flatten_maps_are_immutable_public_program_data_not_private_sources");zk_torch_4::dag::cnn_layout_tests::flatten_maps_are_immutable_public_program_data_not_private_sources();println!("PASS flatten_maps_are_immutable_public_program_data_not_private_sources");
++println!("RUN row_major_channel_bias_distinct_channels_basis_and_poisoned_padding");zk_torch_4::dag::cnn_layout_tests::row_major_channel_bias_distinct_channels_basis_and_poisoned_padding();println!("PASS row_major_channel_bias_distinct_channels_basis_and_poisoned_padding");
++println!("RUN resnet_head_rejects_same_padded_size_but_wrong_logical_extents");zk_torch_4::dag::cnn_layout_tests::resnet_head_rejects_same_padded_size_but_wrong_logical_extents();println!("PASS resnet_head_rejects_same_padded_size_but_wrong_logical_extents");
++println!("RUN cnn_public_literal_source_census_representative_graphs");zk_torch_4::dag::cnn_layout_tests::cnn_public_literal_source_census_representative_graphs();println!("PASS cnn_public_literal_source_census_representative_graphs");
++println!("RUN explicit_nonpower_batch_survives_pad_and_pool_registered_views");zk_torch_4::dag::cnn_layout_tests::explicit_nonpower_batch_survives_pad_and_pool_registered_views();println!("PASS explicit_nonpower_batch_survives_pad_and_pool_registered_views");
++println!("RUN explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference");zk_torch_4::dag::cnn_layout_tests::explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference();println!("PASS explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference");
++println!("RUN cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference");zk_torch_4::dag::cnn_finite_activation_tests::cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference();println!("PASS cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference");
++}
+--- original/zk-torch-4/src/dag/cnn_finite_activation_tests.rs
++++ adapted/zk-torch-4/src/dag/cnn_finite_activation_tests.rs
+@@ -20,8 +20,7 @@
+         for (&e,out) in nd.outputs.iter().zip(outs) {w[e]=vec![out];}
+     }
+ }
+-#[test]
+-fn cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference() {
++pub fn cnn_silu_row_major_finite_profile_matches_exact_dyadic_reference() {
+     let sf=*crate::SF_LOG;assert!(sf<=20);
+     let q=1i128<<sf;let l=crate::basicblock::exp::exp_ln2(sf);
+     // At -k*Ls (k<=2), canonical remainder is exactly0. Internal Qe=2^15
+--- original/zk-torch-4/src/dag/cnn_layout_tests.rs
++++ adapted/zk-torch-4/src/dag/cnn_layout_tests.rs
+@@ -40,8 +40,7 @@
+     (data, logical)
+ }
+ 
+-#[test]
+-fn flatten_row_major_actual_graph_matches_logical_reference_with_poison() {
++pub fn flatten_row_major_actual_graph_matches_logical_reference_with_poison() {
+     for shape in [vec![16,5,5], vec![3,3,5], vec![2,4,8], vec![3], vec![3,2,3,5]] {
+         for poison in [-777777, 888888] {
+             let (data, mut expected) = row_major(&shape, poison);
+@@ -64,8 +63,7 @@
+     }
+ }
+ 
+-#[test]
+-fn lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding() {
++pub fn lenet_actual_classifier_ignores_poisoned_weight_bias_and_activation_padding() {
+     let sf = *crate::SF_LOG;
+     assert!(sf <= 20);
+     let q = 1i128 << sf;
+@@ -107,8 +105,7 @@
+     }
+ }
+ 
+-#[test]
+-fn resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference() {
++pub fn resnet_actual_gap_fc_matches_nonpower_logical_batch_and_bias_reference() {
+     let sf = *crate::SF_LOG; assert!(sf <= 20); let q = 1i128 << sf;
+     for (batch, channels, h, width) in [(1usize,3usize,3usize,5usize),(3,3,3,5),(5,5,2,3)] {
+         for explicit in [true,false] {
+@@ -149,8 +146,7 @@
+     }
+ }
+ 
+-#[test]
+-fn flatten_maps_are_immutable_public_program_data_not_private_sources() {
++pub fn flatten_maps_are_immutable_public_program_data_not_private_sources() {
+     use crate::morpheus::{piop::{Graph,Config},statement,params::Profile,keys::KeySeed};
+     let mut statements = Vec::new();
+     for poison in [-77,88] {
+@@ -172,8 +168,7 @@
+     assert_eq!(statements[0],statements[1],"private padding cannot change the program");
+ }
+ 
+-#[test]
+-fn row_major_channel_bias_distinct_channels_basis_and_poisoned_padding() {
++pub fn row_major_channel_bias_distinct_channels_basis_and_poisoned_padding() {
+     use crate::basicblock::Add;
+     for (batch, spatial, explicit) in [(1usize,vec![3usize,5usize],false),(3,vec![3,5],true),(3,vec![3,5],false),(1,vec![2,3,5],false)] {
+         let channels = 3usize; let cp = 4; let bp = batch.next_power_of_two();
+@@ -212,8 +207,7 @@
+     }
+ }
+ 
+-#[test]
+-fn resnet_head_rejects_same_padded_size_but_wrong_logical_extents() {
++pub fn resnet_head_rejects_same_padded_size_but_wrong_logical_extents() {
+     for (shape,features,batch) in [(vec![3usize,3,2,3],4usize,3usize),(vec![3,3,2,3],3,4),(vec![3,2,3],4,1),(vec![8,2,3],3,3)] {
+         assert!(std::panic::catch_unwind(|| {
+             let mut g=DagBuilder::new();let x=g.input(shape,DataType::Float);
+@@ -223,8 +217,7 @@
+     }
+ }
+ 
+-#[test]
+-fn cnn_public_literal_source_census_representative_graphs() {
++pub fn cnn_public_literal_source_census_representative_graphs() {
+     use crate::morpheus::{piop::{Graph,Config,layout::{TKey,Layout}},params::Profile};
+     fn census(label:&str,g:DagBuilder) {
+         let(d,mut w)=g.compile();forward(&d,&mut w);
+@@ -255,8 +248,7 @@
+     super::resnet::classifier_head(&mut g,x,w,Some(b),3,sf);census("ResNet_head_B3_C2048_7x7_O1000",g);
+ }
+ 
+-#[test]
+-fn explicit_nonpower_batch_survives_pad_and_pool_registered_views() {
++pub fn explicit_nonpower_batch_survives_pad_and_pool_registered_views() {
+     let b=3usize;let c=3usize;let (h,w)=(4usize,6usize);let (cp,bp,hp,wp)=(4,4,4,8);
+     for poison in [1i128<<40,-(1i128<<40)] {
+         let mut raw=vec![poison;bp*cp*hp*wp];
+@@ -286,8 +278,7 @@
+     }
+ }
+ 
+-#[test]
+-fn explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference() {
++pub fn explicit_batch_pad_conv_bias_pool_chain_matches_logical_reference() {
+     let (batch,ci,co,h,w)=(3usize,3usize,5usize,4usize,6usize);
+     for mode in 0..3 {
+         let (kernel,stride,dilation)=match mode {0=>(1usize,1usize,1usize),1=>(1,2,1),_=>(2,1,2)};
+--- original/zk-torch-4/src/dag/mod.rs
++++ adapted/zk-torch-4/src/dag/mod.rs
+@@ -1305,8 +1305,8 @@
+ #[cfg(test)]
+ mod instancenorm_tests;
+ 
+-#[cfg(test)]
+-mod cnn_layout_tests;
+-
+-#[cfg(test)]
+-mod cnn_finite_activation_tests;
++// VALIDATION ONLY: expose original test bodies.
++pub mod cnn_layout_tests;
++
++// VALIDATION ONLY: expose unchanged integration tests.
++pub mod cnn_finite_activation_tests;

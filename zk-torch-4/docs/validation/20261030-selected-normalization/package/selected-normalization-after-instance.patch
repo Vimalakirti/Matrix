@@ -1,0 +1,976 @@
+diff --git a/zk-torch-4/docs/morpheus_selected_normalization.md b/zk-torch-4/docs/morpheus_selected_normalization.md
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/docs/morpheus_selected_normalization.md
+@@ -0,0 +1,196 @@
++# Exact selected finite-exp normalization (new registered numerical program)
++
++This increment replaces unconstrained `SoftmaxConst`/`SigmoidConst` log advice,
++not real-valued softmax. It builds on the frozen Q0..Q20 mean/RMS candidate and
++canonical unclipped exp profile. No historical model accuracy, logits, runtime,
++GPU execution or authenticated proof is implied. Legacy log advice and additive
++`causal_mask` now fail closed; named former call sites use this explicit relation.
++
++## Public profile and mathematical relation
++
++Let Q=2^s, 0<=s<=30. Exp internally retains Qe=32768 and its registered exact Ls,
++selector width1..8 (default8), cubic constants, operation order, positive-infinity
++half ties, and zero TwoPow tail for k>=16. No clipping or transcendental advice is
++introduced. The same registered graph/profile must be used by prover/verifier;
++a new numerical program has a different identity, never the historical one.
++
++For each row, immutable public A_j in{0,1} selects logical keys; all key/group/
++query padding is excluded. Every logical row has a selected key. Padded rows have
++A=0. Selected scores have signed range[-B,B], B=2^54-1; excluded field residues
++are multiplied by0 before numerical bounds and cannot cause earlier-row rejection.
++Logical tensor shape, column-major layout and all exact A bits are frozen public
++literals. A custom `selected_softmax` support must exclude padding and have a
++nonempty support in every logical row. The causal constructor sets A_{i,j}=1
++exactly for logical keys j<=i. This is replacement/exclusion, not an additive
++large-negative sentinel.
++
++A fixed-shape private dense hint H has entries0 or1, sum_j H_j=V (public row
++validity), and H_j(1-A_j)=0. Define m=sum H_j*s_j. Prove
++
++    -Bexp <= A_j*(s_j-m) <= 0,
++    Bexp=2^b*Ls-floor(Ls/2)-1.
++
++The selector therefore chooses an allowed maximum, not merely an upper bound;
++ties may choose any maximum without changing m. The lower bound declares the
++finite spread domain; out-of-domain rows reject rather than silently saturate.
++For padded rows H=m=0. Set
++
++    t_j=A_j*(s_j-m), e_j=A_j*E_s(t_j),
++    D=sum_j e_j+(1-V)*Q,
++    w_j=floor((2Q*e_j+D)/(2D)).
++
++Every forbidden weight and every padded-row weight is exactly0. The denominator
++for padded rows is the fixed public Q and numerators are0. Both canonical max
++and denominator are independent of future/padded scores. Zeroing weights only
++after a contaminated max or denominator does not establish this property.
++
++Sigmoid is this same selected finite two-logit softmax on[0,x], returning its
++x component. Input/output padding is masked. At x=0 its output is round(Q/2)
++(ties toward positive infinity, including s0 where this equals1).
++
++## Exp positivity is proved for the actual integer polynomial
++
++Canonical remainder conversion gives re in[-16384,16384]. With RD nearest,
++
++    a=RD(re^2,Qe), b6=RD(5461*re,Qe), c=16384+b6,
++    z=RD(c*a,Qe), h=Qe+re+z.
++
++Bounds are a in[0,8192], c in[13653,19115], z in[0,4779], hence
++16384<=h<=53931<2Qe. For k=0, re<=0. Put u=-re. If u=0 then z=0.
++For u>=1, c<=Qe/2, a<=u^2/Qe+1/2, and
++z<=u^2/(2Qe)+3/4<=u/4+3/4<=u. Thus h<=Qe.
++For k>=1, T[k]<=Qe/2 and T[k]*h<Qe^2 (or T[k]=0).
++The final denominator is2^(30-s), so in every admitted case
++
++    0<=E_s(t)<=Q, E_s(0)=Q.
++
++These facts do not assume real exp, monotonicity or strictly positive tails.
++The actual zero tail is retained. A selected maximum has t=0, proving D>=Q;
++D<=KQ where K is the public maximum number of selected keys per row.
++The exp interval roots plus normalization's e range roots enforce the needed
++bounds in the actual graph; they are not host-only observed maxima.
++
++## Exact variable division and no-wrap
++
++Raw `NormalizedRatio` nodes also receive compile-time defining roots. Independently
++prove e in[0,Q], D in[Q,Dmax=KQ], w in[0,Q]. Define derived field residuals
++
++    rho=2*Q*e+D-2*D*w,
++    tau=2D-1-rho.
++
++Both residuals receive nonnegative lookup roots with width
++k=bit_length(2Dmax-1), T=2^k-1. The public checked profile requires
++
++    2T<p,
++    2Q^2+Dmax<p,
++    Dmax*(2Q-1)+T<p,
++    p=18446744069414584289.
++
++All host budget operations are checked. Widths>=62 reject. The integer expression
++F=2Q*e+D-2D*w lies in[-Dmax(2Q-1),2Q^2+Dmax]. Therefore F-rho cannot equal a
++nonzero multiple of p: the entire residual interval, not just the accepted output,
++is bounded. Next rho+tau=2D-1 lifts since both sum bounds are<p. Consequently
++0<=rho<2D and w is the unique nearest quotient with ties toward positive infinity.
++The source quotient bound is essential; the positive lower denominator is also
++proved. The denominator is a derived masked sum, not independently free advice.
++
++Practical profiles (actual residual width / largest conservative residual):
++
++| Scale | Maximum selected keys | Dmax | Bits | Envelope |
++|---|---:|---:|---:|---:|
++| SF16 |512|33554432|26|4398080065535|
++| SF16 |4096|268435456|29|35184640524287|
++| SF20 |512|536870912|30|1125900443713535|
++| SF20 |4096|4294967296|33|9007203549708287|
++| SF20 |1048576|1099511627776|41|2305844108725321727|
++
++SF30 supports small profiles (K7 passes), not arbitrary contexts. Concrete wrap
++regression: Q=2^30, eight allowed logits0 and one allowed -16Ls give eight e=Q,
++one e=0, D=8Q. A false tail weight w=Q has rho mod p=4Q-31 and tau=12Q+30,
++both within[0,2D). It passes naive bounded remainder/quotient tests but is wrong.
++The public budget rejects this K9 profile; linked limbs would be needed to admit
++it. Rejecting this profile is not evidence that all SF30 normalization is unsafe.
++
++## Integer lifting of the max and support
++
++Paired integer_interval roots force each H to0/1. The number of columns is<2^54,
++so sum H=V lifts and gives exactly one allowed selected coordinate per active
++row. H membership is enforced through actual ProductZeroCheck roots. Multiplying
++by H or A is exact selection; m equals a selected signed score. The signed
++selected-score interval has width2^55-2; paired range sums are<2^56<p. The
++max-difference interval is within[-2B,2B], Bexp<2^40, so range representatives
++cannot conceal wrap. Empty rows have no selected H and m0. All range nodes are
++registered in dag.range; PZC outputs are self-claim roots.
++
++## Ratios, rounding, and semantic limits
++
++Before output rounding, normalized finite weights e_j/D preserve the ratios of
++this canonical finite E_s, including its zero tail. No logarithm must be proved.
++After rounding, |w_j/Q-e_j/D|<=1/(2Q). Thus row mass differs from Q by at most
++K/2 integer units (and normalized L1 rounding error<=K/(2Q)). Exact row sumQ is
++NOT promised or falsely constrained. Nor do two rounded weights preserve their
++ratio exactly. Finite exp is not generally translation-invariant, so max must
++be canonical even if denominator selection is already correct.
++
++These statements do NOT prove real exp ratios, historical f64-log-helper outputs,
++accuracy, unchanged logits/argmax/generation, or finite-profile equivalence to the
++original benchmark. Required accuracy evaluation remains same checkpoint/input
++corpus, pinned old/new profile at every used scale, node and mass errors, logits,
++argmax/sequence disagreement, task accuracy, and fresh timing/source census.
++
++Causal noninterference is an exact local theorem of these selected normalization
++and weighted-sum relations. Full one-shot-versus-incremental model correspondence
++still requires every other layer/layout/scale relation to be checked, including
++known whole-graph ScaleDown/no-wrap obligations. This repair alone is not that
++full-model theorem.
++
++## Implementation, source and cost
++
++`basicblock/normalization.rs` supplies only two hints: private one-hot H (same
++full padded shape, no index-dependent layout) and w. `dag/softmax.rs` supplies
++all defining roots and public support validation; the live compiler queue adds
++guards even for raw hint nodes. Softmax/SigmoidConst raw nodes now reject.
++`basicblock/mod.rs`, PIOP advice classification and statement tags44/45 register
++these hints. All numerical bounds/masks/literals and entire operation graph are
++bound by the public statement identity. The intended compiled DAG must still be
++independently registered; arbitrary graph edits are not trusted model edits.
++
++Both hints add O(number of padded scores) committed entries; H is declared private
++bit-typed (one plane), with explicit paired0..1 roots retained. w needs at least s+1 signed digit planes in the worst case. Existing default
++16-plane sources cannot represent Q at SF16: public req_planes_log5 (32 planes)
++is source-complete for these new hints at all supported scales. All scalar domain
++claims are intersected with the registered source width; never enlarge a source
++layout depending on secret values. Public literals do not become private weights.
++
++Beyond the existing exp recipe, max guards add six NonNegative roots (H, selected
++score and canonical difference pairs), two PZC roots (support, row sum), and
++linear selection/reduction arithmetic. Ratio guards add eight NonNegative roots
++(three interval pairs plus rho/tau) and linear arithmetic with one variable
++product D*w. The constructor adds selected-score/shift/exp masks, reductions,
++public padded-row divisor and denominator broadcast. These are actual PIOP
++sumchecks/source chunks, not a claim of one proof row per operator. No giant
++exp, division or max lookup table is introduced; complexity is O(R*Kpad), with
++public fixed shapes and widths. Sigmoid uses two finite exp evaluations per cell.
++
++CPU tests directly evaluate original operators and emitted range/PZC predicates;
++authored PIOP replay tests check actual reduction/link rows but are not PCS proof
++acceptance. Report executed versus unexecuted stages separately.
++
++## Whisper causal routing correction
++
++The old shared Whisper self-attention constructor was noncausal for both encoder
++and decoder. It now takes an explicit public construction choice: encoderfalse,
++decodertrue. Decoder self-attention uses causal selected support; encoder
++self-attention remains bidirectional. Crossattention retains all logical encoder
++keys and independent decoder/encoder sequence dimensions (no triangular mask).
++This repairs another substantive model-semantics defect, not an unchanged-output
++claim. The actual attention CPU regression changes a future decoder hidden state
++and checks both earlier rows unchanged, verifies encoder/crossattention still
++depend on that later key, and inspects the exact authenticated masks for3x3 and
++2x3 cases. Its values have independent raw-product envelope6Q^2<p/2 throughSF30,
++avoiding the unrelated generic ScaleDown/no-wrap gap in this particular test.
++
++The PIOP source-mutation test changes linked selector/ratio advice while keeping
++downstream values honest; it tests source/constraint linkage, not a completely
++recomputed coherent forgery. CPU negative tests separately recompute operators
++and directly inspect emitted range/PZC predicates. Neither is a PCS proof receipt.
+diff --git a/zk-torch-4/src/basicblock/llama.rs b/zk-torch-4/src/basicblock/llama.rs
+--- a/zk-torch-4/src/basicblock/llama.rs
++++ b/zk-torch-4/src/basicblock/llama.rs
+@@ -1,6 +1,7 @@
+ //! LLM-specific advice ops: [`RMSReciprocal`], [`DivConst`], [`SoftmaxConst`],
+-//! [`SigmoidConst`]. All produce auxiliary values whose soundness is enforced
+-//! by surrounding DAG operations (Einsum identities, ProductZeroCheck, etc.).
++//! [`SigmoidConst`]. Legacy log advice is retained only for compatibility tests;
++//! compiled/registered graphs reject it. Exact normalization instead uses
++//! normalization.rs hints with mandatory defining DAG constraints.
+ 
+ use almost_goldilocks_cuda::field::AlmostGoldilocksField;
+ 
+diff --git a/zk-torch-4/src/basicblock/mod.rs b/zk-torch-4/src/basicblock/mod.rs
+--- a/zk-torch-4/src/basicblock/mod.rs
++++ b/zk-torch-4/src/basicblock/mod.rs
+@@ -21,6 +21,7 @@
+ pub mod instancenorm;
+ pub mod llama;
+ pub mod maxpool;
++pub mod normalization;
+ pub mod pad;
+ pub mod permute;
+ pub mod pointpillar;
+@@ -41,6 +42,7 @@
+ pub use exp::{ExpHelper, TwoPow};
+ pub use instancenorm::{InstanceNorm3D, InstanceNormHelper};
+ pub use llama::{DivConst, RMSBucket, RMSReciprocal, SigmoidConst, SoftmaxConst};
++pub use normalization::{MaskedMaxSelector,NormalizedRatio};
+ pub use maxpool::{GeneralMaxPoolHelper, MaxPoolHelper, Replicate2x2};
+ pub use pad::{ZeroPad, ZeroPad3D, ZeroPadAsym};
+ pub use permute::Permute;
+@@ -112,6 +114,8 @@
+     GeneralMaxPoolHelper(GeneralMaxPoolHelper),
+     InstanceNorm3D(InstanceNorm3D),
+     MaxPoolHelper(MaxPoolHelper),
++    MaskedMaxSelector(MaskedMaxSelector),
++    NormalizedRatio(NormalizedRatio),
+     NonNegative(NonNegative),
+     Permute(Permute),
+     PillarMaxPool(PillarMaxPool),
+@@ -173,6 +177,7 @@
+                 assert_eq!(n, 2, "Conv* expects 2 inputs (X, W), got {n}")
+             }
+             BasicBlockType::Einsum(_) => assert!(n >= 1, "Einsum expects at least 1 input, got {n}"),
++            BasicBlockType::MaskedMaxSelector(_) | BasicBlockType::NormalizedRatio(_) => assert_eq!(n,2,"normalization expects two inputs"),
+             BasicBlockType::GatherFromGrid(_) => assert_eq!(n, 2, "GatherFromGrid expects 2 inputs, got {n}"),
+             BasicBlockType::InstanceNorm3D(_) => assert_eq!(n, 3, "InstanceNorm3D expects 3 inputs, got {n}"),
+             BasicBlockType::ProductZeroCheck(_) => {
+@@ -210,6 +215,8 @@
+             BasicBlockType::GeneralMaxPoolHelper(b) => b.$method($($arg),*),
+             BasicBlockType::InstanceNorm3D(b)       => b.$method($($arg),*),
+             BasicBlockType::MaxPoolHelper(b)        => b.$method($($arg),*),
++            BasicBlockType::MaskedMaxSelector(b)   => b.$method($($arg),*),
++            BasicBlockType::NormalizedRatio(b)     => b.$method($($arg),*),
+             BasicBlockType::NonNegative(b)          => b.$method($($arg),*),
+             BasicBlockType::Permute(b)              => b.$method($($arg),*),
+             BasicBlockType::PillarMaxPool(b)        => b.$method($($arg),*),
+diff --git a/zk-torch-4/src/basicblock/normalization.rs b/zk-torch-4/src/basicblock/normalization.rs
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/src/basicblock/normalization.rs
+@@ -0,0 +1,67 @@
++//! Hints for the registered selected finite-exp normalization program.
++//! Both receive defining arithmetic/range roots at DagBuilder::compile.
++use crate::basicblock::BasicBlock;
++use crate::dag::{Claim,DataType,Role,Witness};
++use crate::sumcheck::SumcheckProof;
++use crate::transcript::Transcript;
++use crate::util::arith::{f_to_int,int_to_f};
++use almost_goldilocks_cuda::field::ALMOST_GOLDILOCKS_PRIME;
++
++/// Public no-wrap budget; does not inspect any secret value.
++/// Returns (Q, Dmax, residual lookup width).
++pub fn ratio_budget(sf:usize,max_terms:usize)->(i128,i128,usize) {
++    assert!(sf<=30 && max_terms>0,"unsupported ratio profile");
++    let q=1i128<<sf;
++    let dm=q.checked_mul(i128::try_from(max_terms).expect("term count overflow")).expect("denominator budget overflow");
++    let rmax=dm.checked_mul(2).and_then(|n|n.checked_sub(1)).expect("residual budget overflow");
++    let bits=(128-(rmax as u128).leading_zeros() as usize).max(1);
++    assert!(bits<62,"ratio residual lookup too wide");
++    let t=(1i128<<bits)-1;
++    let positive=2*q*q+dm;
++    let negative=dm.checked_mul(2*q-1).and_then(|n|n.checked_add(t)).expect("ratio product budget overflow");
++    let p=ALMOST_GOLDILOCKS_PRIME as i128;
++    assert!(2*t<p && positive<p && negative<p,"ratio residual can wrap; use a smaller public profile or linked limbs");
++    (q,dm,bits)
++}
++
++#[derive(Clone,Debug)]
++pub struct MaskedMaxSelector;
++impl BasicBlock for MaskedMaxSelector {
++    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
++        assert_eq!(inputs.len(),2);let x=inputs[0];let mask=inputs[1];
++        assert_eq!(x.shape.len(),2);assert_eq!(x.shape,mask.shape);
++        let rows=x.shape[0];let cols=x.shape[1];
++        assert!(rows.is_power_of_two() && cols.is_power_of_two());
++        let mut h=vec![int_to_f(0);rows*cols];
++        for row in 0..rows {
++            let mut best:Option<(i128,usize)>=None;
++            for col in 0..cols {
++                let i=row+rows*col;let a=f_to_int(mask.data.as_ref().unwrap().index(i));
++                assert!(a==0 || a==1,"mask must be public Boolean data");
++                if a==1 {let v=f_to_int(x.data.as_ref().unwrap().index(i));if best.map(|(b,_)|v>b).unwrap_or(true) {best=Some((v,i));}}
++            }
++            if let Some((_,i))=best {h[i]=int_to_f(1);}
++        }
++        vec![Witness::new(x.shape.clone(),h,DataType::Float,0,Role::Auxiliary)]
++    }
++    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>){(vec![],vec![])}
++    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool{true}
++}
++
++#[derive(Clone,Debug)]
++pub struct NormalizedRatio { pub max_terms:usize }
++impl BasicBlock for NormalizedRatio {
++    fn run(&self,inputs:&[&Witness])->Vec<Witness> {
++        assert_eq!(inputs.len(),2);let e=inputs[0];let d=inputs[1];
++        assert_eq!(e.shape,d.shape);assert_eq!(e.sf,d.sf);
++        let(q,dm,_)=ratio_budget(e.sf,self.max_terms);
++        let data=e.data.as_ref().unwrap().evaluations_ref().iter().enumerate().map(|(i,&x)| {
++            let n=f_to_int(x);let den=f_to_int(d.data.as_ref().unwrap().index(i));
++            assert!((0..=q).contains(&n) && (q..=dm).contains(&den),"normalization ratio outside profile");
++            int_to_f((2*q*n+den).div_euclid(2*den))
++        }).collect();
++        vec![Witness::new(e.shape.clone(),data,e.data_type,e.sf,Role::Auxiliary)]
++    }
++    fn prove(&self,_:&[&Witness],_:&[usize],_:&[&Claim],_:&mut Transcript)->(Vec<SumcheckProof>,Vec<Claim>){(vec![],vec![])}
++    fn verify(&self,_:&[&Witness],_:&[&Claim],_:&[&SumcheckProof],_:&mut Transcript)->bool{true}
++}
+diff --git a/zk-torch-4/src/dag/bert.rs b/zk-torch-4/src/dag/bert.rs
+--- a/zk-torch-4/src/dag/bert.rs
++++ b/zk-torch-4/src/dag/bert.rs
+@@ -125,9 +125,7 @@
+             vec![scores, d_sqrt_recip],
+             true,
+         )[0];
+-        let softmax_c = g.softmax_const(scores)[0];
+-        let scores = g.add(scores, softmax_c)[0];
+-        let scores = g.exp(scores)[0];
++        let scores = g.softmax(scores);
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+diff --git a/zk-torch-4/src/dag/builder.rs b/zk-torch-4/src/dag/builder.rs
+--- a/zk-torch-4/src/dag/builder.rs
++++ b/zk-torch-4/src/dag/builder.rs
+@@ -261,54 +261,11 @@
+         out[0]
+     }
+ 
+-    /// Create a causal attention mask and add it to scores.
+-    /// scores shape must end with [..., seq_len, seq_len].
+-    /// Adds a large negative value to positions where key > query (future tokens).
+-    /// The mask is created with the same full shape as scores so that `add` broadcasting works.
+-    pub fn causal_mask(&mut self, scores: EdgeId, seq_len: usize) -> EdgeId {
+-        let scores_shape = self.init_values[scores].as_ref().unwrap().shape.clone();
+-        let sf = self.init_values[scores].as_ref().unwrap().sf;
+-        let padded: Vec<usize> = scores_shape.iter().map(|&s| s.next_power_of_two()).collect();
+-        let total_padded: usize = padded.iter().product();
+-
+-        // Large negative value: exp(-100) ≈ 0
+-        let big_neg = int_to_f(-100 * (1i128 << sf));
+-
+-        // Build mask in little-endian layout matching scores shape.
+-        // Last two dims are [s, t] where s=query, t=key.
+-        // s has stride = product of all padded dims before it
+-        // t has stride = s_stride * s_pad
+-        let ndim = scores_shape.len();
+-        let s_pad = padded[ndim - 2];
+-        let t_pad = padded[ndim - 1];
+-        let s_stride: usize = padded[..ndim - 2].iter().product();
+-        let t_stride = s_stride * s_pad;
+-
+-        let mut mask_data = vec![AlmostGoldilocksField(0); total_padded];
+-        // For each group (batch, head, ...) replicate the same causal pattern
+-        let num_groups: usize = padded[..ndim - 2].iter().product();
+-        for g in 0..num_groups {
+-            for t in 0..t_pad {
+-                for s in 0..s_pad {
+-                    let idx = g + s * s_stride + t * t_stride;
+-                    if t < seq_len && s < seq_len && t > s {
+-                        // Future position: large negative
+-                        mask_data[idx] = big_neg;
+-                    }
+-                    // else: 0 (valid position or padding)
+-                }
+-            }
+-        }
+-
+-        let mask = Witness::new(
+-            scores_shape.clone(),
+-            mask_data,
+-            DataType::Float,
+-            sf,
+-            Role::Constant,
+-        );
+-        let mask_id = self.public_literal(mask);
+-        self.add(scores, mask_id)[0]
++    /// Additive causal sentinels are deliberately unsupported: they do not
++    /// exclude future keys from either the max or the denominator.
++    #[deprecated(note="use causal_softmax on the unmodified scores")]
++    pub fn causal_mask(&mut self, _scores: EdgeId, _seq_len: usize) -> EdgeId {
++        panic!("additive causal_mask is unsupported; use causal_softmax")
+     }
+ 
+     pub fn add(&mut self, a: EdgeId, b: EdgeId) -> Vec<EdgeId> {
+@@ -451,10 +408,7 @@
+     }
+ 
+     pub fn sigmoid(&mut self, a: EdgeId) -> Vec<EdgeId> {
+-        let sigmoid_c = self.sigmoid_const(a)[0];
+-        let scores = self.add(a, sigmoid_c)[0];
+-        let scores = self.exp(scores)[0];
+-        vec![scores]
++        vec![self.finite_sigmoid(a)]
+     }
+ 
+     pub fn scale(&mut self, a: EdgeId, input_sf: usize, output_sf: usize) -> Vec<EdgeId> {
+@@ -1950,6 +1904,9 @@
+         while cursor<self.nodes.len() {
+             let node=self.nodes[cursor].clone();cursor+=1;
+             match node.kind {
++                BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_)=>panic!("unconstrained log normalization advice is unsupported; use selected finite normalization"),
++                BasicBlockType::MaskedMaxSelector(_)=>crate::dag::softmax::max_selector_constraints(&mut self,node.inputs[0],node.inputs[1],node.outputs[0]),
++                BasicBlockType::NormalizedRatio(b)=>crate::dag::softmax::ratio_constraints(&mut self,node.inputs[0],node.inputs[1],node.outputs[0],b.max_terms),
+                 BasicBlockType::InstanceNorm3D(_)=>panic!("unconstrained legacy InstanceNorm advice is unsupported; use instancenorm3d"),
+                 BasicBlockType::DivConst(b)=>self.division_guards(node.inputs[0],node.outputs[0],usize::try_from(b.divisor).expect("divisor too large")),
+                 BasicBlockType::RMSReciprocal(b)=>{
+diff --git a/zk-torch-4/src/dag/gpt2.rs b/zk-torch-4/src/dag/gpt2.rs
+--- a/zk-torch-4/src/dag/gpt2.rs
++++ b/zk-torch-4/src/dag/gpt2.rs
+@@ -125,14 +125,7 @@
+         )[0];
+ 
+         // Causal mask + normalized softmax
+-        let scores = if seq_len > 1 {
+-            g.causal_mask(scores, seq_len)
+-        } else {
+-            scores
+-        };
+-        let softmax_c = g.softmax_const(scores)[0];
+-        let scores = g.add(scores, softmax_c)[0];
+-        let scores = g.exp(scores)[0];
++        let scores = g.causal_softmax(scores, seq_len);
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+diff --git a/zk-torch-4/src/dag/gptj.rs b/zk-torch-4/src/dag/gptj.rs
+--- a/zk-torch-4/src/dag/gptj.rs
++++ b/zk-torch-4/src/dag/gptj.rs
+@@ -123,14 +123,7 @@
+             vec![scores, d_sqrt_recip],
+             true,
+         )[0];
+-        let scores = if seq_len > 1 {
+-            g.causal_mask(scores, seq_len)
+-        } else {
+-            scores
+-        };
+-        let softmax_c = g.softmax_const(scores)[0];
+-        let scores = g.add(scores, softmax_c)[0];
+-        let scores = g.exp(scores)[0];
++        let scores = g.causal_softmax(scores, seq_len);
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+diff --git a/zk-torch-4/src/dag/llama.rs b/zk-torch-4/src/dag/llama.rs
+--- a/zk-torch-4/src/dag/llama.rs
++++ b/zk-torch-4/src/dag/llama.rs
+@@ -451,10 +451,7 @@
+             vec![scores, d_sqrt_recip],
+             true,
+         )[0];
+-        let scores = if seq_len > 1 { g.causal_mask(scores, seq_len) } else { scores };
+-        let softmax_c = g.softmax_const(scores)[0];
+-        let scores = g.add(scores, softmax_c)[0];
+-        let scores = g.exp(scores)[0];
++        let scores = g.causal_softmax(scores, seq_len);
+ 
+         let out =
+             g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+@@ -857,14 +854,7 @@
+         )[0];
+ 
+         // Causal mask + normalized softmax
+-        let scores = if seq_len > 1 {
+-            g.causal_mask(scores, seq_len)
+-        } else {
+-            scores
+-        };
+-        let softmax_c = g.softmax_const(scores)[0];
+-        let scores = g.add(scores, softmax_c)[0];
+-        let scores = g.exp(scores)[0];
++        let scores = g.causal_softmax(scores, seq_len);
+ 
+         // Weighted values: scores · V with GQA broadcasting
+         // V broadcasts over q dimension
+diff --git a/zk-torch-4/src/dag/mod.rs b/zk-torch-4/src/dag/mod.rs
+--- a/zk-torch-4/src/dag/mod.rs
++++ b/zk-torch-4/src/dag/mod.rs
+@@ -16,6 +16,7 @@
+ pub mod lookups;
+ pub mod nanogpt;
+ pub mod oneshot;
++pub mod softmax;
+ pub mod partition;
+ pub mod pointpillar;
+ pub mod proving;
+@@ -1299,4 +1300,7 @@
+ mod normalization_tests;
+ 
+ #[cfg(test)]
++mod softmax_tests;
++
++#[cfg(test)]
+ mod instancenorm_tests;
+diff --git a/zk-torch-4/src/dag/nanogpt.rs b/zk-torch-4/src/dag/nanogpt.rs
+--- a/zk-torch-4/src/dag/nanogpt.rs
++++ b/zk-torch-4/src/dag/nanogpt.rs
+@@ -27,10 +27,10 @@
+ //!
+ //! One DEVIATION, which the paper should state. nanoGPT's activation is the
+ //! tanh approximation to GELU; `gpt2_mlp` here uses the sigmoid approximation
+-//! `x * sigmoid(1.702x)`. The two differ by well under a percent over the range
+-//! these activations take, and the prover cost is identical because both are
+-//! one lookup-backed nonlinearity per element, but it is not bit-exact against
+-//! EZKL's graph.
++//! `x * sigmoid(1.702x)`, now implemented by the registered finite two-logit
++//! normalization relation (two finite exp evaluations and exact integer
++//! denominator division). It is not bit-exact against EZKL's tanh graph;
++//! neither accuracy nor equal prover cost is established by this substitution.
+ 
+ use crate::dag::gpt2::gpt2_block;
+ use crate::dag::{DagBuilder, EdgeId, Role, Witness};
+diff --git a/zk-torch-4/src/dag/oneshot.rs b/zk-torch-4/src/dag/oneshot.rs
+--- a/zk-torch-4/src/dag/oneshot.rs
++++ b/zk-torch-4/src/dag/oneshot.rs
+@@ -6,8 +6,11 @@
+ //! transformer core, so a full T-token autoregressive generation is
+ //! proved in ONE full-sequence circuit (`seq_len = T`, causal-masked)
+ //! instead of T per-token proofs. The model's prediction at position `i`
+-//! depends only on tokens `0..=i` (causal masking), so a single
+-//! full-sequence forward pass reproduces every AR step; the public
++//! uses selected-support normalization that excludes future/padded keys from
++//! BOTH the canonical maximum and the denominator. Given matching finite
++//! arithmetic/layout semantics in the other layers, this yields prefix-only
++//! dependency and the full-sequence/incremental correspondence. This local
++//! repair is not an unconditional whole-model numerical-equivalence proof. The public
+ //! shift constraint `argmax(logits[i]) == token[i+1]` (checked by the
+ //! verifier on public data) ties each position's prediction to the next
+ //! input token.
+diff --git a/zk-torch-4/src/dag/softmax.rs b/zk-torch-4/src/dag/softmax.rs
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/src/dag/softmax.rs
+@@ -0,0 +1,140 @@
++//! Canonical max over authenticated support, finite exp, exact integer division.
++//! No log/softplus advice, additive negative sentinel, or secret-dependent layout.
++use crate::basicblock::{BasicBlockType,MaskedMaxSelector,NormalizedRatio,ProductZeroCheck};
++use crate::basicblock::normalization::ratio_budget;
++use crate::dag::{DagBuilder,DataType,EdgeId,Role,Witness};
++use crate::util::arith::int_to_f;
++
++const SCORE_BOUND:i128=(1i128<<54)-1;
++fn mul(b:&mut DagBuilder,a:EdgeId,c:EdgeId)->EdgeId {
++    let ndim=b.init_values[a].as_ref().unwrap().shape.len();
++    let s:String=(0..ndim).map(|i|(b'a'+i as u8)as char).collect();
++    b.einsum(format!("{s},{s}->{s}"),vec![a,c],false)[0]
++}
++fn zero(b:&mut DagBuilder,x:EdgeId) {
++    let w=b.init_values[x].as_ref().unwrap();let shape=w.shape.clone();
++    let one=b.integer_literal(shape.clone(),1,0);
++    let out=b.add_gkr_node(vec![x,one],BasicBlockType::ProductZeroCheck(ProductZeroCheck))[0];
++    b.init_values.push(Some(Witness::new_wo_data(shape,DataType::Uint,0,Role::Output)));
++    b.self_claim_edges.push(out);
++}
++fn maximum(b:&mut DagBuilder,s:EdgeId,h:EdgeId)->EdgeId {
++    let prod=mul(b,s,h);b.einsum("ab->a".into(),vec![prod],false)[0]
++}
++fn support_rows(b:&DagBuilder,mask:EdgeId,shape:&[usize])->Vec<i128> {
++    assert_eq!(shape.len(),2);assert!(shape.iter().all(|d|d.is_power_of_two()));
++    let values=b.program_literals.get(&mask).expect("normalization support must be an immutable program literal");
++    assert_eq!(values.len(),shape[0]*shape[1]);assert!(values.iter().all(|&v|v<=1));
++    (0..shape[0]).map(|r|i128::from((0..shape[1]).any(|c|values[r+shape[0]*c]==1))).collect()
++}
++
++pub(crate) fn max_selector_constraints(b:&mut DagBuilder,s:EdgeId,a:EdgeId,h:EdgeId) {
++    let sw=b.init_values[s].as_ref().unwrap();let shape=sw.shape.clone();let sf=sw.sf;
++    assert_eq!(b.init_values[a].as_ref().unwrap().shape,shape);assert_eq!(b.init_values[h].as_ref().unwrap().shape,shape);
++    assert_eq!(b.init_values[a].as_ref().unwrap().sf,0);assert_eq!(b.init_values[h].as_ref().unwrap().sf,0);
++    let active=support_rows(b,a,&shape);assert!(shape[1]<(1usize<<54));
++    // Boolean H + sum H=V + H supported on A proves a selected member,
++    // not merely an arbitrary upper bound. Empty rows have H=0 and m=0.
++    b.integer_interval(h,0,1);
++    let one=b.integer_literal(shape.clone(),1,0);let forbidden=b.sub(one,a)[0];
++    let bad=mul(b,h,forbidden);zero(b,bad);
++    let count=b.einsum("ab->a".into(),vec![h],false)[0];
++    let v=b.public_literal(Witness::new(vec![shape[0]],active.into_iter().map(int_to_f).collect(),DataType::Float,0,Role::Input));
++    let diff=b.sub(count,v)[0];zero(b,diff);
++    let selected=mul(b,s,a);b.integer_interval(selected,-SCORE_BOUND,SCORE_BOUND);
++    let m=maximum(b,s,h);let mb=b.change_shape(m,vec![shape[0],1]);
++    let shifted=b.sub(s,mb)[0];let shifted=mul(b,shifted,a);
++    let l=crate::basicblock::exp::exp_ln2(sf);let bound=(1i128<<crate::basicblock::exp::exp_bits())*l-l/2-1;
++    // 2*SCORE_BOUND+bound and both paired range envelopes are <p.
++    b.integer_interval(shifted,-bound,0);
++}
++
++pub(crate) fn ratio_constraints(b:&mut DagBuilder,e:EdgeId,d:EdgeId,w:EdgeId,max_terms:usize) {
++    let ew=b.init_values[e].as_ref().unwrap();let shape=ew.shape.clone();let sf=ew.sf;
++    assert!(!shape.is_empty() && shape.len()<=26 && shape.iter().all(|&d|d>0),"ratio requires explicit nonzero supported extents");
++    assert_eq!(b.init_values[d].as_ref().unwrap().shape,shape);assert_eq!(b.init_values[w].as_ref().unwrap().shape,shape);
++    assert_eq!(b.init_values[d].as_ref().unwrap().sf,sf);assert_eq!(b.init_values[w].as_ref().unwrap().sf,sf);
++    let(q,dm,bits)=ratio_budget(sf,max_terms);
++    b.integer_interval(e,0,q);b.integer_interval(d,q,dm);b.integer_interval(w,0,q);
++    let twiceq=b.integer_literal(shape.clone(),2*q,0);
++    let n2=mul(b,e,twiceq);let nd=b.add(n2,d)[0];
++    let dw=mul(b,d,w);let twice=b.integer_literal(shape.clone(),2,0);let dw2=mul(b,dw,twice);
++    let rho=b.sub(nd,dw2)[0];
++    let d2=mul(b,d,twice);let one=b.integer_literal(shape,1,sf);let dm1=b.sub(d2,one)[0];
++    let tau=b.sub(dm1,rho)[0];
++    b.add_nonneg_node_bits(rho,bits);b.add_nonneg_node_bits(tau,bits);
++}
++
++impl DagBuilder {
++    /// Explicit public support in the original column-major padded layout.
++    /// Every logical query row must have a key; padding rows must have none.
++    pub fn selected_softmax(&mut self,scores:EdgeId,support:Vec<bool>)->EdgeId {
++        let w=self.init_values[scores].as_ref().unwrap();let shape=w.shape.clone();let sf=w.sf;
++        assert!(!shape.is_empty() && shape.len()<=26 && shape.iter().all(|&d|d>0));
++        assert_eq!(sf,*crate::SF_LOG);assert!(sf<=30);
++        let pads:Vec<_>=shape.iter().map(|&d|d.checked_next_power_of_two().expect("normalization shape overflow")).collect();
++        let cols=*pads.last().unwrap();let rows=pads[..pads.len()-1].iter().try_fold(1usize,|n,&d|n.checked_mul(d)).expect("normalization row overflow");
++        assert_eq!(support.len(),rows.checked_mul(cols).expect("normalization shape overflow"));
++        let mut active=vec![0;rows];let mut max_terms=0;
++        for r in 0..rows {
++            let mut index=r;let mut logical=true;
++            for (&extent,&pad) in shape[..shape.len()-1].iter().zip(&pads) {logical &= index%pad<extent;index/=pad;}
++            let mut count=0;
++            for c in 0..cols {if support[r+rows*c] {assert!(logical && c<*shape.last().unwrap(),"support selects padding");count+=1;}}
++            assert_eq!(count>0,logical,"all-masked logical row is unsupported");
++            active[r]=i128::from(logical);max_terms=max_terms.max(count);
++        }
++        ratio_budget(sf,max_terms);
++        let scores=self.change_shape(scores,vec![rows,cols]);
++        let mask=self.public_literal(Witness::new(vec![rows,cols],support.into_iter().map(|a|int_to_f(i128::from(a))).collect(),DataType::Float,0,Role::Input));
++        // Mask raw excluded scores before *any* numerical-domain constraint.
++        let s=mul(self,scores,mask);
++        let h=self.add_gkr_node(vec![s,mask],BasicBlockType::MaskedMaxSelector(MaskedMaxSelector))[0];
++        self.init_values.push(Some(Witness::new_wo_data(vec![rows,cols],DataType::Float,0,Role::Auxiliary)));
++        let m=maximum(self,s,h);let m=self.change_shape(m,vec![rows,1]);
++        let t=self.sub(s,m)[0];let t=mul(self,t,mask);
++        let e=self.exp(t)[0];let e=mul(self,e,mask);
++        let d=self.einsum("ab->a".into(),vec![e],false)[0];
++        // Empty padded rows get a fixed positive divisor; numerator remains0.
++        let q=1i128<<sf;
++        let dummy=self.public_literal(Witness::new(vec![rows],active.into_iter().map(|v|int_to_f((1-v)*q)).collect(),DataType::Float,sf,Role::Input));
++        let d=self.add(d,dummy)[0];
++        let ones=self.integer_literal(vec![rows,cols],1,0);
++        let d=self.einsum("a,ab->ab".into(),vec![d,ones],false)[0];
++        let out=self.add_gkr_node(vec![e,d],BasicBlockType::NormalizedRatio(NormalizedRatio{max_terms}))[0];
++        self.init_values.push(Some(Witness::new_wo_data(vec![rows,cols],DataType::Float,sf,Role::Auxiliary)));
++        self.change_shape(out,shape)
++    }
++    fn normalization_support(&self,scores:EdgeId,causal:bool)->Vec<bool> {
++        let shape=&self.init_values[scores].as_ref().unwrap().shape;
++        assert!(!shape.is_empty() && shape.iter().all(|&d|d>0));
++        assert!(!causal || shape.len()>=2);
++        let pads:Vec<_>=shape.iter().map(|&d|d.checked_next_power_of_two().expect("shape overflow")).collect();
++        let n=pads.iter().try_fold(1usize,|n,&d|n.checked_mul(d)).expect("shape overflow");
++        (0..n).map(|mut i| {let mut c=vec![];let mut valid=true;for (&d,&p)in shape.iter().zip(&pads){c.push(i%p);valid &=i%p<d;i/=p;} valid && (!causal || c[c.len()-1]<=c[c.len()-2])}).collect()
++    }
++    pub fn softmax(&mut self,scores:EdgeId)->EdgeId {let a=self.normalization_support(scores,false);self.selected_softmax(scores,a)}
++    pub fn causal_softmax(&mut self,scores:EdgeId,seq_len:usize)->EdgeId {
++        let shape=&self.init_values[scores].as_ref().unwrap().shape;
++        assert!(shape.len()>=2);assert_eq!(&shape[shape.len()-2..],&[seq_len,seq_len]);
++        let a=self.normalization_support(scores,true);self.selected_softmax(scores,a)
++    }
++    pub(crate) fn finite_sigmoid(&mut self,x:EdgeId)->EdgeId {
++        let w=self.init_values[x].as_ref().unwrap();let shape=w.shape.clone();let sf=w.sf;
++        let mask=self.normalization_support(x,false);
++        let n=mask.len();let x=self.change_shape(x,vec![n]);
++        let valid=self.public_literal(Witness::new(vec![n],mask.into_iter().map(|v|int_to_f(i128::from(v))).collect(),DataType::Float,0,Role::Input));
++        let x=mul(self,x,valid);
++        let selector=self.public_literal(Witness::new(vec![2],vec![int_to_f(0),int_to_f(1)],DataType::Float,0,Role::Input));
++        let pair=self.einsum("a,b->ab".into(),vec![x,selector],false)[0];
++        // Reinterpret the true logical cells as active rows, preserving original
++        // padding support. selected_softmax requires its *own* logical rows live,
++        // so use a full safe pair for pads then explicitly zero their output.
++        let out=self.softmax(pair);
++        let chosen=self.einsum("ab,b->ab".into(),vec![out,selector],false)[0];
++        let chosen=self.einsum("ab->a".into(),vec![chosen],false)[0];
++        let chosen=mul(self,chosen,valid);
++        assert_eq!(self.init_values[chosen].as_ref().unwrap().sf,sf);
++        self.change_shape(chosen,shape)
++    }
++}
+diff --git a/zk-torch-4/src/dag/softmax_tests.rs b/zk-torch-4/src/dag/softmax_tests.rs
+new file mode 100644
+--- /dev/null
++++ b/zk-torch-4/src/dag/softmax_tests.rs
+@@ -0,0 +1,123 @@
++//! Original CPU operator bodies and actual emitted range/PZC predicate checks.
++//! Not cryptographic verifier acceptance/rejection tests.
++use super::*;
++use crate::basicblock::{BasicBlock,BasicBlockType,NormalizedRatio};
++use crate::basicblock::normalization::ratio_budget;
++use crate::util::arith::{f_to_int,int_to_f};
++fn input(b:&mut DagBuilder,shape:Vec<usize>,v:Vec<i128>,sf:usize)->EdgeId {
++    b.committed_input(Witness::new(shape,v.into_iter().map(int_to_f).collect(),DataType::Float,sf,Role::Input))
++}
++fn forward(d:&Dag,w:&mut [Vec<Witness>],bad:Option<(EdgeId,Vec<i128>)>)->bool {
++    let mut good=true;
++    for &n in &d.topo {
++        let nd=&d.nodes[n];
++        if let BasicBlockType::NonNegative(b)=&nd.kind {
++            good &= w[nd.inputs[0]][0].data.as_ref().unwrap().evaluations_ref().iter().all(|v| {let z=f_to_int(*v);z>=0 && z<(1i128<<b.table_size_log)});
++        }
++        if matches!(nd.kind,BasicBlockType::ProductZeroCheck(_)) {
++            let a=w[nd.inputs[0]][0].data.as_ref().unwrap();let b=w[nd.inputs[1]][0].data.as_ref().unwrap();
++            good &= a.evaluations_ref().iter().enumerate().all(|(i,v)|(*v*b.index(i)).reduce().0==0);
++        }
++        let ins=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();let outputs=nd.kind.run(&ins);
++        for (&e,mut v) in nd.outputs.iter().zip(outputs) {
++            if let Some((target,values))=&bad {if e==*target {v=Witness::new(v.shape,values.iter().copied().map(int_to_f).collect(),v.data_type,v.sf,v.role);}}
++            w[e]=vec![v];
++        }
++    }
++    good
++}
++fn vals(w:&[Vec<Witness>],e:EdgeId)->Vec<i128>{w[e][0].data.as_ref().unwrap().evaluations_ref().iter().map(|v|f_to_int(*v)).collect()}
++#[test]
++fn normalized_ratio_actual_roots_ties_and_modular_mutations() {
++    for sf in [0,10,16,20,30] {
++        let q=1i128<<sf;let terms=if sf==30 {2}else{4096};let ds=vec![q,2*q,2*q,(terms as i128)*q];let es=vec![0,q,q/2,q];
++        let mut b=DagBuilder::new();let e=input(&mut b,vec![4],es.clone(),sf);let d=input(&mut b,vec![4],ds.clone(),sf);
++        let y=b.add_gkr_node(vec![e,d],BasicBlockType::NormalizedRatio(NormalizedRatio{max_terms:terms}))[0];
++        b.init_values.push(Some(Witness::new_wo_data(vec![4],DataType::Float,sf,Role::Auxiliary)));
++        let(dag,w)=b.compile();let mut honest=w.clone();assert!(forward(&dag,&mut honest,None));
++        let expected:Vec<_>=es.iter().zip(&ds).map(|(&e,&d)|(2*q*e+d)/(2*d)).collect();assert_eq!(vals(&honest,y),expected);
++        for delta in [-1,1] {let mut bad=expected.clone();bad[0]+=delta;assert!(!forward(&dag,&mut w.clone(),Some((y,bad))));}
++        // Old remainder-only equations admit a huge modular quotient; explicit
++        // range roots reject it without relying on a host range assertion.
++        let mut bad=expected.clone();bad[0]=(1i128<<54)-1;assert!(!forward(&dag,&mut w.clone(),Some((y,bad))));
++    }
++}
++#[test]
++fn causal_softmax_future_and_padding_are_structurally_excluded() {
++    let sf=*crate::SF_LOG;let q=1i128<<sf;let l=crate::basicblock::exp::exp_ln2(sf);
++    let mut baseline=None;
++    for poison in [0,100*q,15*l,(1i128<<60)-1,-((1i128<<60)-1)] {
++        let mut x=vec![poison;16];for t in 0..3 {for s in t..3 {x[s+4*t]=-((s-t)as i128)*l;}}
++        let mut b=DagBuilder::new();let x=input(&mut b,vec![3,3],x,sf);let y=b.causal_softmax(x,3);let(d,mut w)=b.compile();
++        assert!(forward(&d,&mut w,None));let actual=vals(&w,y);
++        assert_eq!(actual[0],q);
++        for t in 0..4 {for s in 0..4 {if t>s || t>=3 || s>=3 {assert_eq!(actual[s+4*t],0);}}}
++        if let Some(ref expected)=baseline {assert_eq!(&actual,expected);}else{baseline=Some(actual);}
++        assert!(d.nodes.iter().all(|n|!matches!(n.kind,BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_))));
++    }
++}
++#[test]
++fn selected_max_onehot_and_all_masked_mutations() {
++    let sf=*crate::SF_LOG;let q=1i128<<sf;let l=crate::basicblock::exp::exp_ln2(sf);
++    let mut b=DagBuilder::new();let x=input(&mut b,vec![1,3],vec![0,-l,100*q,1i128<<60],sf);let y=b.selected_softmax(x,vec![true,true,false,false]);let(d,w)=b.compile();
++    let h=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::MaskedMaxSelector(_))).unwrap().outputs[0];
++    let mut honest=w.clone();assert!(forward(&d,&mut honest,None));assert_eq!(vals(&honest,y)[2..],[0,0]);
++    for bad in [vec![0,0,0,0],vec![1,1,0,0],vec![2,0,0,0],vec![0,0,1,0],vec![0,1,0,0]] {
++        let accepted=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||forward(&d,&mut w.clone(),Some((h,bad))))).unwrap_or(false);assert!(!accepted);
++    }
++    assert!(std::panic::catch_unwind(||{let mut b=DagBuilder::new();let x=input(&mut b,vec![1,3],vec![0;4],sf);b.selected_softmax(x,vec![false;4]);}).is_err());
++}
++#[test]
++fn sigmoid_two_logits_and_padding_are_exact() {
++    let sf=*crate::SF_LOG;let q=1i128<<sf;let l=crate::basicblock::exp::exp_ln2(sf);
++    let mut baseline=None;
++    for poison in [0,1i128<<60,-(1i128<<60)] {
++        let mut b=DagBuilder::new();let x=input(&mut b,vec![3],vec![0,l,-l,poison],sf);let y=b.sigmoid(x)[0];let(d,mut w)=b.compile();assert!(forward(&d,&mut w,None));let got=vals(&w,y);
++        assert_eq!(got[0],(q+1)/2);assert_eq!(got[3],0);assert!(got[..3].iter().all(|&v|v>=0&&v<=q));
++        if let Some(ref expected)=baseline {assert_eq!(&got,expected);}else{baseline=Some(got);}
++    }
++}
++#[test]
++fn practical_contexts_and_sf30_wrap_profile_fail_closed() {
++    for sf in [16,20] {for terms in [512,4096,1<<20] {ratio_budget(sf,terms);}}
++    ratio_budget(30,7);
++    assert!(std::panic::catch_unwind(||ratio_budget(30,9)).is_err());
++    let q=1i128<<30;let d=8*q;let p=almost_goldilocks_cuda::field::ALMOST_GOLDILOCKS_PRIME as i128;
++    let rho=(d-2*d*q).rem_euclid(p);let tau=2*d-1-rho;
++    assert_eq!((rho,tau),(4*q-31,12*q+30));assert!(rho>=0&&rho<2*d&&tau>=0&&tau<2*d);
++    for terms in [512usize,4096] {
++        let sf=*crate::SF_LOG;if std::panic::catch_unwind(||ratio_budget(sf,terms)).is_err(){continue;}
++        let mut b=DagBuilder::new();let x=input(&mut b,vec![1,terms],vec![0;terms],sf);let y=b.softmax(x);let(d,mut w)=b.compile();assert!(forward(&d,&mut w,None));
++        let q=1i128<<sf;let expected=(2*q+terms as i128)/(2*terms as i128);assert!(vals(&w,y).iter().all(|&v|v==expected));
++    }
++}
++
++#[test]
++fn whisper_decoder_encoder_cross_attention_selection_and_dependency() {
++    let sf=*crate::SF_LOG;let q=1i128<<sf;
++    let mut encoder_first=vec![];let mut cross_first=vec![];let mut decoder_prefix:Option<Vec<i128>>=None;
++    assert!(6*q*q<(almost_goldilocks_cuda::field::ALMOST_GOLDILOCKS_PRIME as i128)/2);
++    // Raw attention products stay below p/2 throughSF30: max self score4Q^2.
++    for future in [-2*q,2*q] {
++        for causal in [false,true] {
++            let mut b=DagBuilder::new();let x=input(&mut b,vec![1,3,1],vec![q,2*q,future,777],sf);
++            let weight=b.param(Witness::new(vec![1,1],vec![int_to_f(q)],DataType::Float,sf,Role::Constant));
++            let bias=b.param(Witness::new(vec![1],vec![int_to_f(0)],DataType::Float,sf,Role::Constant));
++            let y=super::whisper::whisper_self_attention(&mut b,x,weight,weight,weight,weight,bias,bias,bias,bias,1,1,1,causal);
++            let(d,mut w)=b.compile();assert!(forward(&d,&mut w,None));let got=vals(&w,y);
++            if causal {assert_eq!(got[0],q);let prefix=got[..2].to_vec();if let Some(ref expected)=decoder_prefix{assert_eq!(&prefix,expected);}else{decoder_prefix=Some(prefix);}}else{encoder_first.push(got[0]);}
++            let selector=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::MaskedMaxSelector(_))).unwrap();
++            let support=&d.program_literals[&selector.inputs[1]];
++            for t in 0..4 {for s in 0..4 {assert_eq!(support[s+4*t],u64::from(s<3&&t<3&&(!causal||t<=s)));}}
++        }
++        let mut b=DagBuilder::new();let xd=input(&mut b,vec![1,2,1],vec![q,q],sf);let xe=input(&mut b,vec![1,3,1],vec![q,2*q,future,777],sf);
++        let weight=b.param(Witness::new(vec![1,1],vec![int_to_f(q)],DataType::Float,sf,Role::Constant));
++        let bias=b.param(Witness::new(vec![1],vec![int_to_f(0)],DataType::Float,sf,Role::Constant));
++        let y=super::whisper::whisper_cross_attention(&mut b,xd,xe,weight,weight,weight,weight,bias,bias,bias,bias,1,1,1,2,3);
++        let(d,mut w)=b.compile();assert!(forward(&d,&mut w,None));cross_first.push(vals(&w,y)[0]);
++        let selector=d.nodes.iter().find(|n|matches!(n.kind,BasicBlockType::MaskedMaxSelector(_))).unwrap();
++        let support=&d.program_literals[&selector.inputs[1]];assert_eq!(support,&vec![1,1,1,1,1,1,0,0]);
++    }
++    assert_ne!(encoder_first[0],encoder_first[1],"encoder must retain later-key dependency");
++    assert_ne!(cross_first[0],cross_first[1],"cross attention must include all encoder keys, not decoder-triangular keys");
++}
+diff --git a/zk-torch-4/src/dag/whisper.rs b/zk-torch-4/src/dag/whisper.rs
+--- a/zk-torch-4/src/dag/whisper.rs
++++ b/zk-torch-4/src/dag/whisper.rs
+@@ -157,8 +157,8 @@
+     g.einsum(einsum_str, vec![x, h], true)[0]
+ }
+ 
+-/// Self-attention (no causal mask). Parameterized by n_head and head_dim.
+-fn whisper_self_attention(
++/// Encoder self-attention is bidirectional; decoder self-attention is causal.
++pub(crate) fn whisper_self_attention(
+     g: &mut DagBuilder,
+     x: EdgeId,
+     w_q: EdgeId,
+@@ -172,6 +172,7 @@
+     n_head: usize,
+     head_dim: usize,
+     n_state: usize,
++    causal: bool,
+ ) -> EdgeId {
+     // x shape: [1, seq, n_state]
+     let seq = g.init_values[x].as_ref().unwrap().shape[1];
+@@ -203,9 +204,7 @@
+     let scores = g.einsum("bhsd,bhtd->bhst".to_string(), vec![q, k], true)[0];
+     // Use 'z' for scalar to avoid overwriting 's' dimension when seq > 1
+     let scores = g.einsum("bhst,z->bhst".to_string(), vec![scores, d_sqrt_recip], true)[0];
+-    let softmax_c = g.softmax_const(scores)[0];
+-    let scores = g.add(scores, softmax_c)[0];
+-    let scores = g.exp(scores)[0];
++    let scores = if causal { g.causal_softmax(scores,seq) } else { g.softmax(scores) };
+ 
+     let out = g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+     let out = g.change_shape(out, vec![1, seq, n_head, head_dim]);
+@@ -217,7 +216,7 @@
+ 
+ /// Cross-attention: Q from decoder, K/V from encoder output.
+ /// seq_q and seq_kv may differ.
+-fn whisper_cross_attention(
++pub(crate) fn whisper_cross_attention(
+     g: &mut DagBuilder,
+     x_dec: EdgeId,       // decoder state [1, S_dec, n_state]
+     enc_out: EdgeId,     // encoder output [1, S_enc, n_state]
+@@ -266,9 +265,7 @@
+     let scores = g.einsum("bhsd,bhtd->bhst".to_string(), vec![q, k], true)[0];
+     // Use 'z' for scalar to avoid overwriting 's' dimension when seq > 1
+     let scores = g.einsum("bhst,z->bhst".to_string(), vec![scores, d_sqrt_recip], true)[0];
+-    let softmax_c = g.softmax_const(scores)[0];
+-    let scores = g.add(scores, softmax_c)[0];
+-    let scores = g.exp(scores)[0];
++    let scores = g.softmax(scores);
+ 
+     let out = g.einsum("bhst,bhtd->bhsd".to_string(), vec![scores, v], true)[0];
+     let out = g.change_shape(out, vec![1, seq_dec, n_head, head_dim]);
+@@ -363,7 +360,7 @@
+         let ln_out = g.pipe(&[x], whisper_layer_norm(attn_ln_w, attn_ln_b));
+         let attn_out = whisper_self_attention(
+             g, ln_out[0], w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+-            n_head, head_dim, n_state,
++            n_head, head_dim, n_state, false,
+         );
+         let residual = g.add(attn_out, x)[0];
+ 
+@@ -440,7 +437,7 @@
+         let ln_out = g.pipe(&[x], whisper_layer_norm(attn_ln_w, attn_ln_b));
+         let attn_out = whisper_self_attention(
+             g, ln_out[0], w_q, w_k, w_v, w_o, b_q, b_k, b_v, b_o,
+-            n_head, head_dim, n_state,
++            n_head, head_dim, n_state, true,
+         );
+         let residual = g.add(attn_out, x)[0];
+ 
+diff --git a/zk-torch-4/src/morpheus/piop/exp_tests.rs b/zk-torch-4/src/morpheus/piop/exp_tests.rs
+--- a/zk-torch-4/src/morpheus/piop/exp_tests.rs
++++ b/zk-torch-4/src/morpheus/piop/exp_tests.rs
+@@ -285,6 +285,23 @@
+     }
+ }
+ 
++#[test]
++fn selected_normalization_piop_rejects_ratio_and_selector_source_mutations() {
++    let mut b=DagBuilder::new();let q=1i128<<*crate::SF_LOG;
++    let x=b.committed_input(Witness::new(vec![1,3],vec![int_to_f(0),int_to_f(-q),int_to_f(100*q),int_to_f(0)],DataType::Float,*crate::SF_LOG,Role::Input));
++    let out=b.selected_softmax(x,vec![true,true,false,false]);let(d,mut w)=b.compile();
++    for &n in &d.topo {let nd=&d.nodes[n];let ins=nd.inputs.iter().map(|&e|&w[e][0]).collect::<Vec<_>>();let vs=nd.kind.run(&ins);for(&e,v)in nd.outputs.iter().zip(vs){w[e]=vec![v];}}
++    let g=Graph::new(&d,&w,Config{tcl:4,slots_log:12,req_planes_log:6});
++    let pd=ProverData::new(&g,&w,vec![K8::ZERO;1<<12]);assert!(replay(&g,&pd));
++    for kind in 0..2 {
++        let e=d.nodes.iter().find(|n|if kind==0 {matches!(n.kind,BasicBlockType::NormalizedRatio(_))} else {matches!(n.kind,BasicBlockType::MaskedMaxSelector(_))}).unwrap().outputs[0];
++        let mut bad=ProverData::new(&g,&w,vec![K8::ZERO;1<<12]);let mut values=bad.vals[e].as_ref().unwrap().as_ref().clone();
++        if kind==0 {values[0]=(values[0]+1)%Q;}else{values.fill(0);values[2]=1;}
++        bad.vals[e]=Some(Arc::new(values));assert!(!replay(&g,&bad));
++    }
++    assert_eq!(pd.vals[out].as_ref().unwrap()[2..],[0,0]);
++}
++
+ /// Actual PIOP replay authored for InstanceNorm. Native CUDA linkage is still
+ /// required by this crate; a typecheck/CPU predicate test is NOT its execution.
+ #[test]
+diff --git a/zk-torch-4/src/morpheus/piop/mod.rs b/zk-torch-4/src/morpheus/piop/mod.rs
+--- a/zk-torch-4/src/morpheus/piop/mod.rs
++++ b/zk-torch-4/src/morpheus/piop/mod.rs
+@@ -106,7 +106,7 @@
+ }
+ 
+ fn advice_kind(k: &BasicBlockType) -> bool {
+-    matches!(k, BasicBlockType::DivConst(_) | BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_) | BasicBlockType::RMSReciprocal(_) | BasicBlockType::RMSBucket(_)
++    matches!(k, BasicBlockType::MaskedMaxSelector(_) | BasicBlockType::NormalizedRatio(_) | BasicBlockType::DivConst(_) | BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_) | BasicBlockType::RMSReciprocal(_) | BasicBlockType::RMSBucket(_)
+         // Vision advice, constrained by range checks / product zero checks
+         // wired by the builder (the same relation as the previous prover).
+         | BasicBlockType::ReLUHelper(_) | BasicBlockType::MaxPoolHelper(_) | BasicBlockType::GeneralMaxPoolHelper(_)
+@@ -137,6 +137,7 @@
+ 
+ impl<'a> Graph<'a> {
+     pub fn new(dag: &'a Dag, wit: &[Vec<Witness>], cfg: Config) -> Self {
++        assert!(dag.nodes.iter().all(|n|!matches!(n.kind,BasicBlockType::SoftmaxConst(_) | BasicBlockType::SigmoidConst(_))),"legacy log normalization advice is unsupported");
+         assert!(!dag.nodes.iter().any(|n| matches!(n.kind,BasicBlockType::InstanceNorm3D(_))),
+             "unconstrained legacy InstanceNorm advice cannot be registered");
+         let protocol_conv_pp = cv::conv_pp();
+@@ -366,7 +367,7 @@
+             // by the input's declared Bool type; every other request tensor
+             // gets 2^req_planes_log planes. The honest prover checks the fit.
+             let bits = g.bool_typed[e] || g.dag.producers[e].map(|n| matches!(g.dag.nodes[n].kind,
+-                BasicBlockType::ReLUHelper(_) | BasicBlockType::RMSBucket(_) | BasicBlockType::PillarMaxPool(_) | BasicBlockType::ScatterToBEV(_))).unwrap_or(false);
++                BasicBlockType::ReLUHelper(_) | BasicBlockType::RMSBucket(_) | BasicBlockType::MaskedMaxSelector(_) | BasicBlockType::PillarMaxPool(_) | BasicBlockType::ScatterToBEV(_))).unwrap_or(false);
+             if bits {
+                 assert!(v.par_iter().all(|&x| x <= 1), "edge {e}: declared bit tensor holds a non-bit value");
+                 (0, true)
+diff --git a/zk-torch-4/src/morpheus/statement.rs b/zk-torch-4/src/morpheus/statement.rs
+--- a/zk-torch-4/src/morpheus/statement.rs
++++ b/zk-torch-4/src/morpheus/statement.rs
+@@ -63,6 +63,8 @@
+         GatherFromGrid(b) => { w.u(18); w.us(b.n_points)?; w.us(b.channels)?; w.us(b.grid_h)?; w.us(b.grid_w)?; },
+         GeneralMaxPoolHelper(b) => { w.u(19); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.kernel_h)?; w.us(b.kernel_w)?; w.us(b.stride_h)?; w.us(b.stride_w)?; },
+         InstanceNorm3D(_) => return Err("unconstrained legacy InstanceNorm advice is unsupported".into()),
++        MaskedMaxSelector(_) => { w.u(44); w.bytes(b"selected-canonical-max-v1")?; },
++        NormalizedRatio(b) => { w.u(45); w.us(b.max_terms)?; w.bytes(b"nearest-positive-tie-normalized-ratio-v1")?; },
+         MaxPoolHelper(b) => { w.u(21); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.pool_h)?; w.us(b.pool_w)?; },
+         NonNegative(b) => { w.u(22); w.us(b.table_size_log)?; },
+         Permute(b) => { w.u(23); w.pairs(&b.ranges)?; },
+@@ -76,8 +78,8 @@
+         ScaleDown(b) => { w.u(30); w.us(b.output_sf)?; },
+         ScaleUp(b) => { w.u(31); w.us(b.output_sf)?; },
+         ScatterToBEV(b) => { w.u(32); w.us(b.n_pillars)?; w.us(b.features)?; w.us(b.ny)?; w.us(b.nx)?; },
+-        SigmoidConst(b) => { w.u(33); w.us(b.segments)?; },
+-        SoftmaxConst(b) => { w.u(34); w.us(b.dim)?; },
++        SigmoidConst(_) => return Err("legacy unproved sigmoid-log advice is unsupported".into()),
++        SoftmaxConst(_) => return Err("legacy unproved softmax-log advice is unsupported".into()),
+         SubSample2D(b) => { w.u(35); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.out_h)?; w.us(b.out_w)?; w.us(b.stride_h)?; w.us(b.stride_w)?; w.us(b.offset_h)?; w.us(b.offset_w)?; },
+         TwoPow(_) => { w.u(36); },
+         ZeroPad(b) => { w.u(37); w.us(b.channels)?; w.us(b.input_h)?; w.us(b.input_w)?; w.us(b.pad_h)?; w.us(b.pad_w)?; },

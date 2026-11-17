@@ -1,0 +1,5 @@
+{
+  "original_sha256": "10de5a1d49760b518f5b6e6c17c71acdd167fe17c17466a2b13819901d5c82b0",
+  "adapted_sha256": "73b43e28b73c86902b15dc0f478098ba5a0c8c08388622ca3c2828c10681fe49",
+  "only_change": "#[test] fn -> pub fn; all eight complete bodies identical"
+}

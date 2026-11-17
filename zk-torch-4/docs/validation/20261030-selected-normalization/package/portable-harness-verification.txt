@@ -1,0 +1,1 @@
+PASS portable adjacent-script harness regenerates all 456 final CPU validation-copy files byte-identically; no environment-specific script path required.

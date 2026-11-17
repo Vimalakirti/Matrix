@@ -1,0 +1,23 @@
+{
+  "format": "morpheus-digits-reproduction-pins-v1",
+  "python": "3.12.14",
+  "files": {
+    "model.json": "7620a762dc49e1bd1ea08b9ff0c0193e0826fd590a337829083bc4064db352d9",
+    "float_model.json": "3838fafa091a0e80e9eeded7f3bb35d4b86aab056dfc656812f4c35c6e6bd6dd",
+    "split.json": "a33637124303540a827cbe415b44badefa5835a9252c11615b5f2074265ea0e9",
+    "dataset.json": "eedf9489d94770fca7f76bc262da070eee94cbc9b33e53ea12dbf2f2176ebf3b",
+    "test_inputs.json": "94bef0b41e810c792fa3d4bdc8e35a9ba02f6c2231c5d7e491324facb8d10d5a",
+    "integer_test_outputs.json": "5757767fffb0bd1164664674210e4ccbdc25370e508229b1d470fa9ee139105a",
+    "selected_examples.json": "49a2ec79af08b4956ff93c708ddd60a3f7cdfde381092fc67e38fd7331af711a"
+  },
+  "expected_float_correct": 435,
+  "expected_integer_correct": 435,
+  "test_count": 450,
+  "selected_indices": [
+    1329,
+    1379,
+    1319,
+    909
+  ],
+  "report_not_byte_pinned": "Original convergence metadata was not retained; rerun diagnostics are new evidence, never substituted for original diagnostics."
+}

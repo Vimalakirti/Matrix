@@ -1,0 +1,59 @@
+{
+  "base_commit": "f192323f0725fed17a27dee21442fcba25460d2f",
+  "base_tree": "96844dc3236c37f2983c42d238864dcda809d855",
+  "scope": "nine exp/literal/profile files plus baseline E0596 binary borrow repair; clean protocol3 registration/lifecycle retained",
+  "wire_protocol_version": 3,
+  "canonical_statement_codec_version": 2,
+  "files": [
+    {
+      "path": "zk-torch-4/docs/exp_profile_scalar.txt",
+      "sha256": "f26e571475c0b1a8c0f8f0f3d942587d10ce1443f2428e71bf8573d93c17b9c2",
+      "bytes": 2639
+    },
+    {
+      "path": "zk-torch-4/docs/morpheus_exp_profile.md",
+      "sha256": "2910b8622b2b33ff529c475f2908854bb71e144f950b9bbb7128be897798a7a9",
+      "bytes": 7343
+    },
+    {
+      "path": "zk-torch-4/scripts/bench/morpheus/test_exp_profile.py",
+      "sha256": "da97ef75f819282c50839fc039a0f708dbfecedcafbb572ce3c37644a42c3f78",
+      "bytes": 12531
+    },
+    {
+      "path": "zk-torch-4/src/basicblock/exp.rs",
+      "sha256": "5c1f27169e6447298689e27ee1cc9d342814f61c32457f398d1bc878e59904d3",
+      "bytes": 12211
+    },
+    {
+      "path": "zk-torch-4/src/bin/morpheus_piop_e2e.rs",
+      "sha256": "6ce8fe9edc4a9635524fdf83546e35687d30328da6ef403cc638bf46525dd3c3",
+      "bytes": 18721
+    },
+    {
+      "path": "zk-torch-4/src/dag/builder.rs",
+      "sha256": "ccfe9a4d657052c5e25732984969158d040dd0e20621995608528ec2b196f070",
+      "bytes": 96265
+    },
+    {
+      "path": "zk-torch-4/src/dag/mod.rs",
+      "sha256": "a8de9d42efa474e6fe35375880007bbb7ca9a94137b3b71d9585cc7681f114ac",
+      "bytes": 55196
+    },
+    {
+      "path": "zk-torch-4/src/morpheus/piop/exp_tests.rs",
+      "sha256": "b9670aa33853db7745c4d9d2a3c99421140344276bc6d7c324d0714304f61c6f",
+      "bytes": 8743
+    },
+    {
+      "path": "zk-torch-4/src/morpheus/piop/mod.rs",
+      "sha256": "58e67710fe295a4fff71d57a42da7c547c4a1d85151d6de576880c85859d59f6",
+      "bytes": 60146
+    },
+    {
+      "path": "zk-torch-4/src/morpheus/statement.rs",
+      "sha256": "9a665ecb0558e3065a8c235f14a14624431a6412dd06bab5294f4d8b3064a34d",
+      "bytes": 22041
+    }
+  ]
+}

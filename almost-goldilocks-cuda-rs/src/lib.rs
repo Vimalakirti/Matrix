@@ -41,7 +41,7 @@ pub use field::{
     ALMOST_GOLDILOCKS_PRIME, ALMOST_REDUCE_C, ALMOST_HALF_P_PLUS_ONE,
 };
 pub use memory::{
-    get_last_error, mem_get_info, memcpy_dtod, peek_at_last_error, pool_trim, synchronize,
+    get_last_error, mem_get_info, memcpy_dtod, nvtx, peek_at_last_error, pool_trim, synchronize,
     DeviceBuffer,
 };
 

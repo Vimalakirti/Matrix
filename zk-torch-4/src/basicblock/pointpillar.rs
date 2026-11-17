@@ -2,14 +2,14 @@
 //! [`GatherFromGrid`].
 //!
 //! Soundness model:
-//! - [`PillarMaxPool`]: same dominance argument as the other max-pool blocks
-//!   — output is upper-bounded by every input via SubSample2D + Sub + NonNeg
-//!   wired by the DAG builder. Achievability requires a lookup argument and
-//!   is currently an open soundness gap (see plan §F.6).
-//! - [`ScatterToBEV`] / [`GatherFromGrid`]: scatter/gather along coordinate
-//!   indices. Both are non-algebraic; full soundness requires a permutation /
-//!   lookup argument. Currently emit advice values trusted by the verifier
-//!   (plan §F.7 documents this as an open gap).
+//! - [`PillarMaxPool`]: compilation attaches the exact bounded window-maximum
+//!   relation, including private one-hot attainment and signed dominance.
+//!   Grid routing is separately constrained as described below.
+//! - [`ScatterToBEV`] / [`GatherFromGrid`]: compilation binds private coordinates
+//!   through exact field-equality arithmetic, with last-write-wins scatter and
+//!   zero invalid gather. The dense correctness baseline has an explicit cost
+//!   preflight; it is not a scalable sparse-routing performance claim
+//!   and does not establish full PointPillar conformance.
 
 use almost_goldilocks_cuda::field::AlmostGoldilocksField;
 
@@ -34,6 +34,10 @@ impl BasicBlock for PillarMaxPool {
     fn run(&self, inputs: &[&Witness]) -> Vec<Witness> {
         assert_eq!(inputs.len(), 1, "PillarMaxPool expects 1 input");
         let x = inputs[0];
+        crate::basicblock::GeneralMaxPoolHelper {channels:self.n_pillars,input_h:self.max_points,input_w:self.features,
+            kernel_h:self.max_points,kernel_w:1,stride_h:self.max_points,stride_w:1}.output_shape();
+        assert_eq!(x.shape,vec![self.n_pillars,self.max_points,self.features]);
+
         let x_evals = x.data.as_ref().unwrap().evaluations_ref();
         let d_pad = self.features.next_power_of_two();
         let t_pad = self.max_points.next_power_of_two();

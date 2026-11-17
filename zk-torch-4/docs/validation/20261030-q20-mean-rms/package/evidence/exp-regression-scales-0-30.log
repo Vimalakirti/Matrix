@@ -1,0 +1,1116 @@
+SCALE=0
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (65) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (65) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=1
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (76) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (76) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=2
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (87) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (87) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=3
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (98) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (98) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=4
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (109) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (109) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=5
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (120) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (120) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=6
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (131) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (131) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=7
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (142) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (142) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=8
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (153) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (153) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=9
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (164) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (164) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=10
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (175) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (175) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=11
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (186) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (186) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=12
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (197) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (197) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=13
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (208) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (208) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=14
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (219) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (219) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=15
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (230) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (230) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=16
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (241) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (241) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=17
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (252) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (252) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=18
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (263) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (263) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=19
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (274) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (274) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=20
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (285) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (285) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=21
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (296) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (296) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=22
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (307) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (307) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=23
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (318) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (318) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=24
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (329) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (329) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=25
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (340) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (340) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=26
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (351) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (351) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=27
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (362) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (362) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=28
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (373) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (373) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=29
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (384) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (384) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe
+SCALE=30
+RUN exphelper_emits_dense_r_and_sparse_k
+PASS exphelper_emits_dense_r_and_sparse_k
+RUN exphelper_recovers_negative_k
+PASS exphelper_recovers_negative_k
+RUN exphelper_rejects_positive_and_out_of_domain_without_clamping
+
+thread 'main' (395) panicked at src/basicblock/exp.rs:80:13:
+exp profile requires nonpositive input
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+thread 'main' (395) panicked at src/basicblock/exp.rs:82:13:
+exp input outside registered selector domain
+PASS exphelper_rejects_positive_and_out_of_domain_without_clamping
+RUN exphelper_prove_passes_through
+PASS exphelper_prove_passes_through
+RUN twopow_looks_up_15_minus_k
+PASS twopow_looks_up_15_minus_k
+RUN twopow_prove_returns_empty
+PASS twopow_prove_returns_empty
+RUN exp_zero_is_one_at_output_scale_cpu_forward
+PASS exp_zero_is_one_at_output_scale_cpu_forward
+RUN exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+PASS exp_logical_values_ignore_padding_and_padded_outputs_are_zero
+RUN eager_request_arithmetic_is_not_a_model_parameter
+PASS eager_request_arithmetic_is_not_a_model_parameter
+RUN eager_model_only_arithmetic_remains_trusted_precomputation
+PASS eager_model_only_arithmetic_remains_trusted_precomputation
+RUN test_dag_builder_simple_add
+PASS test_dag_builder_simple_add
+RUN test_dag_builder_compile
+PASS test_dag_builder_compile
+RUN test_dag_builder_chain
+PASS test_dag_builder_chain
+RUN test_dag_builder_pipe
+PASS test_dag_builder_pipe

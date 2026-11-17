@@ -1,0 +1,3 @@
+PASS 2675503 arithmetic assertion groups; all scales 0..20
+{'residual': 288230324883162095, 'product': 144115162440270832, 'quotient': 274844336130}
+Not Rust execution, PIOP replay, PCS verification, model-accuracy or performance evidence.
