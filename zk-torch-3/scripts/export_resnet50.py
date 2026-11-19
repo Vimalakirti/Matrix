@@ -146,7 +146,7 @@ def export_image(img_np, sf_log):
 def main():
     parser = argparse.ArgumentParser(description='Export ResNet-50 for zk-torch-3')
     parser.add_argument('--onnx-model', type=str,
-                        default='/scratch/bjchen4/goldilocks/research/onnx/resnet50.onnx',
+                        default='/path/to/workspace/research/onnx/resnet50.onnx',
                         help='Path to ResNet-50 ONNX model')
     parser.add_argument('--imagenet-val', type=str, default='',
                         help='Path to ImageNet validation directory')

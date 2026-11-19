@@ -1107,7 +1107,7 @@ All models require:
 ### Build
 
 ```bash
-cd /scratch/bjchen4/goldilocks/zk-torch-3
+cd /path/to/workspace/zk-torch-3
 cargo build --release
 ```
 

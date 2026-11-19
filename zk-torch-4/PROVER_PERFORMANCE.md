@@ -719,12 +719,12 @@ witness values are bounded by `2^14` (e.g., scaled differently),
 
 ```bash
 # zk-torch-4 GPT-2 bench (NUM_LAYERS=1 default; bench_config.yaml in CWD)
-cd /scratch/bjchen4_icgpu/goldilocks/zk-torch-4
+cd /path/to/workspace/zk-torch-4
 cargo build --release --bin gpt2 --offline
 ZK4_TIMING=1 NUM_LAYERS=1 SEQ_LEN=1 ./target/release/gpt2 bench_config.yaml
 
 # zk-torch-3 reference
-cd /scratch/bjchen4_icgpu/goldilocks/zk-torch-3
+cd /path/to/workspace/zk-torch-3
 NUM_LAYERS=1 SEQ_LEN=1 ./target/release/gpt2
 ```
 
@@ -898,11 +898,11 @@ protocol changes (1-3) or non-trivial CUDA-stream work (4).
 
 ```bash
 # zk-3 Llama (baseline)
-cd /scratch/bjchen4_icgpu/goldilocks/zk-torch-3
+cd /path/to/workspace/zk-torch-3
 CUDA_VISIBLE_DEVICES=2 NUM_LAYERS=1 SEQ_LEN=1 ./target/release/llama
 
 # zk-4 Llama BEST (this section)
-cd /scratch/bjchen4_icgpu/goldilocks/zk-torch-4
+cd /path/to/workspace/zk-torch-4
 CUDA_VISIBLE_DEVICES=2 NUM_LAYERS=1 SEQ_LEN=1 \
   LOGITS_SHARDS=32 FFN_SHARDS=8 MAX_NUM_VARS=23 ZK4_BASE=16 \
   ./target/release/llama2 llama2_config.yaml

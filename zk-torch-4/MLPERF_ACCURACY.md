@@ -5,8 +5,8 @@ inference is run through **zk-torch-4's fixed-point arithmetization**, and quant
 (if any) accuracy is lost versus the fp32 reference — scored with MLPerf's official accuracy
 scripts against MLPerf's 99% / 99.9% targets.
 
-Reference suite: `/scratch/bjchen4_icgpu/goldilocks/research/inference` (MLCommons `inference`, v6.0).
-Prover / arithmetization: `/scratch/bjchen4_icgpu/goldilocks/zk-torch-4`.
+Reference suite: `/path/to/workspace/research/inference` (MLCommons `inference`, v6.0).
+Prover / arithmetization: `/path/to/workspace/zk-torch-4`.
 Precedent: `zk-torch-3/MLPERF_ACCURACY.md` + `zk-torch-3/src/bin/resnet_mlperf_acc.rs` +
 `zk-torch-3/scripts/export_resnet50.py` (ResNet reached real Top-1; other 6 were TODO). This plan
 ports and completes that effort on zk-4.

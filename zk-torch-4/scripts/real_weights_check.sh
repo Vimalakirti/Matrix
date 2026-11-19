@@ -18,7 +18,7 @@
 set -u
 M=$1; L=$2; P=$3; TAG=$4; shift 4
 HERE=$(cd "$(dirname "$0")" && pwd)
-R=${REAL_ROOT:-/scratch/bjchen4_icgpu/goldilocks/rebuttal_assets/real_weights}
+R=${REAL_ROOT:-/path/to/workspace/rebuttal_assets/real_weights}
 BIN=${BIN:-$HERE/../../target/release/morpheus_real_check}
 cd "${OUT:-.}"
 case $M in

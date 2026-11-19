@@ -34,7 +34,7 @@ use crate::dag::{Dag, DagProof, EdgeId, PolyType, Role, Witness};
 ///
 /// Replaces the earlier unsound `ZK4_SKIP_CONSTANT_OPENS` knob, which
 /// silently dropped opens with no binding. See
-/// `~/.claude/.../project_zk_soundness_audit.md` for the audit.
+/// the soundness audit notes for the audit.
 fn defer_constants() -> bool {
     // Read fresh on each call (called O(1) per proof) so tests can toggle
     // the mode within a single process. The env-var lookup is negligible

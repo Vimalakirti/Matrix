@@ -5,7 +5,7 @@ import onnx
 from onnx import numpy_helper, TensorProto
 from collections import Counter, OrderedDict
 
-MODEL_PATH = "/scratch/bjchen4/goldilocks/zk-torch-3/3dunet.onnx"
+MODEL_PATH = "/path/to/workspace/zk-torch-3/3dunet.onnx"
 
 # Dtype mapping
 DTYPE_MAP = {

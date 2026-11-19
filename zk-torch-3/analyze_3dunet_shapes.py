@@ -4,7 +4,7 @@
 import onnx
 from onnx import shape_inference, TensorProto
 
-MODEL_PATH = "/scratch/bjchen4/goldilocks/zk-torch-3/3dunet.onnx"
+MODEL_PATH = "/path/to/workspace/zk-torch-3/3dunet.onnx"
 
 DTYPE_MAP = {
     TensorProto.FLOAT: "float32",
